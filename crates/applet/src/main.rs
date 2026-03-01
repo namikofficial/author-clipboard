@@ -23,6 +23,12 @@ use tracing::{error, info, warn};
 
 const APP_ID: &str = "com.namikofficial.author-clipboard";
 const SEARCH_INPUT_ID: fn() -> widget::Id = || widget::Id::new("search-input");
+const CLIPBOARD_SCROLL_ID: fn() -> widget::Id = || widget::Id::new("clipboard-scroll");
+
+/// Approximate height of each clipboard item row in pixels (for scroll offset calculation).
+const ITEM_ROW_HEIGHT: f32 = 64.0;
+/// Approximate visible height of the scrollable area.
+const VISIBLE_SCROLL_HEIGHT: f32 = 420.0;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
@@ -99,6 +105,9 @@ enum Message {
     ToggleQuickPaste,
     #[allow(dead_code)]
     OpenFileManager(String),
+    NextTab,
+    PreviousTab,
+    QuickSelect(usize),
 }
 
 // ── Application trait ─────────────────────────────────────────────────
@@ -194,10 +203,26 @@ impl cosmic::Application for App {
     }
 
     fn subscription(&self) -> Subscription<Self::Message> {
-        let keyboard = cosmic::iced::keyboard::on_key_press(|key, _modifiers| match key {
+        let keyboard = cosmic::iced::keyboard::on_key_press(|key, modifiers| match key.as_ref() {
             Key::Named(iced::keyboard::key::Named::ArrowDown) => Some(Message::SelectNext),
             Key::Named(iced::keyboard::key::Named::ArrowUp) => Some(Message::SelectPrevious),
             Key::Named(iced::keyboard::key::Named::Enter) => Some(Message::CopySelected),
+            Key::Named(iced::keyboard::key::Named::Tab) if modifiers.control() => {
+                if modifiers.shift() {
+                    Some(Message::PreviousTab)
+                } else {
+                    Some(Message::NextTab)
+                }
+            }
+            Key::Character("1") if modifiers.control() => Some(Message::QuickSelect(0)),
+            Key::Character("2") if modifiers.control() => Some(Message::QuickSelect(1)),
+            Key::Character("3") if modifiers.control() => Some(Message::QuickSelect(2)),
+            Key::Character("4") if modifiers.control() => Some(Message::QuickSelect(3)),
+            Key::Character("5") if modifiers.control() => Some(Message::QuickSelect(4)),
+            Key::Character("6") if modifiers.control() => Some(Message::QuickSelect(5)),
+            Key::Character("7") if modifiers.control() => Some(Message::QuickSelect(6)),
+            Key::Character("8") if modifiers.control() => Some(Message::QuickSelect(7)),
+            Key::Character("9") if modifiers.control() => Some(Message::QuickSelect(8)),
             _ => None,
         });
 
@@ -320,6 +345,7 @@ impl cosmic::Application for App {
                         _ => 0,
                     });
                 }
+                return self.scroll_to_selected();
             }
 
             Message::SelectPrevious => {
@@ -330,66 +356,15 @@ impl cosmic::Application for App {
                         Some(i) => i - 1,
                     });
                 }
+                return self.scroll_to_selected();
             }
 
             Message::CopySelected => {
-                if let Some(index) = self.selected_index {
-                    let mut copied = false;
-                    match self.active_tab {
-                        AppTab::Clipboard => {
-                            if let Some(item) = self.items.get(index) {
-                                let result = if item.is_image() {
-                                    set_clipboard_image(
-                                        &image_store::image_path(
-                                            &self.config.data_dir,
-                                            &item.content,
-                                        ),
-                                        &item.mime_type,
-                                    )
-                                } else if item.is_html() {
-                                    set_clipboard_html(
-                                        &item.content,
-                                        item.plain_text.as_deref().unwrap_or(""),
-                                    )
-                                } else {
-                                    set_clipboard_text(&item.content)
-                                };
-                                match result {
-                                    Ok(()) => copied = true,
-                                    Err(e) => warn!("Failed to copy: {e}"),
-                                }
-                            }
-                        }
-                        AppTab::Emoji => {
-                            let emojis = self.filtered_emojis();
-                            if let Some(&e) = emojis.get(index) {
-                                if set_clipboard_text(e).is_ok() {
-                                    copied = true;
-                                }
-                            }
-                        }
-                        AppTab::Symbols => {
-                            let syms = self.filtered_symbols();
-                            if let Some(&(s, _)) = syms.get(index) {
-                                if set_clipboard_text(s).is_ok() {
-                                    copied = true;
-                                }
-                            }
-                        }
-                        AppTab::Kaomoji => {
-                            let items = self.filtered_kaomoji();
-                            if let Some(&k) = items.get(index) {
-                                if set_clipboard_text(k).is_ok() {
-                                    copied = true;
-                                }
-                            }
-                        }
-                        AppTab::Settings => {}
-                    }
-                    if copied {
-                        std::process::exit(0);
-                    }
+                // Auto-select first item if nothing selected
+                if self.selected_index.is_none() && self.visible_item_count() > 0 {
+                    self.selected_index = Some(0);
                 }
+                return self.copy_selected_item();
             }
 
             Message::EmojiCategory(idx) => {
@@ -516,6 +491,22 @@ impl cosmic::Application for App {
                     warn!("Failed to open file manager: {e}");
                 }
             }
+
+            Message::NextTab => {
+                self.cycle_tab(true);
+            }
+
+            Message::PreviousTab => {
+                self.cycle_tab(false);
+            }
+
+            Message::QuickSelect(idx) => {
+                let len = self.visible_item_count();
+                if idx < len {
+                    self.selected_index = Some(idx);
+                    return self.copy_selected_item();
+                }
+            }
         }
 
         Task::none()
@@ -535,6 +526,7 @@ impl cosmic::Application for App {
 
         let search_bar = text_input(search_placeholder, &self.search_query)
             .on_input(Message::SearchChanged)
+            .on_submit(|_| Message::CopySelected)
             .id(SEARCH_INPUT_ID())
             .width(Length::Fill)
             .padding(8);
@@ -605,9 +597,17 @@ impl cosmic::Application for App {
         }
         let full_status = status_parts.join(" • ");
 
-        let status_bar = container(text(full_status).size(12.0))
-            .width(Length::Fill)
-            .padding([4, 8]);
+        let hints = "↑↓ Navigate • Enter Paste • Esc Close • Ctrl+1-9 Quick • Ctrl+Tab Tabs";
+
+        let status_bar = container(
+            row()
+                .push(text(full_status).size(12.0))
+                .push(cosmic::iced::widget::horizontal_space())
+                .push(text(hints).size(10.0))
+                .align_y(iced::Alignment::Center),
+        )
+        .width(Length::Fill)
+        .padding([4, 8]);
 
         let content = column()
             .spacing(8)
@@ -700,6 +700,7 @@ impl App {
             }
 
             scrollable(list)
+                .id(CLIPBOARD_SCROLL_ID())
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .into()
@@ -708,6 +709,13 @@ impl App {
 
     fn clipboard_item_row(&self, item: &ClipboardItem, index: usize) -> Element<'_, Message> {
         let time_ago = format_time_ago(item.timestamp);
+
+        // Position number (1-9 for quick select, blank for rest)
+        let position_label = if index < 9 {
+            format!("{}", index + 1)
+        } else {
+            String::from(" ")
+        };
 
         let pin_icon = if item.pinned { "📌" } else { "○" };
         let pin_btn = widget::button::text(pin_icon)
@@ -760,15 +768,25 @@ impl App {
             col.push(text(time_ago).size(11.0))
         } else {
             let preview = truncate_content(&item.content, 120);
+            let char_count = item.content.len();
+            let word_count = item.content.split_whitespace().count();
+            let meta = format!("{char_count} chars, {word_count} words");
             let mut col = column().spacing(2).push(text(preview).size(13.0));
             if item.sensitive {
                 col = col.push(text("⚠️ Sensitive content").size(11.0));
             }
-            col.push(text(time_ago).size(11.0))
+            col = col.push(
+                row()
+                    .spacing(8)
+                    .push(text(time_ago).size(11.0))
+                    .push(text(meta).size(10.0)),
+            );
+            col
         };
 
         let row_content = row()
             .spacing(8)
+            .push(text(position_label).size(11.0).width(Length::Fixed(14.0)))
             .push(pin_btn)
             .push(container(content_col).width(Length::Fill))
             .push(delete_btn)
@@ -1091,7 +1109,7 @@ impl App {
 
         // Info
         content = content.push(text("About").size(16.0));
-        content = content.push(text("Author Clipboard v0.1.0").size(13.0));
+        content = content.push(text("Author Clipboard v0.2.0").size(13.0));
         content =
             content.push(text("COSMIC clipboard manager with emoji & symbol pickers").size(12.0));
         content =
@@ -1107,6 +1125,110 @@ impl App {
         let title = String::from("Clipboard Manager");
         self.set_header_title(title.clone());
         self.set_window_title(title)
+    }
+
+    /// Scroll the clipboard list to keep the selected item visible.
+    fn scroll_to_selected(&self) -> Task<Message> {
+        if let Some(idx) = self.selected_index {
+            #[allow(clippy::cast_precision_loss)]
+            let target_y = idx as f32 * ITEM_ROW_HEIGHT;
+            let scroll_y = (target_y - VISIBLE_SCROLL_HEIGHT / 2.0).max(0.0);
+            cosmic::iced_widget::scrollable::scroll_to(
+                CLIPBOARD_SCROLL_ID(),
+                cosmic::iced_widget::scrollable::AbsoluteOffset {
+                    x: 0.0,
+                    y: scroll_y,
+                },
+            )
+        } else {
+            Task::none()
+        }
+    }
+
+    /// Cycle through tabs forward or backward.
+    fn cycle_tab(&mut self, forward: bool) {
+        const TAB_ORDER: [AppTab; 5] = [
+            AppTab::Clipboard,
+            AppTab::Emoji,
+            AppTab::Symbols,
+            AppTab::Kaomoji,
+            AppTab::Settings,
+        ];
+        let current = TAB_ORDER
+            .iter()
+            .position(|t| *t == self.active_tab)
+            .unwrap_or(0);
+        let next = if forward {
+            (current + 1) % TAB_ORDER.len()
+        } else {
+            (current + TAB_ORDER.len() - 1) % TAB_ORDER.len()
+        };
+        let next_tab = TAB_ORDER[next];
+        // Collect matching entity first to avoid borrow conflict
+        let target_entity = self
+            .tab_model
+            .iter()
+            .find(|&entity| self.tab_model.data::<AppTab>(entity) == Some(&next_tab));
+        if let Some(entity) = target_entity {
+            self.tab_model.activate(entity);
+        }
+        self.active_tab = next_tab;
+        self.search_query.clear();
+        self.selected_index = None;
+    }
+
+    /// Copy the currently selected item and exit.
+    fn copy_selected_item(&mut self) -> Task<Message> {
+        if let Some(index) = self.selected_index {
+            match self.active_tab {
+                AppTab::Clipboard => {
+                    if let Some(item) = self.items.get(index) {
+                        let result = if item.is_image() {
+                            set_clipboard_image(
+                                &image_store::image_path(&self.config.data_dir, &item.content),
+                                &item.mime_type,
+                            )
+                        } else if item.is_html() {
+                            set_clipboard_html(
+                                &item.content,
+                                item.plain_text.as_deref().unwrap_or(""),
+                            )
+                        } else {
+                            set_clipboard_text(&item.content)
+                        };
+                        if result.is_ok() {
+                            std::process::exit(0);
+                        }
+                    }
+                }
+                AppTab::Emoji => {
+                    let emojis = self.filtered_emojis();
+                    if let Some(&e) = emojis.get(index) {
+                        if set_clipboard_text(e).is_ok() {
+                            std::process::exit(0);
+                        }
+                    }
+                }
+                AppTab::Symbols => {
+                    let syms = self.filtered_symbols();
+                    if let Some(&(s, _)) = syms.get(index) {
+                        if set_clipboard_text(s).is_ok() {
+                            std::process::exit(0);
+                        }
+                    }
+                }
+                AppTab::Kaomoji => {
+                    let items = self.filtered_kaomoji();
+                    if let Some(&k) = items.get(index) {
+                        if set_clipboard_text(k).is_ok() {
+                            std::process::exit(0);
+                        }
+                    }
+                }
+                AppTab::Settings => {}
+            }
+        }
+        Task::none()
     }
 }
 
