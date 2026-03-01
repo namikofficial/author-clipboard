@@ -16,6 +16,9 @@
 - **Instant search** - Type to filter through history
 - **Pin important items** - Keep frequently used content accessible
 - **Rich content** - Text, HTML, images, and file lists
+- **Full keyboard navigation** - Home/End, PgUp/Dn, Ctrl+1-9 quick select, Delete to remove
+- **COSMIC native icons** - Symbolic icons for all actions and content types
+- **Daemon status** - Real-time indicator shows if clipboard capture is active
 - **Sensitive content detection** - Passwords, API keys, OTP codes auto-flagged
 - **Encryption at rest** - AES-256-GCM for sensitive items
 - **Audit logging** - Track security-relevant events
@@ -91,11 +94,19 @@ The shortcut launches the applet when not running, or closes it when already ope
 
 ### Applet Usage
 
-- **Click** any item to copy it to clipboard and close
-- **Arrow keys** to navigate items (highlighted selection)
-- **Enter** to copy the selected item and close
-- **Escape** to close the applet (clears search first if active)
-- **Start typing** to search - the search bar is auto-focused
+| Key | Action |
+|-----|--------|
+| **↑/↓** | Navigate items |
+| **Enter** | Copy selected item and close |
+| **Escape** | Clear search (or close if search empty) |
+| **Home/End** | Jump to first/last item |
+| **Page Up/Down** | Jump 10 items up/down |
+| **Delete** or **Ctrl+D** | Delete selected item |
+| **Ctrl+1-9** | Quick copy item by position |
+| **Ctrl+Tab** | Next tab |
+| **Ctrl+Shift+Tab** | Previous tab |
+| **Click** | Copy item to clipboard and close |
+| **Type** | Search is auto-focused, start typing to filter |
 
 ### Configuration
 
@@ -166,7 +177,8 @@ just dev           # Watch mode for development
 | **Phase 5** | Quick paste + file handling | Done |
 | **Phase 7** | Security + privacy features | Done |
 | **Phase 8** | CLI tool + config + graceful shutdown | Done |
-| **Phase 9** | Documentation + quality | Done |
+| **Phase 9** | COSMIC native icons + status indicators | Done |
+| **Phase 10** | Advanced keyboard navigation | Done |
 
 See [PROJECT_PLAN.md](PROJECT_PLAN.md) for the detailed roadmap.
 
