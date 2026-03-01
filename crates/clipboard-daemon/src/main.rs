@@ -552,13 +552,43 @@ fn run() -> Result<()> {
 
     // Main event loop
     loop {
-        event_queue
-            .blocking_dispatch(&mut state)
-            .context("Wayland event dispatch failed")?;
+        if let Err(e) = event_queue.blocking_dispatch(&mut state) {
+            info!("Daemon shutting down...");
+            remove_ipc_socket();
+            return Err(e).context("Wayland event dispatch failed");
+        }
     }
 }
 
 fn main() {
+    // Handle --help and --version before tracing init
+    if let Some(arg) = std::env::args().nth(1) {
+        match arg.as_str() {
+            "--help" | "-h" => {
+                println!("author-clipboard-daemon - Clipboard monitoring daemon");
+                println!();
+                println!("USAGE: author-clipboard-daemon [OPTIONS]");
+                println!();
+                println!("OPTIONS:");
+                println!("  -h, --help       Print this help message");
+                println!("  -V, --version    Print version information");
+                println!();
+                println!("ENVIRONMENT:");
+                println!("  RUST_LOG    Set log level (default: info)");
+                return;
+            }
+            "--version" | "-V" => {
+                println!("author-clipboard-daemon 0.1.0");
+                return;
+            }
+            other => {
+                eprintln!("Unknown argument: {other}");
+                eprintln!("Run with --help for usage information.");
+                std::process::exit(1);
+            }
+        }
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -568,8 +598,23 @@ fn main() {
 
     info!("author-clipboard-daemon starting...");
 
-    if let Err(e) = run() {
-        error!("Fatal error: {e:#}");
-        std::process::exit(1);
+    match run() {
+        Ok(()) => {
+            info!("Daemon stopped cleanly.");
+        }
+        Err(e) => {
+            error!("Fatal error: {e:#}");
+            remove_ipc_socket();
+            std::process::exit(1);
+        }
     }
+}
+
+/// Remove the IPC socket file, ignoring errors if it doesn't exist.
+fn remove_ipc_socket() {
+    let path = std::env::var("XDG_RUNTIME_DIR").map_or_else(
+        |_| std::path::PathBuf::from("/tmp/author-clipboard.sock"),
+        |dir| std::path::PathBuf::from(dir).join("author-clipboard.sock"),
+    );
+    let _unused = std::fs::remove_file(path);
 }
