@@ -51,13 +51,20 @@ just daemon        # Run clipboard daemon
 just applet        # Run GUI applet
 ```
 
+### Install (User-Local)
+
+```bash
+just install       # Installs binaries, .desktop file, icon, systemd service
+just enable        # Enables and starts the daemon service
+```
+
 ### CLI Tool
 
 ```bash
-# Control the daemon
-author-clipboard-ctl toggle          # Toggle visibility
-author-clipboard-ctl show            # Show applet
-author-clipboard-ctl hide            # Hide applet
+# Control the applet
+author-clipboard-ctl toggle          # Launch or close applet
+author-clipboard-ctl show            # Launch applet
+author-clipboard-ctl hide            # Close applet
 author-clipboard-ctl ping            # Check daemon status
 
 # Query clipboard
@@ -80,7 +87,15 @@ To open the clipboard picker with Super+V, add a custom shortcut in COSMIC Setti
 4. Press **Super+V** as the key combination
 5. Save
 
-The shortcut sends a toggle command to the daemon, which signals the applet to come to the foreground.
+The shortcut launches the applet when not running, or closes it when already open (standard Wayland toggle pattern).
+
+### Applet Usage
+
+- **Click** any item to copy it to clipboard and close
+- **Arrow keys** to navigate items (highlighted selection)
+- **Enter** to copy the selected item and close
+- **Escape** to close the applet (clears search first if active)
+- **Start typing** to search - the search bar is auto-focused
 
 ### Configuration
 
@@ -151,7 +166,7 @@ just dev           # Watch mode for development
 | **Phase 5** | Quick paste + file handling | Done |
 | **Phase 7** | Security + privacy features | Done |
 | **Phase 8** | CLI tool + config + graceful shutdown | Done |
-| **Phase 9** | Documentation + quality | In Progress |
+| **Phase 9** | Documentation + quality | Done |
 
 See [PROJECT_PLAN.md](PROJECT_PLAN.md) for the detailed roadmap.
 
