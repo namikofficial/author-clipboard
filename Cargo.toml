@@ -66,3 +66,6 @@ rustix = { version = "0.38", features = ["pipe"] }
 
 # COSMIC (check for latest version)
 libcosmic = { git = "https://github.com/pop-os/libcosmic.git", default-features = false, features = ["winit", "wgpu", "tokio"] }
+
+# Image processing
+image = "0.25"

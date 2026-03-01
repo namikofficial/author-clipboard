@@ -14,3 +14,4 @@ chrono.workspace = true
 thiserror.workspace = true
 directories.workspace = true
 tracing.workspace = true
+image.workspace = true
