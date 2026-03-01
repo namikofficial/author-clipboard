@@ -1,0 +1,42 @@
+# .gitignore for namik-clipboard Rust workspace
+# Based on GitHub's Rust template, with common editor and OS ignores
+
+# Build artifacts
+/target/
+**/target/
+
+# Compiled artifacts
+*.rlib
+*.rmeta
+*.d
+*.o
+
+# Incremental compilation
+**/incremental/
+
+# Backup and temporary files
+*~
+*.swp
+*.swo
+*.bak
+*.tmp
+
+# Logs
+*.log
+
+# dotenv environment files
+.env
+
+# IDE / editor directories
+.vscode/
+.idea/
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+
+# Misc
+.cache/
+coverage/
