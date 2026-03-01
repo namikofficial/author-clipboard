@@ -2,201 +2,187 @@
 
 > A fast, native clipboard manager for COSMIC desktop, built entirely in Rust
 
-**author-clipboard** delivers a powerful clipboard experience designed for COSMIC DE. Store clipboard history, search through past copies, and access emoji/GIF/symbol pickers - all with native COSMIC theming and Wayland support.
+**author-clipboard** delivers a powerful clipboard experience designed for COSMIC DE. Store clipboard history, search through past copies, pin favorites, detect sensitive content, and manage your clipboard with a native COSMIC UI and full Wayland support.
 
-![Status: Early Development](https://img.shields.io/badge/status-early%20development-yellow)
+![Status: Active Development](https://img.shields.io/badge/status-active%20development-green)
 ![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue)
 ![Language: Rust](https://img.shields.io/badge/language-rust-orange)
 
 ---
 
-## 🎯 Vision
+## Features
 
-The missing productivity tool for COSMIC desktop users. A beautiful, fast, native clipboard manager that delivers a modern clipboard experience, built from the ground up for COSMIC's Wayland-native architecture.
-
-### ✨ Key Features (Planned)
-
-- 📋 **Persistent clipboard history** - Never lose a copy again
-- 🔍 **Instant search** - Type to filter through history  
-- 📌 **Pin important items** - Keep frequently used content accessible
-- 😀 **Emoji picker** - Full Unicode emoji support with search
-- 🎬 **GIF search** - Tenor API integration for animated content
-- 🔣 **Symbol picker** - Math, currency, arrows, and special characters
-- 🎨 **Native theming** - Follows COSMIC light/dark themes automatically
-- ⚡ **Global shortcut** - Super+V (or configurable) opens from anywhere
-- 🖼️ **Image support** - Copy and paste images with thumbnails
-- 🔒 **Privacy-focused** - Local storage, no cloud sync
-- 🛡️ **Security controls** - Sensitive item detection, encryption at rest
+- **Persistent clipboard history** - Never lose a copy again
+- **Instant search** - Type to filter through history
+- **Pin important items** - Keep frequently used content accessible
+- **Rich content** - Text, HTML, images, and file lists
+- **Sensitive content detection** - Passwords, API keys, OTP codes auto-flagged
+- **Encryption at rest** - AES-256-GCM for sensitive items
+- **Audit logging** - Track security-relevant events
+- **Screen lock protection** - Auto-clear sensitive items on lock
+- **Incognito mode** - Temporarily stop recording
+- **Data export/import** - JSON backup and restore
+- **Quick paste** - Paste via wtype/ydotool backends
+- **IPC control** - Unix socket protocol for daemon communication
+- **CLI tool** - `author-clipboard-ctl` for scripting and automation
+- **Config file** - JSON configuration at `~/.config/author-clipboard/config.json`
+- **Native theming** - Follows COSMIC light/dark themes automatically
+- **Global shortcut** - Configurable keyboard shortcut (default: Super+V)
+- **Graceful shutdown** - Clean socket cleanup on exit
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 
 - Linux with COSMIC desktop environment
 - Rust toolchain (1.70+)
+- Wayland compositor with `wlr-data-control` support
 
-### Development Setup
+### Build and Run
 
-1. **Clone and setup:**
-   ```bash
-   git clone https://github.com/namikofficial/author-clipboard
-   cd author-clipboard
-   just setup  # Install dev tools and dependencies
-   ```
+```bash
+git clone https://github.com/namikofficial/author-clipboard
+cd author-clipboard
+just setup         # Install dev tools
+just build         # Build all components
+just daemon        # Run clipboard daemon
+just applet        # Run GUI applet
+```
 
-2. **Build and run:**
-   ```bash
-   just build      # Build all components
-   just daemon     # Run clipboard daemon
-   just applet     # Run GUI applet
-   ```
+### CLI Tool
 
-3. **Development workflow:**
-   ```bash
-   just dev        # Watch mode - rebuilds on changes
-   just check      # Quick syntax/type check
-   just verify     # Full check (format, lint, test, build)
-   ```
+```bash
+# Control the daemon
+author-clipboard-ctl toggle          # Toggle visibility
+author-clipboard-ctl show            # Show applet
+author-clipboard-ctl hide            # Hide applet
+author-clipboard-ctl ping            # Check daemon status
 
-> **Note:** Until Phase 1 is complete, the components are minimal placeholders.
+# Query clipboard
+author-clipboard-ctl history         # List recent items
+author-clipboard-ctl status          # Show database stats
+author-clipboard-ctl clear           # Clear unpinned items
+
+# Data management
+author-clipboard-ctl export out.json # Export history
+author-clipboard-ctl config          # Show current config
+```
+
+### Configuration
+
+Config file location: `~/.config/author-clipboard/config.json`
+
+```json
+{
+  "max_items": 500,
+  "max_age_days": 30,
+  "keyboard_shortcut": "Super+V",
+  "clear_on_lock": true,
+  "encrypt_sensitive": false
+}
+```
 
 ---
 
-## 🏗️ Architecture
+## Architecture
 
 ```
 author-clipboard/
 ├── crates/
-│   ├── clipboard-daemon/    # Background service (Wayland clipboard watcher)
-│   ├── applet/             # COSMIC UI applet (popup interface) 
-│   └── shared/             # Common types, database, configuration
-├── data/                   # Desktop files, systemd services
-├── resources/              # Icons, assets
-└── docs/                   # Documentation
+│   ├── clipboard-daemon/    # Background Wayland clipboard watcher
+│   ├── applet/              # COSMIC UI applet (popup interface)
+│   ├── ctl/                 # CLI control tool
+│   └── shared/              # Common library (DB, types, config, IPC)
+├── data/                    # Desktop files, systemd services
+├── resources/               # Icons, assets
+└── docs/                    # Documentation
 ```
 
 ### Components
 
-| Component | Purpose | Status |
-|-----------|---------|---------|
-| **clipboard-daemon** | Background service that monitors Wayland clipboard and stores history | 🏗️ In Progress |
-| **applet** | COSMIC UI popup for browsing/selecting from history | 📋 Planned |
-| **shared** | Database, types, and utilities shared between components | ⚡ Basic |
+| Component | Binary | Purpose |
+|-----------|--------|---------|
+| **clipboard-daemon** | `author-clipboard-daemon` | Monitors Wayland clipboard, stores history in SQLite |
+| **applet** | `author-clipboard` | COSMIC UI with history, search, pins, export/import |
+| **ctl** | `author-clipboard-ctl` | CLI tool for scripting and daemon control via IPC |
+| **shared** | *(library)* | Database, types, config, encryption, IPC, sensitive detection |
 
 ---
 
-## 📅 Development Phases
-
-| Phase | Goal | Status |
-|-------|------|--------|
-| **Phase 0** | Clipboard watcher prototype | 🏗️ **In Progress** |
-| **Phase 1** | Text history + basic UI | 📋 Planned |
-| **Phase 2** | Global shortcut + polish | 📋 Planned |
-| **Phase 3** | Image support | 📋 Planned |
-| **Phase 4** | Emoji/GIF/symbol pickers | 📋 Planned |
-| **Phase 5** | Quick paste + file support | 📋 Planned |
-| **Phase 6** | Settings + final polish | 📋 Planned |
-| **Phase 7** | Security + privacy features | 📋 Planned |
-
-👉 **See [PROJECT_PLAN.md](PROJECT_PLAN.md) for detailed roadmap**
-
----
-
-## 🔧 Development
+## Development
 
 ### Using the justfile
-
-This project uses [just](https://github.com/casey/just) for common tasks:
 
 ```bash
 just                # Show available commands
 just build         # Build all crates
-just check         # Quick check without full build  
+just check         # Quick check without full build
 just test          # Run tests
 just fmt           # Format code
-just lint          # Run clippy
+just lint          # Run clippy (strict: -D warnings)
 just verify        # Full verification (fmt + lint + test + build)
 just daemon        # Run clipboard daemon
-just applet        # Run GUI applet  
+just applet        # Run GUI applet
 just dev           # Watch mode for development
-just clean         # Clean build artifacts
-just setup         # One-time development setup
-just install-deps  # Install system dependencies
-just doctor        # Check development environment
 ```
 
-### Project Structure
+### Development Phases
 
-```bash
-# Key files
-├── justfile                 # Task runner commands
-├── Cargo.toml              # Workspace definition  
-├── PROJECT_PLAN.md         # Detailed development roadmap
-└── docs/                   # Developer documentation
-    ├── CONTRIBUTING.md      # Contributor guide
-    ├── DEVELOPMENT.md       # Tooling & workflow reference
-    └── LOCAL_TESTING.md     # Step-by-step testing guide
+| Phase | Goal | Status |
+|-------|------|--------|
+| **Phase 0** | Clipboard watcher prototype | Done |
+| **Phase 1** | Text history + basic UI | Done |
+| **Phase 2** | Global shortcut + IPC | Done |
+| **Phase 3** | Rich content (HTML, files) | Done |
+| **Phase 5** | Quick paste + file handling | Done |
+| **Phase 7** | Security + privacy features | Done |
+| **Phase 8** | CLI tool + config + graceful shutdown | Done |
+| **Phase 9** | Documentation + quality | In Progress |
 
-# Source code
-├── crates/
-│   ├── clipboard-daemon/   # Wayland clipboard monitoring
-│   ├── applet/            # COSMIC UI application
-│   └── shared/            # Common library (DB, types, config)
-```
+See [PROJECT_PLAN.md](PROJECT_PLAN.md) for the detailed roadmap.
 
 ---
 
-## 📖 Documentation
+## Documentation
 
-- **[PROJECT_PLAN.md](PROJECT_PLAN.md)** - Detailed development phases and feature specifications
+- **[PROJECT_PLAN.md](PROJECT_PLAN.md)** - Development phases and feature specifications
 - **[docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)** - How to contribute
 - **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)** - Development tooling and workflow
 - **[docs/LOCAL_TESTING.md](docs/LOCAL_TESTING.md)** - Step-by-step local testing guide
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
-This is an early-stage project. Contributions are welcome once Phase 1 (basic functionality) is complete.
-
-### Development Environment
+Contributions are welcome! Please read [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) first.
 
 ```bash
-# First-time setup
 just install-deps  # Install system dependencies
 just setup         # Install Rust tools
 just doctor        # Verify environment
-
-# Daily workflow
 just dev           # Start watch mode
-just verify        # Before committing
+just verify        # Run before committing
 ```
 
 ---
 
-## 📄 License
+## License
 
 GPL-3.0 - See [LICENSE](LICENSE) file for details.
 
 ---
 
-## 🔗 Related Projects
+## Related Projects
 
 - [cosmic-utils/clipboard-manager](https://github.com/cosmic-utils/clipboard-manager) - Community COSMIC clipboard manager
 - [pop-os/cosmic-applets](https://github.com/pop-os/cosmic-applets) - Official COSMIC applet examples
-- [gustavosett/Windows-11-Clipboard-History-For-Linux](https://github.com/gustavosett/Windows-11-Clipboard-History-For-Linux) - Similar project (Tauri+React)
-
----
-
-**Status:** 🏗️ **Phase 0 - Clipboard Watcher Prototype**  
-**Next Milestone:** Basic Wayland clipboard monitoring working on COSMIC
 
 ---
 
 <div align="center">
 
-**Built with ❤️ for the COSMIC desktop ecosystem**
+**Built with love for the COSMIC desktop ecosystem**
 
 </div>
