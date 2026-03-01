@@ -1,51 +1,52 @@
 #!/usr/bin/env bash
 # Pre-commit hook: runs formatting check and clippy ONLY on staged Rust files.
-# If no staged .rs files, skips checks entirely.
+# If no staged .rs/.toml files, skips checks entirely.
 # Install: just setup-hooks
 
 set -euo pipefail
 
-# Get list of staged .rs files
-STAGED_RS_FILES=$(git diff --cached --name-only --diff-filter=ACMR -- '*.rs' '*.toml')
+# Get list of staged Rust-related files
+STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACMR -- '*.rs' '*.toml')
 
-if [ -z "$STAGED_RS_FILES" ]; then
-    # No Rust files staged — skip checks
+if [ -z "$STAGED_FILES" ]; then
     exit 0
 fi
 
 echo "🔍 Running pre-commit checks on staged files..."
 
-# Stash unstaged changes so we only check what's being committed
-STASH_NAME="pre-commit-$(date +%s)"
-git stash push --keep-index --quiet -m "$STASH_NAME" 2>/dev/null || true
-STASHED=true
+# Use git stash create + git checkout-index to test only staged content
+# This avoids the merge conflict issues of git stash push/pop
+STASH_HASH=$(git stash create)
+if [ -n "$STASH_HASH" ]; then
+    # Reset working tree to match the index (staged state)
+    git checkout -- . 2>/dev/null || true
+    NEEDS_RESTORE=true
+else
+    NEEDS_RESTORE=false
+fi
 
-# Restore unstaged changes on exit (success or failure)
-cleanup() {
-    if [ "$STASHED" = true ]; then
-        # Check if our stash still exists
-        if git stash list | grep -q "$STASH_NAME"; then
-            git stash pop --quiet 2>/dev/null || true
-        fi
+restore_working_tree() {
+    if [ "$NEEDS_RESTORE" = true ] && [ -n "$STASH_HASH" ]; then
+        git stash apply "$STASH_HASH" --quiet 2>/dev/null || true
     fi
 }
-trap cleanup EXIT
+trap restore_working_tree EXIT
 
-# Check formatting (like prettier --check)
+# Check formatting
 echo "  Checking formatting..."
 if ! cargo fmt -- --check 2>/dev/null; then
     echo ""
-    echo "❌ Formatting issues found in staged files!"
+    echo "❌ Formatting issues found!"
     echo "   Run 'cargo fmt' or 'just fmt' to fix."
     echo ""
     exit 1
 fi
 
-# Run clippy (like eslint)
+# Run clippy
 echo "  Running clippy..."
 if ! cargo clippy --all-targets --all-features -- -D warnings 2>/dev/null; then
     echo ""
-    echo "❌ Clippy found issues in staged files!"
+    echo "❌ Clippy found issues!"
     echo "   Run 'cargo clippy --fix' or 'just lint-fix' to auto-fix."
     echo ""
     exit 1
