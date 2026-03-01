@@ -1,4 +1,4 @@
-# .gitignore for namik-clipboard Rust workspace
+# .gitignore for author-clipboard Rust workspace
 # Based on GitHub's Rust template, with common editor and OS ignores
 
 # Build artifacts
@@ -40,3 +40,8 @@ Thumbs.db
 # Misc
 .cache/
 coverage/
+
+# Project-local files to ignore
+# plan.md
+# plans/**/*
+# .serena/

@@ -1,0 +1,16 @@
+[package]
+name = "author-clipboard-applet"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "author-clipboard"
+path = "src/main.rs"
+
+[dependencies]
+author-clipboard-shared = { path = "../shared" }
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+anyhow.workspace = true
+libcosmic.workspace = true

@@ -1,0 +1,35 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/clipboard-daemon",
+    "crates/applet",
+    "crates/shared",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0"
+authors = ["Namik"]
+repository = "https://github.com/namik/author-clipboard"
+
+[workspace.dependencies]
+# Shared dependencies (version managed here, used in crates)
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rusqlite = { version = "0.31", features = ["bundled"] }
+tracing = "0.1"
+tracing-subscriber = "0.3"
+thiserror = "1"
+anyhow = "1"
+chrono = { version = "0.4", features = ["serde"] }
+directories = "5"
+
+# Wayland
+wayland-client = "0.31"
+wayland-protocols = { version = "0.31", features = ["client", "unstable"] }
+wayland-protocols-wlr = { version = "0.2", features = ["client"] }
+
+# COSMIC (check for latest version)
+libcosmic = { git = "https://github.com/pop-os/libcosmic.git" }
