@@ -72,6 +72,7 @@ struct App {
     quick_paste_enabled: bool,
     paste_backend: Option<PasteBackend>,
     visibility_signal_path: std::path::PathBuf,
+    window_visible: bool,
 }
 
 // ── Messages ──────────────────────────────────────────────────────────
@@ -171,6 +172,7 @@ impl cosmic::Application for App {
             quick_paste_enabled: false,
             paste_backend: quick_paste::detect_backend(),
             visibility_signal_path,
+            window_visible: true,
         };
 
         let command = app.update_title();
@@ -220,12 +222,17 @@ impl cosmic::Application for App {
                         let _ = std::fs::remove_file(&self.visibility_signal_path);
                         let signal = signal.trim();
                         match signal {
-                            "toggle" | "show" => {
-                                info!("Received visibility signal: {signal}");
+                            "toggle" => {
+                                info!("Received toggle signal");
                                 return self.toggle_window_visibility();
+                            }
+                            "show" => {
+                                info!("Received show signal");
+                                return self.show_window();
                             }
                             "hide" => {
                                 info!("Received hide signal");
+                                return self.hide_window();
                             }
                             _ => {}
                         }
@@ -1093,9 +1100,40 @@ impl App {
     }
 
     fn toggle_window_visibility(&mut self) -> Task<Message> {
-        // Bring window to front and focus it
+        info!(
+            "Toggling window visibility: currently {}",
+            if self.window_visible {
+                "visible"
+            } else {
+                "hidden"
+            }
+        );
+        if self.window_visible {
+            self.hide_window()
+        } else {
+            self.show_window()
+        }
+    }
+
+    fn show_window(&mut self) -> Task<Message> {
+        self.window_visible = true;
         if let Some(id) = self.core.main_window_id() {
-            return cosmic::iced::window::gain_focus(id);
+            info!("Showing window (id: {id:?})");
+            return Task::batch([
+                cosmic::iced::window::change_mode(id, cosmic::iced::window::Mode::Windowed),
+                cosmic::iced::window::minimize(id, false),
+                cosmic::iced::window::gain_focus(id),
+            ]);
+        }
+        warn!("No main window id found");
+        Task::none()
+    }
+
+    fn hide_window(&mut self) -> Task<Message> {
+        self.window_visible = false;
+        if let Some(id) = self.core.main_window_id() {
+            info!("Hiding window (id: {id:?})");
+            return cosmic::iced::window::minimize(id, true);
         }
         Task::none()
     }
