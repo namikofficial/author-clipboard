@@ -6,7 +6,9 @@
 /// Result of checking content for sensitive data.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SensitivityCheck {
+    /// Whether the content was classified as sensitive.
     pub is_sensitive: bool,
+    /// Human-readable reason for the classification, if sensitive.
     pub reason: Option<String>,
 }
 

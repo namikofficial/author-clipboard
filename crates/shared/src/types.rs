@@ -10,13 +10,18 @@ use serde::{Deserialize, Serialize};
 /// The type of clipboard content
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ContentType {
+    /// Plain text content.
     Text,
+    /// Image content stored as a file path.
     Image,
+    /// HTML markup content.
     Html,
+    /// File list (URIs or paths).
     Files,
 }
 
 impl ContentType {
+    /// Returns the string representation of the content type.
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Text => "text",

@@ -34,9 +34,13 @@ pub enum ShortcutError {
 /// Modifier keys for keyboard shortcuts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum ModifierKey {
+    /// The Super/Meta/Windows key.
     Super,
+    /// The Control key.
     Ctrl,
+    /// The Alt key.
     Alt,
+    /// The Shift key.
     Shift,
 }
 

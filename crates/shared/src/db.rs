@@ -4,11 +4,13 @@ use crate::types::{ClipboardItem, ContentType, DbStats};
 use rusqlite::{Connection, Result as SqlResult};
 use std::path::Path;
 
+/// SQLite-backed clipboard history database.
 pub struct Database {
     conn: Connection,
 }
 
 impl Database {
+    /// Open or create a database at the given path, running migrations.
     pub fn open(path: &Path) -> SqlResult<Self> {
         let conn = Connection::open(path)?;
         let db = Self { conn };
