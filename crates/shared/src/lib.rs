@@ -2,6 +2,8 @@
 
 pub mod config;
 pub mod db;
+pub mod image_store;
+pub mod sensitive;
 pub mod types;
 
 pub use config::Config;

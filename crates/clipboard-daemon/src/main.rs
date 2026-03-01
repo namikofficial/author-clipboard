@@ -3,11 +3,11 @@
 //! Watches for clipboard changes via the Wayland wlr-data-control protocol
 //! and stores them in a local `SQLite` database.
 
-use std::io::Read;
 use std::os::fd::AsFd;
 
 use anyhow::{Context, Result};
 use author_clipboard_shared::config::Config;
+use author_clipboard_shared::image_store;
 use author_clipboard_shared::types::ClipboardItem;
 use author_clipboard_shared::Database;
 use tracing::{debug, error, info, warn};
@@ -68,21 +68,27 @@ impl AppState {
         }
     }
 
-    /// Read text content from a clipboard offer via a pipe.
-    fn read_offer_content(offer: &ZwlrDataControlOfferV1) -> Result<String> {
+    /// Read raw bytes from a clipboard offer via a pipe.
+    fn read_offer_bytes(offer: &ZwlrDataControlOfferV1, mime_type: &str) -> Result<Vec<u8>> {
         let (read_fd, write_fd) = rustix::pipe::pipe().context("Failed to create pipe")?;
 
-        offer.receive("text/plain;charset=utf-8".to_string(), write_fd.as_fd());
+        offer.receive(mime_type.to_string(), write_fd.as_fd());
 
         // Close the write end so we get EOF after the compositor writes.
         drop(write_fd);
 
-        let mut content = String::new();
+        let mut data = Vec::new();
         let mut file = std::fs::File::from(read_fd);
-        file.read_to_string(&mut content)
+        std::io::Read::read_to_end(&mut file, &mut data)
             .context("Failed to read clipboard content from pipe")?;
 
-        Ok(content)
+        Ok(data)
+    }
+
+    /// Read text content from a clipboard offer via a pipe.
+    fn read_offer_content(offer: &ZwlrDataControlOfferV1) -> Result<String> {
+        let data = Self::read_offer_bytes(offer, "text/plain;charset=utf-8")?;
+        String::from_utf8(data).context("Clipboard content is not valid UTF-8")
     }
 }
 
@@ -140,6 +146,7 @@ impl Dispatch<ZwlrDataControlManagerV1, ()> for AppState {
 }
 
 impl Dispatch<ZwlrDataControlDeviceV1, ()> for AppState {
+    #[allow(clippy::too_many_lines)]
     fn event(
         state: &mut Self,
         _proxy: &ZwlrDataControlDeviceV1,
@@ -154,13 +161,70 @@ impl Dispatch<ZwlrDataControlDeviceV1, ()> for AppState {
                 state.pending_offer = Some((id, OfferMimeTypes::default()));
             }
             zwlr_data_control_device_v1::Event::Selection { id } => {
+                // Check incognito mode - skip storing if active
+                if state.config.is_incognito() {
+                    debug!("🕶️  Incognito mode active, skipping clipboard storage");
+                    state.pending_offer = None;
+                    return;
+                }
+
                 if let Some(offer) = id {
-                    // Check if we have text MIME type in the pending offer
-                    let has_text = state.pending_offer.as_ref().is_some_and(|(_, mimes)| {
-                        mimes.types.iter().any(|t| t.starts_with("text/plain"))
+                    let mime_types = state.pending_offer.as_ref().map(|(_, mimes)| &mimes.types);
+
+                    // Check for image MIME types first (prefer image over text)
+                    let image_mime = mime_types.and_then(|types| {
+                        types
+                            .iter()
+                            .find(|t| image_store::is_image_mime(t))
+                            .cloned()
                     });
 
-                    if has_text {
+                    let has_text = mime_types
+                        .is_some_and(|types| types.iter().any(|t| t.starts_with("text/plain")));
+
+                    if let Some(mime) = image_mime {
+                        // Handle image clipboard
+                        match Self::read_offer_bytes(&offer, &mime) {
+                            Ok(data) if data.is_empty() => {
+                                debug!("Ignoring empty image clipboard");
+                            }
+                            Ok(data) if data.len() > state.config.max_item_size => {
+                                debug!(
+                                    "Ignoring oversized image ({} bytes, max {})",
+                                    data.len(),
+                                    state.config.max_item_size
+                                );
+                            }
+                            Ok(data) => {
+                                let hash = ClipboardItem::hash_bytes(&data);
+
+                                match image_store::save_image(
+                                    &state.config.data_dir,
+                                    &data,
+                                    &mime,
+                                    hash,
+                                ) {
+                                    Ok(filename) => {
+                                        let item = ClipboardItem::new_image(
+                                            filename.clone(),
+                                            mime.clone(),
+                                            hash,
+                                        );
+
+                                        match state.db.insert_or_bump(&item) {
+                                            Ok(_) => info!(
+                                                "🖼️  Stored image: {filename} ({} bytes, {mime})",
+                                                data.len()
+                                            ),
+                                            Err(e) => warn!("DB insert failed for image: {e}"),
+                                        }
+                                    }
+                                    Err(e) => warn!("Failed to save image: {e}"),
+                                }
+                            }
+                            Err(e) => warn!("Failed to read image clipboard: {e}"),
+                        }
+                    } else if has_text {
                         match Self::read_offer_content(&offer) {
                             Ok(content) => {
                                 let content = content.trim().to_string();
@@ -250,6 +314,10 @@ fn run() -> Result<()> {
 
     let db = Database::open(&config.db_path()).context("Failed to open clipboard database")?;
     info!("Database opened at {}", config.db_path().display());
+
+    // Ensure image storage directories exist
+    image_store::ensure_dirs(&config.data_dir)
+        .context("Failed to create image storage directories")?;
 
     let conn = Connection::connect_to_env().context(
         "Failed to connect to Wayland display. \

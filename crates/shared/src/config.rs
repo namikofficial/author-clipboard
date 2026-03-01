@@ -15,7 +15,7 @@ pub struct Config {
 
 impl Default for Config {
     fn default() -> Self {
-        let data_dir = ProjectDirs::from("com", "namik", "author-clipboard")
+        let data_dir = ProjectDirs::from("com", "namikofficial", "author-clipboard")
             .map_or_else(|| PathBuf::from("."), |dirs| dirs.data_dir().to_path_buf());
 
         Self {
@@ -32,5 +32,29 @@ impl Config {
     /// Full path to the `SQLite` database file.
     pub fn db_path(&self) -> PathBuf {
         self.data_dir.join("clipboard.db")
+    }
+
+    /// Path to the incognito mode flag file.
+    pub fn incognito_flag_path(&self) -> PathBuf {
+        self.data_dir.join(".incognito")
+    }
+
+    /// Check if incognito mode is active.
+    pub fn is_incognito(&self) -> bool {
+        self.incognito_flag_path().exists()
+    }
+
+    /// Toggle incognito mode on/off. Returns the new state.
+    pub fn set_incognito(&self, enabled: bool) -> std::io::Result<bool> {
+        let path = self.incognito_flag_path();
+        if enabled {
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(&path, "1")?;
+        } else if path.exists() {
+            std::fs::remove_file(&path)?;
+        }
+        Ok(enabled)
     }
 }

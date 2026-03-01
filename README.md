@@ -134,9 +134,10 @@ just doctor        # Check development environment
 ├── justfile                 # Task runner commands
 ├── Cargo.toml              # Workspace definition  
 ├── PROJECT_PLAN.md         # Detailed development roadmap
-└── plans/                  # Additional planning documents
-    ├── SETUP_AND_DEV_GUIDE.md  # Complete setup guide
-    └── ...                 # Architecture docs, etc.
+└── docs/                   # Developer documentation
+    ├── CONTRIBUTING.md      # Contributor guide
+    ├── DEVELOPMENT.md       # Tooling & workflow reference
+    └── LOCAL_TESTING.md     # Step-by-step testing guide
 
 # Source code
 ├── crates/
@@ -150,8 +151,9 @@ just doctor        # Check development environment
 ## 📖 Documentation
 
 - **[PROJECT_PLAN.md](PROJECT_PLAN.md)** - Detailed development phases and feature specifications
-- **[plans/SETUP_AND_DEV_GUIDE.md](plans/SETUP_AND_DEV_GUIDE.md)** - Complete development environment setup
-- **[plans/](plans/)** - Architecture docs, design decisions, and additional planning
+- **[docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)** - How to contribute
+- **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)** - Development tooling and workflow
+- **[docs/LOCAL_TESTING.md](docs/LOCAL_TESTING.md)** - Step-by-step local testing guide
 
 ---
 

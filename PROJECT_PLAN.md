@@ -261,7 +261,7 @@ enum SecurityLevel {
 ```
 
 #### Deliverables
-- [ ] Sensitive item detection (passwords, OTP)
+- [x] Sensitive item detection (passwords, OTP)
 - [ ] Encryption at rest options
 - [ ] Clear on screen lock/logout
 - [x] Incognito mode (temporary pause)

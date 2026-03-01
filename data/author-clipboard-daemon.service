@@ -1,0 +1,16 @@
+[Unit]
+Description=Author Clipboard Daemon - Clipboard history monitor
+Documentation=https://github.com/namik/author-clipboard
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/author-clipboard-daemon
+Restart=on-failure
+RestartSec=5
+Environment=COSMIC_DATA_CONTROL_ENABLED=1
+Environment=RUST_LOG=info
+
+[Install]
+WantedBy=graphical-session.target

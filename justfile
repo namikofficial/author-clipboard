@@ -78,6 +78,16 @@ applet:
 daemon-bg:
     cargo run -p author-clipboard-daemon {{ build_flag }} &
 
+# Run both daemon and applet for end-to-end testing
+run: build
+    @echo "🚀 Starting daemon in background + applet in foreground..."
+    @echo "   Copy text anywhere → it appears in the applet window"
+    @echo "   Press Ctrl+C to stop both"
+    @echo ""
+    cargo run -p author-clipboard-daemon {{ build_flag }} &
+    @sleep 1
+    cargo run -p author-clipboard-applet {{ build_flag }}
+
 # Development mode - watch for changes and rebuild
 dev:
     cargo watch -x check
@@ -121,6 +131,47 @@ docs:
 # Quick development cycle
 quick: check test
     @echo "⚡ Quick check complete!"
+
+# ── Install / Uninstall ────────────────────────────────────────────────
+
+# Install binaries, .desktop file, icon, and systemd service
+install: build-release
+    @echo "📦 Installing author-clipboard..."
+    install -Dm755 target/release/author-clipboard-daemon ~/.local/bin/author-clipboard-daemon
+    install -Dm755 target/release/author-clipboard ~/.local/bin/author-clipboard
+    install -Dm644 data/com.namikofficial.author-clipboard.desktop ~/.local/share/applications/com.namikofficial.author-clipboard.desktop
+    install -Dm644 resources/icons/com.namikofficial.author-clipboard.svg ~/.local/share/icons/hicolor/scalable/apps/com.namikofficial.author-clipboard.svg
+    install -Dm644 data/author-clipboard-daemon.service ~/.config/systemd/user/author-clipboard-daemon.service
+    systemctl --user daemon-reload
+    @echo "✅ Installed! Enable daemon with: just enable"
+
+# Enable and start the clipboard daemon service
+enable:
+    systemctl --user enable --now author-clipboard-daemon.service
+    @echo "✅ Daemon enabled and started"
+
+# Disable and stop the clipboard daemon service
+disable:
+    systemctl --user disable --now author-clipboard-daemon.service
+    @echo "🛑 Daemon disabled"
+
+# Check daemon service status
+status:
+    systemctl --user status author-clipboard-daemon.service
+
+# View daemon logs
+logs:
+    journalctl --user -u author-clipboard-daemon.service -f
+
+# Uninstall everything
+uninstall: disable
+    rm -f ~/.local/bin/author-clipboard-daemon
+    rm -f ~/.local/bin/author-clipboard
+    rm -f ~/.local/share/applications/com.namikofficial.author-clipboard.desktop
+    rm -f ~/.local/share/icons/hicolor/scalable/apps/com.namikofficial.author-clipboard.svg
+    rm -f ~/.config/systemd/user/author-clipboard-daemon.service
+    systemctl --user daemon-reload
+    @echo "🗑️  Uninstalled author-clipboard"
 
 # ── Setup ──────────────────────────────────────────────────────────────
 

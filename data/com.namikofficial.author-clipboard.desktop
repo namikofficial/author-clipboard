@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=Clipboard Manager
+GenericName=Clipboard History
+Comment=COSMIC clipboard manager with history, search, and pin support
+Exec=author-clipboard
+Icon=com.namikofficial.author-clipboard
+Terminal=false
+Type=Application
+Categories=Utility;
+Keywords=clipboard;paste;copy;history;
+StartupNotify=true
+X-GNOME-UsesNotifications=false

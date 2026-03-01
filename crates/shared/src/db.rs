@@ -1,6 +1,6 @@
 //! Database operations using `SQLite`
 
-use crate::types::{ClipboardItem, DbStats};
+use crate::types::{ClipboardItem, ContentType, DbStats};
 use rusqlite::{Connection, Result as SqlResult};
 use std::path::Path;
 
@@ -13,6 +13,7 @@ impl Database {
         let conn = Connection::open(path)?;
         let db = Self { conn };
         db.init_schema()?;
+        db.migrate()?;
         Ok(db)
     }
 
@@ -21,6 +22,7 @@ impl Database {
         let conn = Connection::open_in_memory()?;
         let db = Self { conn };
         db.init_schema()?;
+        db.migrate()?;
         Ok(db)
     }
 
@@ -31,14 +33,54 @@ impl Database {
                 content_hash INTEGER NOT NULL,
                 content TEXT NOT NULL,
                 mime_type TEXT NOT NULL,
+                content_type TEXT NOT NULL DEFAULT 'text',
                 timestamp TEXT NOT NULL,
                 pinned INTEGER NOT NULL DEFAULT 0,
-                source_app TEXT
+                source_app TEXT,
+                sensitive INTEGER NOT NULL DEFAULT 0
             );
             CREATE INDEX IF NOT EXISTS idx_timestamp ON clipboard_items(timestamp DESC);
             CREATE INDEX IF NOT EXISTS idx_content_hash ON clipboard_items(content_hash);
-            CREATE INDEX IF NOT EXISTS idx_pinned ON clipboard_items(pinned);",
+            CREATE INDEX IF NOT EXISTS idx_pinned ON clipboard_items(pinned);
+            CREATE INDEX IF NOT EXISTS idx_content_type ON clipboard_items(content_type);
+
+            CREATE TABLE IF NOT EXISTS recently_used (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                category TEXT NOT NULL,
+                content TEXT NOT NULL,
+                used_at TEXT NOT NULL,
+                use_count INTEGER NOT NULL DEFAULT 1,
+                UNIQUE(category, content)
+            );
+            CREATE INDEX IF NOT EXISTS idx_recently_category ON recently_used(category, used_at DESC);",
         )?;
+        Ok(())
+    }
+
+    /// Run schema migrations for existing databases.
+    fn migrate(&self) -> SqlResult<()> {
+        // Check if content_type column exists; add it if missing (upgrade from v1 schema)
+        let has_content_type: bool = self
+            .conn
+            .prepare("SELECT content_type FROM clipboard_items LIMIT 0")
+            .is_ok();
+        if !has_content_type {
+            self.conn.execute_batch(
+                "ALTER TABLE clipboard_items ADD COLUMN content_type TEXT NOT NULL DEFAULT 'text';
+                 CREATE INDEX IF NOT EXISTS idx_content_type ON clipboard_items(content_type);",
+            )?;
+        }
+
+        // Add sensitive column if missing
+        let has_sensitive: bool = self
+            .conn
+            .prepare("SELECT sensitive FROM clipboard_items LIMIT 0")
+            .is_ok();
+        if !has_sensitive {
+            self.conn.execute_batch(
+                "ALTER TABLE clipboard_items ADD COLUMN sensitive INTEGER NOT NULL DEFAULT 0;",
+            )?;
+        }
         Ok(())
     }
 
@@ -48,15 +90,17 @@ impl Database {
     pub fn insert_item(&self, item: &ClipboardItem) -> SqlResult<i64> {
         self.conn.execute(
             "INSERT INTO clipboard_items
-                (content_hash, content, mime_type, timestamp, pinned, source_app)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                (content_hash, content, mime_type, content_type, timestamp, pinned, source_app, sensitive)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             (
                 item.content_hash.cast_signed(),
                 &item.content,
                 &item.mime_type,
+                item.content_type.as_str(),
                 item.timestamp.to_rfc3339(),
                 i32::from(item.pinned),
                 &item.source_app,
+                i32::from(item.sensitive),
             ),
         )?;
         Ok(self.conn.last_insert_rowid())
@@ -94,7 +138,7 @@ impl Database {
     /// Get the most recent items, pinned first.
     pub fn get_recent(&self, limit: usize) -> SqlResult<Vec<ClipboardItem>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, content_hash, content, mime_type, timestamp, pinned, source_app
+            "SELECT id, content_hash, content, mime_type, content_type, timestamp, pinned, source_app, sensitive
              FROM clipboard_items
              ORDER BY pinned DESC, timestamp DESC
              LIMIT ?1",
@@ -102,11 +146,11 @@ impl Database {
         Self::collect_items(&mut stmt, [limit])
     }
 
-    /// Search items by content substring (case-insensitive).
+    /// Search items by content substring (case-insensitive). Only searches text items.
     pub fn search(&self, query: &str, limit: usize) -> SqlResult<Vec<ClipboardItem>> {
         let pattern = format!("%{query}%");
         let mut stmt = self.conn.prepare(
-            "SELECT id, content_hash, content, mime_type, timestamp, pinned, source_app
+            "SELECT id, content_hash, content, mime_type, content_type, timestamp, pinned, source_app, sensitive
              FROM clipboard_items
              WHERE content LIKE ?1
              ORDER BY pinned DESC, timestamp DESC
@@ -118,7 +162,7 @@ impl Database {
     /// Get a single item by id.
     pub fn get_by_id(&self, id: i64) -> SqlResult<Option<ClipboardItem>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, content_hash, content, mime_type, timestamp, pinned, source_app
+            "SELECT id, content_hash, content, mime_type, content_type, timestamp, pinned, source_app, sensitive
              FROM clipboard_items WHERE id = ?1",
         )?;
         let mut items = stmt.query_map([id], Self::row_to_item)?;
@@ -225,6 +269,49 @@ impl Database {
         })
     }
 
+    // ── Recently Used ─────────────────────────────────────────────────
+
+    /// Record that an emoji/symbol/kaomoji was used (upsert).
+    pub fn record_usage(&self, category: &str, content: &str) -> SqlResult<()> {
+        self.conn.execute(
+            "INSERT INTO recently_used (category, content, used_at, use_count)
+             VALUES (?1, ?2, ?3, 1)
+             ON CONFLICT(category, content) DO UPDATE SET
+                used_at = ?3,
+                use_count = use_count + 1",
+            rusqlite::params![category, content, chrono::Utc::now().to_rfc3339()],
+        )?;
+        Ok(())
+    }
+
+    /// Get recently used items for a category, ordered by most recent.
+    pub fn get_recently_used(&self, category: &str, limit: usize) -> SqlResult<Vec<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT content FROM recently_used
+             WHERE category = ?1
+             ORDER BY used_at DESC
+             LIMIT ?2",
+        )?;
+        let items = stmt
+            .query_map(rusqlite::params![category, limit], |row| row.get(0))?
+            .collect::<SqlResult<Vec<String>>>()?;
+        Ok(items)
+    }
+
+    /// Get frequently used items for a category, ordered by use count.
+    pub fn get_frequently_used(&self, category: &str, limit: usize) -> SqlResult<Vec<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT content FROM recently_used
+             WHERE category = ?1
+             ORDER BY use_count DESC, used_at DESC
+             LIMIT ?2",
+        )?;
+        let items = stmt
+            .query_map(rusqlite::params![category, limit], |row| row.get(0))?
+            .collect::<SqlResult<Vec<String>>>()?;
+        Ok(items)
+    }
+
     // ── Helpers ────────────────────────────────────────────────────────
 
     fn row_to_item(row: &rusqlite::Row<'_>) -> SqlResult<ClipboardItem> {
@@ -233,10 +320,15 @@ impl Database {
             content_hash: row.get::<_, i64>(1)?.cast_unsigned(),
             content: row.get(2)?,
             mime_type: row.get(3)?,
-            timestamp: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(4)?)
+            content_type: row
+                .get::<_, String>(4)?
+                .parse()
+                .unwrap_or(ContentType::Text),
+            timestamp: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(5)?)
                 .map_or_else(|_| chrono::Utc::now(), |dt| dt.with_timezone(&chrono::Utc)),
-            pinned: row.get::<_, i32>(5)? != 0,
-            source_app: row.get(6)?,
+            pinned: row.get::<_, i32>(6)? != 0,
+            source_app: row.get(7)?,
+            sensitive: row.get::<_, i32>(8).unwrap_or(0) != 0,
         })
     }
 
@@ -385,5 +477,25 @@ mod tests {
         let items = db.get_recent(10).unwrap();
         assert_eq!(items.len(), 3);
         assert_eq!(items[0].content, "third");
+    }
+
+    #[test]
+    fn test_recently_used() {
+        let db = make_db();
+        db.record_usage("emoji", "😀").unwrap();
+        db.record_usage("emoji", "😂").unwrap();
+        db.record_usage("emoji", "😀").unwrap(); // bump count
+        db.record_usage("symbol", "→").unwrap();
+
+        let recent = db.get_recently_used("emoji", 10).unwrap();
+        assert_eq!(recent.len(), 2);
+        assert_eq!(recent[0], "😀"); // most recently used
+
+        let frequent = db.get_frequently_used("emoji", 10).unwrap();
+        assert_eq!(frequent[0], "😀"); // most frequently used (count=2)
+
+        let symbols = db.get_recently_used("symbol", 10).unwrap();
+        assert_eq!(symbols.len(), 1);
+        assert_eq!(symbols[0], "→");
     }
 }
