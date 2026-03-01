@@ -7,6 +7,9 @@ use std::io::Read;
 use std::os::fd::AsFd;
 
 use anyhow::{Context, Result};
+use author_clipboard_shared::config::Config;
+use author_clipboard_shared::types::ClipboardItem;
+use author_clipboard_shared::Database;
 use tracing::{debug, error, info, warn};
 use wayland_client::protocol::wl_registry;
 use wayland_client::protocol::wl_seat::WlSeat;
@@ -35,16 +38,22 @@ struct AppState {
     pending_offer: Option<(ZwlrDataControlOfferV1, OfferMimeTypes)>,
     /// The most recently received clipboard text (for deduplication).
     last_content: Option<String>,
+    /// Database for clipboard history persistence.
+    db: Database,
+    /// Application configuration.
+    config: Config,
 }
 
 impl AppState {
-    fn new() -> Self {
+    fn new(db: Database, config: Config) -> Self {
         Self {
             manager: None,
             seat: None,
             device: None,
             pending_offer: None,
             last_content: None,
+            db,
+            config,
         }
     }
 
@@ -157,6 +166,11 @@ impl Dispatch<ZwlrDataControlDeviceV1, ()> for AppState {
                                 let content = content.trim().to_string();
                                 if content.is_empty() {
                                     debug!("Ignoring empty clipboard content");
+                                } else if content.len() > state.config.max_item_size {
+                                    debug!(
+                                        "Ignoring oversized clipboard content ({} bytes)",
+                                        content.len()
+                                    );
                                 } else if state.last_content.as_deref() == Some(&content) {
                                     debug!("Ignoring duplicate clipboard content");
                                 } else {
@@ -165,7 +179,20 @@ impl Dispatch<ZwlrDataControlDeviceV1, ()> for AppState {
                                     } else {
                                         content.clone()
                                     };
-                                    info!("📋 Clipboard: {preview}");
+
+                                    let item = ClipboardItem::new_text(content.clone());
+
+                                    match state.db.insert_or_bump(&item) {
+                                        Ok(_) => info!("📋 Stored: {preview}"),
+                                        Err(e) => warn!("DB insert failed: {e}"),
+                                    }
+
+                                    if let Err(e) =
+                                        state.db.enforce_max_items(state.config.max_items)
+                                    {
+                                        warn!("Cleanup failed: {e}");
+                                    }
+
                                     state.last_content = Some(content);
                                 }
                             }
@@ -215,6 +242,15 @@ impl Dispatch<ZwlrDataControlOfferV1, ()> for AppState {
 delegate_noop!(AppState: ignore WlSeat);
 
 fn run() -> Result<()> {
+    let config = Config::default();
+
+    // Ensure data directory exists
+    std::fs::create_dir_all(&config.data_dir)
+        .with_context(|| format!("Failed to create data dir: {}", config.data_dir.display()))?;
+
+    let db = Database::open(&config.db_path()).context("Failed to open clipboard database")?;
+    info!("Database opened at {}", config.db_path().display());
+
     let conn = Connection::connect_to_env().context(
         "Failed to connect to Wayland display. \
          Ensure you are running on a Wayland compositor (e.g. COSMIC).",
@@ -225,7 +261,7 @@ fn run() -> Result<()> {
     let mut event_queue: EventQueue<AppState> = conn.new_event_queue();
     let qh = event_queue.handle();
 
-    let mut state = AppState::new();
+    let mut state = AppState::new(db, config);
 
     // Trigger global advertisement
     display.get_registry(&qh, ());
