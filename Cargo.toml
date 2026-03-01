@@ -4,6 +4,7 @@ members = [
     "crates/clipboard-daemon",
     "crates/applet",
     "crates/shared",
+    "crates/ctl",
 ]
 
 [workspace.package]
@@ -69,6 +70,9 @@ libcosmic = { git = "https://github.com/pop-os/libcosmic.git", default-features 
 
 # Image processing
 image = "0.25"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
 
 # Encryption
 aes-gcm = "0.10"
