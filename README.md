@@ -70,6 +70,18 @@ author-clipboard-ctl export out.json # Export history
 author-clipboard-ctl config          # Show current config
 ```
 
+### Keyboard Shortcut (Super+V)
+
+To open the clipboard picker with Super+V, add a custom shortcut in COSMIC Settings:
+
+1. Open **COSMIC Settings** → **Keyboard** → **Custom Shortcuts**
+2. Click **Add Shortcut**
+3. Set the command to: `author-clipboard-ctl toggle`
+4. Press **Super+V** as the key combination
+5. Save
+
+The shortcut sends a toggle command to the daemon, which signals the applet to come to the foreground.
+
 ### Configuration
 
 Config file location: `~/.config/author-clipboard/config.json`
