@@ -5,4 +5,5 @@ pub mod db;
 pub mod types;
 
 pub use config::Config;
+pub use db::Database;
 pub use types::*;
