@@ -86,7 +86,7 @@ fn main() -> Result<()> {
 - [x] Database operations (insert, query, search, pin, delete)
 - [x] Content deduplication (hash-based `insert_or_bump`)
 - [x] Auto-cleanup and size limits (`enforce_max_items`, `clear_unpinned`)
-- [ ] Database migration system
+- [x] Database migration system
 
 #### Week 2: Storage Integration
 - [x] Daemon → Database pipeline
@@ -134,7 +134,7 @@ fn main() -> Result<()> {
 
 ---
 
-### Phase 3: Rich Content Support (3 weeks) ⚡ **IN PROGRESS**
+### Phase 3: Rich Content Support (3 weeks) ✅ **COMPLETE**
 **Goal:** Images, HTML, and file clipboard support
 
 #### Image Pipeline
@@ -142,6 +142,8 @@ fn main() -> Result<()> {
 enum ContentType {
     Text,
     Image,
+    Html,
+    Files,
 }
 ```
 
@@ -149,8 +151,8 @@ enum ContentType {
 - [x] Image MIME type detection (`image/png`, `image/jpeg`, etc.)
 - [x] Image storage strategy (file system with thumbnails)
 - [x] Thumbnail generation for UI (128px via `image` crate)
-- [ ] HTML + plain text dual storage
-- [ ] File list clipboard support
+- [x] HTML + plain text dual storage
+- [x] File list clipboard support
 - [x] Size limits and cleanup for large content
 - [x] Database migration for `content_type` column
 
@@ -248,7 +250,7 @@ struct Config {
 
 ---
 
-### Phase 7: Security & Privacy (2 weeks) ⚡ **IN PROGRESS**
+### Phase 7: Security & Privacy (2 weeks) ✅ **COMPLETE**
 **Goal:** Enterprise-grade privacy and security controls
 
 #### Security Model
@@ -262,11 +264,11 @@ enum SecurityLevel {
 
 #### Deliverables
 - [x] Sensitive item detection (passwords, OTP)
-- [ ] Encryption at rest options
-- [ ] Clear on screen lock/logout
+- [x] Encryption at rest options
+- [x] Clear on screen lock/logout
 - [x] Incognito mode (temporary pause)
-- [ ] Data export/import with encryption
-- [ ] Audit logging for security events
+- [x] Data export/import with encryption
+- [x] Audit logging for security events
 
 #### Success Criteria
 - Password fields don't enter history

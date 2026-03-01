@@ -417,6 +417,33 @@ impl Database {
         Ok(affected)
     }
 
+    // ── Export / Import ───────────────────────────────────────────────
+
+    /// Export all clipboard items as JSON string.
+    pub fn export_items(&self) -> SqlResult<String> {
+        let items = self.get_recent(i32::MAX as usize)?;
+        let json = serde_json::to_string_pretty(&items)
+            .unwrap_or_else(|e| format!("{{\"error\": \"{e}\"}}"));
+        Ok(json)
+    }
+
+    /// Import clipboard items from JSON string. Returns count of imported items.
+    pub fn import_items(&self, json: &str) -> Result<usize, String> {
+        let items: Vec<crate::types::ClipboardItem> =
+            serde_json::from_str(json).map_err(|e| format!("Invalid JSON: {e}"))?;
+
+        let mut count = 0;
+        for item in &items {
+            match self.insert_or_bump(item) {
+                Ok(_) => count += 1,
+                Err(e) => {
+                    tracing::warn!("Failed to import item: {e}");
+                }
+            }
+        }
+        Ok(count)
+    }
+
     // ── Helpers ────────────────────────────────────────────────────────
 
     fn row_to_item(row: &rusqlite::Row<'_>) -> SqlResult<ClipboardItem> {
@@ -704,5 +731,26 @@ mod tests {
         let results = db.search("HTML content", 10).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].content_type, ContentType::Html);
+    }
+
+    #[test]
+    fn test_export_import() {
+        let db = make_db();
+        db.insert_item(&ClipboardItem::new_text("export test 1".to_string()))
+            .unwrap();
+        db.insert_item(&ClipboardItem::new_text("export test 2".to_string()))
+            .unwrap();
+
+        let json = db.export_items().unwrap();
+        assert!(json.contains("export test 1"));
+        assert!(json.contains("export test 2"));
+
+        // Import into fresh db
+        let db2 = make_db();
+        let count = db2.import_items(&json).unwrap();
+        assert_eq!(count, 2);
+
+        let items = db2.get_recent(10).unwrap();
+        assert_eq!(items.len(), 2);
     }
 }

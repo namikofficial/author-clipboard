@@ -89,6 +89,8 @@ enum Message {
     SymbolCategory(usize),
     KaomojiCategory(usize),
     ToggleIncognito,
+    ExportData,
+    ImportData,
 }
 
 // ── Application trait ─────────────────────────────────────────────────
@@ -398,6 +400,53 @@ impl cosmic::Application for App {
                         }
                     }
                     Err(e) => warn!("Failed to toggle incognito: {e}"),
+                }
+            }
+
+            Message::ExportData => {
+                if let Some(db) = &self.db {
+                    let export_path = self.config.data_dir.join("clipboard_export.json");
+                    match db.export_items() {
+                        Ok(json) => match std::fs::write(&export_path, &json) {
+                            Ok(()) => {
+                                info!("📤 Exported clipboard data to {}", export_path.display());
+                                if let Some(db) = &self.db {
+                                    let _ = db.log_audit_event(
+                                        &AuditEventKind::DataExported,
+                                        Some(&format!("Exported to {}", export_path.display())),
+                                    );
+                                }
+                            }
+                            Err(e) => warn!("Failed to write export file: {e}"),
+                        },
+                        Err(e) => warn!("Failed to export data: {e}"),
+                    }
+                }
+            }
+
+            Message::ImportData => {
+                if let Some(db) = &self.db {
+                    let import_path = self.config.data_dir.join("clipboard_export.json");
+                    if import_path.exists() {
+                        match std::fs::read_to_string(&import_path) {
+                            Ok(json) => match db.import_items(&json) {
+                                Ok(count) => {
+                                    info!("📥 Imported {count} clipboard items");
+                                    self.refresh_items();
+                                    if let Some(db) = &self.db {
+                                        let _ = db.log_audit_event(
+                                            &AuditEventKind::DataImported,
+                                            Some(&format!("Imported {count} items")),
+                                        );
+                                    }
+                                }
+                                Err(e) => warn!("Failed to import data: {e}"),
+                            },
+                            Err(e) => warn!("Failed to read import file: {e}"),
+                        }
+                    } else {
+                        warn!("No export file found at {}", import_path.display());
+                    }
                 }
             }
         }
@@ -852,6 +901,25 @@ impl App {
                 .on_press(Message::ClearAll)
                 .width(Length::Fill)
                 .padding([10, 16]),
+        );
+        content = content.push(
+            widget::button::text("📤 Export Clipboard History")
+                .on_press(Message::ExportData)
+                .width(Length::Fill)
+                .padding([10, 16]),
+        );
+        content = content.push(
+            widget::button::text("📥 Import Clipboard History")
+                .on_press(Message::ImportData)
+                .width(Length::Fill)
+                .padding([10, 16]),
+        );
+        content = content.push(
+            text(format!(
+                "Export/import path: {}",
+                self.config.data_dir.join("clipboard_export.json").display()
+            ))
+            .size(11.0),
         );
 
         // Stats
