@@ -2,6 +2,9 @@
 # Usage: just <command>
 # Install just: https://github.com/casey/just
 
+# Load .env file if it exists (RUST_LOG, COSMIC_DATA_CONTROL_ENABLED, etc.)
+set dotenv-load := true
+
 # Default task - show available commands
 default:
     @just --list
@@ -60,17 +63,20 @@ fix: fmt lint-fix
 
 # ── Run ────────────────────────────────────────────────────────────────
 
+# Build profile: set BUILD_PROFILE=release in .env for release builds
+build_flag := if env("BUILD_PROFILE", "debug") == "release" { "--release" } else { "" }
+
 # Run the clipboard daemon
 daemon:
-    cargo run -p author-clipboard-daemon
+    cargo run -p author-clipboard-daemon {{ build_flag }}
 
 # Run the applet
 applet:
-    cargo run -p author-clipboard-applet
+    cargo run -p author-clipboard-applet {{ build_flag }}
 
 # Run daemon in background for development
 daemon-bg:
-    cargo run -p author-clipboard-daemon &
+    cargo run -p author-clipboard-daemon {{ build_flag }} &
 
 # Development mode - watch for changes and rebuild
 dev:
