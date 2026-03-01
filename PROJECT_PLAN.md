@@ -44,18 +44,18 @@ Build a native, high-performance clipboard manager for COSMIC desktop that deliv
 
 ## 🚀 Development Phases
 
-### Phase 0: Clipboard Watcher Prototype ⚡ **IN PROGRESS**
+### Phase 0: Clipboard Watcher Prototype ✅ **COMPLETE**
 **Duration:** 1 week  
 **Goal:** Prove Wayland clipboard monitoring works on COSMIC
 
 #### Deliverables
 - [x] Project structure setup
 - [x] Workspace and crate configuration
-- [ ] Wayland display connection
-- [ ] wlr-data-control protocol binding
-- [ ] Clipboard change detection
-- [ ] Text content extraction
-- [ ] Terminal output validation
+- [x] Wayland display connection
+- [x] wlr-data-control protocol binding
+- [x] Clipboard change detection
+- [x] Text content extraction
+- [x] Terminal output validation
 
 #### Technical Requirements
 ```rust
@@ -78,28 +78,28 @@ fn main() -> Result<()> {
 
 ---
 
-### Phase 1: MVP Text History (3 weeks)
+### Phase 1: MVP Text History (3 weeks) ✅ **COMPLETE**
 **Goal:** Persistent, searchable text clipboard history with basic UI
 
 #### Week 1: Database Foundation
 - [x] SQLite schema design (`ClipboardItem` table)
 - [x] Database operations (insert, query, search, pin, delete)
-- [ ] Content deduplication (FNV hash-based)
-- [ ] Auto-cleanup and size limits
+- [x] Content deduplication (hash-based `insert_or_bump`)
+- [x] Auto-cleanup and size limits (`enforce_max_items`, `clear_unpinned`)
 - [ ] Database migration system
 
 #### Week 2: Storage Integration
-- [ ] Daemon → Database pipeline
-- [ ] TTL-based expiry for non-pinned items
-- [ ] Configurable limits (max items, max size)
-- [ ] Data integrity and error handling
+- [x] Daemon → Database pipeline
+- [x] TTL-based expiry for non-pinned items (configurable `ttl_seconds`)
+- [x] Configurable limits (max items, max size)
+- [x] Data integrity and error handling
 
 #### Week 3: Basic UI
-- [ ] libcosmic application structure
-- [ ] Single-tab list view (timestamp, preview, actions)
-- [ ] Search bar with real-time filtering
-- [ ] Pin/unpin, delete, clear all actions
-- [ ] Keyboard navigation (↑↓ select, Enter copy, Esc close)
+- [x] libcosmic application structure
+- [x] Single-tab list view (timestamp, preview, actions)
+- [x] Search bar with real-time filtering
+- [x] Pin/unpin, delete, clear all actions
+- [x] Keyboard navigation (↑↓ select, Enter copy, Esc close)
 
 #### Success Criteria
 - Copy 20+ items, see all in history
@@ -109,7 +109,7 @@ fn main() -> Result<()> {
 
 ---
 
-### Phase 2: Global Shortcut & Polish (2 weeks)
+### Phase 2: Global Shortcut & Polish (2 weeks) ⚡ **IN PROGRESS**
 **Goal:** Full global shortcut experience - press key anywhere, picker appears instantly
 
 #### Technical Challenges
@@ -122,8 +122,8 @@ fn main() -> Result<()> {
 - [ ] Super+V shortcut registration
 - [ ] Smart positioning (near cursor, screen-aware)
 - [ ] Focus handling (open on top, return focus on close)
-- [ ] Autostart systemd service
-- [ ] .desktop file and app icon
+- [x] Autostart systemd service
+- [x] .desktop file and app icon
 - [ ] Shortcut conflict detection
 
 #### Success Criteria
@@ -134,25 +134,25 @@ fn main() -> Result<()> {
 
 ---
 
-### Phase 3: Rich Content Support (3 weeks) 
+### Phase 3: Rich Content Support (3 weeks) ⚡ **IN PROGRESS**
 **Goal:** Images, HTML, and file clipboard support
 
 #### Image Pipeline
 ```rust
-enum ClipboardContent {
-    Text { plain: String, html: Option<String> },
-    Image { data: Vec<u8>, format: ImageFormat, thumbnail: Vec<u8> },
-    Files { paths: Vec<PathBuf>, total_size: u64 },
+enum ContentType {
+    Text,
+    Image,
 }
 ```
 
 #### Deliverables
-- [ ] Image MIME type detection (`image/png`, `image/jpeg`)
-- [ ] Image storage strategy (database blob vs file system)
-- [ ] Thumbnail generation for UI
+- [x] Image MIME type detection (`image/png`, `image/jpeg`, etc.)
+- [x] Image storage strategy (file system with thumbnails)
+- [x] Thumbnail generation for UI (128px via `image` crate)
 - [ ] HTML + plain text dual storage
 - [ ] File list clipboard support
-- [ ] Size limits and cleanup for large content
+- [x] Size limits and cleanup for large content
+- [x] Database migration for `content_type` column
 
 #### Success Criteria
 - Copy image → appears in history with thumbnail
@@ -162,28 +162,28 @@ enum ClipboardContent {
 
 ---
 
-### Phase 4: Expression Pickers (4 weeks)
+### Phase 4: Expression Pickers (4 weeks) ✅ **COMPLETE**
 **Goal:** Tabbed UI with emoji, GIF, symbol, and kaomoji pickers
 
 #### UI Architecture
 ```rust
 enum AppTab {
-    Clipboard(ClipboardTab),
-    Emoji(EmojiPicker),
-    Gif(GifPicker),  
-    Symbols(SymbolPicker),
-    Kaomoji(KaomojiPicker),
+    Clipboard,
+    Emoji,
+    Symbols,
+    Kaomoji,
+    Settings,
 }
 ```
 
 #### Deliverables
-- [ ] Tab bar navigation system
-- [ ] Emoji picker with Unicode 15.0+ support
-- [ ] Category-based organization (Smileys, Objects, etc.)
-- [ ] Tenor API GIF search integration
-- [ ] Symbol categories (Math, Currency, Arrows, etc.)
-- [ ] Kaomoji database with search
-- [ ] Recently used tracking across all pickers
+- [x] Tab bar navigation system
+- [x] Emoji picker with Unicode 15.0+ support
+- [x] Category-based organization (Smileys, Objects, etc.)
+- [ ] Tenor API GIF search integration (deferred — requires API key)
+- [x] Symbol categories (Math, Currency, Arrows, etc.)
+- [x] Kaomoji database with search
+- [x] Recently used tracking across all pickers
 
 #### Success Criteria
 - Tab navigation smooth and responsive
@@ -217,7 +217,7 @@ enum AppTab {
 
 ---
 
-### Phase 6: Settings & Polish (2 weeks)
+### Phase 6: Settings & Polish (2 weeks) ✅ **COMPLETE**
 **Goal:** Configuration UI and production readiness
 
 #### Configuration Areas
@@ -233,12 +233,12 @@ struct Config {
 ```
 
 #### Deliverables
-- [ ] Settings panel (in-app or separate window)
-- [ ] Shortcut configuration UI
-- [ ] Theme and appearance options
-- [ ] Performance tuning
-- [ ] Accessibility improvements
-- [ ] Setup wizard for first-run experience
+- [x] Settings panel (in-app tab with stats, privacy toggle, about)
+- [ ] Shortcut configuration UI (deferred — requires COSMIC runtime)
+- [x] Theme and appearance options (native COSMIC theming)
+- [x] Performance tuning (auto-refresh, efficient queries)
+- [x] Accessibility improvements (keyboard navigation, status bar)
+- [ ] Setup wizard for first-run experience (deferred)
 
 #### Success Criteria
 - All major features configurable
@@ -248,7 +248,7 @@ struct Config {
 
 ---
 
-### Phase 7: Security & Privacy (2 weeks)
+### Phase 7: Security & Privacy (2 weeks) ⚡ **IN PROGRESS**
 **Goal:** Enterprise-grade privacy and security controls
 
 #### Security Model
@@ -264,7 +264,7 @@ enum SecurityLevel {
 - [ ] Sensitive item detection (passwords, OTP)
 - [ ] Encryption at rest options
 - [ ] Clear on screen lock/logout
-- [ ] Incognito mode (temporary pause)
+- [x] Incognito mode (temporary pause)
 - [ ] Data export/import with encryption
 - [ ] Audit logging for security events
 
@@ -342,15 +342,24 @@ CREATE INDEX idx_pinned ON clipboard_items(pinned);
 
 ## 📊 Implementation Status
 
-### Current Progress (Phase 0)
+### Current Progress (Phase 1 — Week 3)
 
 | Task | Status | Notes |
 |------|--------|-------|
 | Project structure | ✅ Complete | Workspace, crates, justfile configured |
-| Build system | ✅ Complete | Cargo workspace builds successfully |
-| Documentation | ✅ Complete | README, PROJECT_PLAN, setup guide |
-| Wayland client | 🏗️ In Progress | Need to implement data-control binding |
-| Clipboard monitoring | ⏳ Blocked | Requires Wayland client completion |
+| Build system | ✅ Complete | Cargo workspace with pedantic clippy lints |
+| Documentation | ✅ Complete | README, PROJECT_PLAN, setup guide, contributing, dev guide, local testing |
+| Code quality tooling | ✅ Complete | rustfmt, clippy pedantic, pre-commit hooks, conventional commits |
+| Changelog generation | ✅ Complete | git-cliff with `just release` |
+| Wayland clipboard watcher | ✅ Complete | Full wlr-data-control-v1 integration |
+| Database (CRUD + search) | ✅ Complete | Insert, query, search, pin, delete, dedup, cleanup, stats (9 tests) |
+| Daemon → DB pipeline | ✅ Complete | Clipboard items stored in SQLite on copy |
+| Configuration | ✅ Complete | Max items, max size, TTL, cleanup interval, db_path |
+| COSMIC Applet UI | ✅ Complete | Search bar, list view, pin/delete/clear, copy-to-clipboard |
+| Keyboard navigation | ✅ Complete | Arrow keys, Enter to copy, Esc to close, Ctrl+F search |
+| Auto-refresh | ✅ Complete | Applet polls DB every 2s for new items |
+| Image support | ✅ Complete | Capture, store, thumbnail, display, copy images |
+| Desktop integration | ✅ Complete | .desktop file, systemd service, app icon, install/uninstall |
 
 ### Upcoming Milestones
 
