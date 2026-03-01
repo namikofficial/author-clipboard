@@ -78,6 +78,24 @@ dev:
 
 # ── Maintenance ────────────────────────────────────────────────────────
 
+# Generate/update CHANGELOG.md from conventional commits
+changelog:
+    git-cliff --output CHANGELOG.md
+    @echo "📝 CHANGELOG.md updated"
+
+# Preview changelog without writing (dry-run)
+changelog-preview:
+    git-cliff --unreleased
+
+# Tag a release and generate changelog (usage: just release 0.2.0)
+release version:
+    @echo "🚀 Releasing v{{version}}..."
+    git-cliff --tag "v{{version}}" --output CHANGELOG.md
+    git add CHANGELOG.md
+    git commit -m "chore(release): v{{version}}"
+    git tag -a "v{{version}}" -m "Release v{{version}}"
+    @echo "✅ Release v{{version}} created. Push with: git push && git push --tags"
+
 # Clean build artifacts
 clean:
     cargo clean
