@@ -17,7 +17,7 @@ use cosmic::app::{Core, Settings, Task};
 use cosmic::iced::alignment::Horizontal;
 use cosmic::iced::keyboard::Key;
 use cosmic::iced::{Length, Size, Subscription};
-use cosmic::widget::{self, column, container, row, scrollable, text, text_input};
+use cosmic::widget::{self, column, container, icon, row, scrollable, text, text_input};
 use cosmic::{executor, iced, ApplicationExt, Element};
 use tracing::{error, info, warn};
 
@@ -77,6 +77,7 @@ struct App {
     incognito: bool,
     quick_paste_enabled: bool,
     paste_backend: Option<PasteBackend>,
+    daemon_running: bool,
 }
 
 // ── Messages ──────────────────────────────────────────────────────────
@@ -160,6 +161,7 @@ impl cosmic::Application for App {
             .build();
 
         let incognito = config.is_incognito();
+        let daemon_running = check_daemon_running();
 
         let mut app = App {
             core,
@@ -176,6 +178,7 @@ impl cosmic::Application for App {
             incognito,
             quick_paste_enabled: false,
             paste_backend: quick_paste::detect_backend(),
+            daemon_running,
         };
 
         let command = Task::batch([
@@ -239,6 +242,7 @@ impl cosmic::Application for App {
                 if self.active_tab == AppTab::Clipboard {
                     self.refresh_items();
                 }
+                self.daemon_running = check_daemon_running();
             }
             Message::TabSelected(entity) => {
                 self.tab_model.activate(entity);
@@ -512,6 +516,7 @@ impl cosmic::Application for App {
         Task::none()
     }
 
+    #[allow(clippy::too_many_lines)]
     fn view(&self) -> Element<'_, Self::Message> {
         let tab_bar =
             widget::tab_bar::horizontal(&self.tab_model).on_activate(Message::TabSelected);
@@ -528,28 +533,41 @@ impl cosmic::Application for App {
             .on_input(Message::SearchChanged)
             .on_submit(|_| Message::CopySelected)
             .id(SEARCH_INPUT_ID())
+            .leading_icon(
+                icon::from_name("system-search-symbolic")
+                    .size(16)
+                    .icon()
+                    .into(),
+            )
             .width(Length::Fill)
             .padding(8);
 
         let incognito_btn = {
-            let label = if self.incognito { "🕶️" } else { "👁️" };
-            let btn = widget::button::text(label).padding([6, 8]);
-            btn.on_press(Message::ToggleIncognito)
+            let icon_name = if self.incognito {
+                "system-lock-screen-symbolic"
+            } else {
+                "view-reveal-symbolic"
+            };
+            widget::button::icon(icon::from_name(icon_name).size(18))
+                .on_press(Message::ToggleIncognito)
+                .padding(6)
         };
 
         let header = match self.active_tab {
             AppTab::Clipboard => row()
-                .spacing(8)
+                .spacing(6)
                 .push(search_bar)
                 .push(incognito_btn)
-                .push(
-                    widget::button::destructive("Clear")
+                .push(widget::tooltip(
+                    widget::button::icon(icon::from_name("edit-clear-symbolic").size(18))
                         .on_press(Message::ClearAll)
-                        .padding([6, 12]),
-                )
+                        .padding(6),
+                    text("Clear unpinned").size(12.0),
+                    widget::tooltip::Position::Bottom,
+                ))
                 .align_y(iced::Alignment::Center),
             _ => row()
-                .spacing(8)
+                .spacing(6)
                 .push(search_bar)
                 .push(incognito_btn)
                 .align_y(iced::Alignment::Center),
@@ -589,25 +607,42 @@ impl cosmic::Application for App {
         };
 
         let mut status_parts = vec![status_text];
+        if self.daemon_running {
+            status_parts.push("● Daemon".to_string());
+        } else {
+            status_parts.push("○ No Daemon".to_string());
+        }
         if self.incognito {
-            status_parts.push("🕶️ Incognito".to_string());
+            status_parts.push("Incognito".to_string());
         }
         if self.quick_paste_enabled {
-            status_parts.push("⌨️ Quick Paste".to_string());
+            status_parts.push("Quick Paste".to_string());
         }
-        let full_status = status_parts.join(" • ");
+        let full_status = status_parts.join(" · ");
 
-        let hints = "↑↓ Navigate • Enter Paste • Esc Close • Ctrl+1-9 Quick • Ctrl+Tab Tabs";
+        let hints = "↑↓ Nav · Enter Paste · Esc Close · Ctrl+N Quick · Ctrl+Tab";
 
         let status_bar = container(
             row()
-                .push(text(full_status).size(12.0))
+                .push(text(full_status).size(11.0))
                 .push(cosmic::iced::widget::horizontal_space())
                 .push(text(hints).size(10.0))
                 .align_y(iced::Alignment::Center),
         )
         .width(Length::Fill)
-        .padding([4, 8]);
+        .padding([4, 8])
+        .style(|theme| {
+            let cosmic = theme.cosmic();
+            let [r, g, b, _] = cosmic.bg_divider().into();
+            cosmic::iced_widget::container::Style {
+                background: Some(cosmic::iced::Color::from_rgba(r, g, b, 0.4).into()),
+                border: cosmic::iced::Border {
+                    radius: 6.0.into(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            }
+        });
 
         let content = column()
             .spacing(8)
@@ -680,18 +715,27 @@ impl App {
 
     fn view_clipboard(&self) -> Element<'_, Message> {
         if self.items.is_empty() {
-            let empty_msg = if self.search_query.is_empty() {
-                "No clipboard items yet.\nCopy something to get started!"
+            let (icon_name, msg) = if self.search_query.is_empty() {
+                (
+                    "edit-paste-symbolic",
+                    "No clipboard items yet\nCopy something to get started!",
+                )
             } else {
-                "No items match your search."
+                ("system-search-symbolic", "No items match your search")
             };
 
-            container(text(empty_msg).size(14.0).align_x(Horizontal::Center))
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .align_x(Horizontal::Center)
-                .align_y(iced::alignment::Vertical::Center)
-                .into()
+            container(
+                column()
+                    .spacing(12)
+                    .align_x(Horizontal::Center)
+                    .push(icon::from_name(icon_name).size(48).icon())
+                    .push(text(msg).size(14.0).align_x(Horizontal::Center)),
+            )
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .align_x(Horizontal::Center)
+            .align_y(iced::alignment::Vertical::Center)
+            .into()
         } else {
             let mut list = column().spacing(4).padding([0, 4]);
 
@@ -707,6 +751,7 @@ impl App {
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     fn clipboard_item_row(&self, item: &ClipboardItem, index: usize) -> Element<'_, Message> {
         let time_ago = format_time_ago(item.timestamp);
 
@@ -717,14 +762,28 @@ impl App {
             String::from(" ")
         };
 
-        let pin_icon = if item.pinned { "📌" } else { "○" };
-        let pin_btn = widget::button::text(pin_icon)
+        let pin_btn = widget::tooltip(
+            widget::button::icon(
+                icon::from_name(if item.pinned {
+                    "pin-symbolic"
+                } else {
+                    "mail-mark-important-symbolic"
+                })
+                .size(16),
+            )
             .on_press(Message::TogglePin(item.id))
-            .padding([4, 8]);
+            .padding(4),
+            text(if item.pinned { "Unpin" } else { "Pin" }).size(11.0),
+            widget::tooltip::Position::Bottom,
+        );
 
-        let delete_btn = widget::button::text("✕")
-            .on_press(Message::DeleteItem(item.id))
-            .padding([4, 8]);
+        let delete_btn = widget::tooltip(
+            widget::button::icon(icon::from_name("edit-delete-symbolic").size(16))
+                .on_press(Message::DeleteItem(item.id))
+                .padding(4),
+            text("Delete").size(11.0),
+            widget::tooltip::Position::Bottom,
+        );
 
         let content_col = if item.is_image() {
             let thumb_path = image_store::thumbnail_path(&self.config.data_dir, &item.content);
@@ -737,14 +796,26 @@ impl App {
                         .height(Length::Fixed(60.0)),
                 );
             }
-            col = col.push(text(format!("🖼️ Image ({})", &item.mime_type)).size(12.0));
+            col = col.push(
+                row()
+                    .spacing(4)
+                    .push(icon::from_name("image-x-generic-symbolic").size(12).icon())
+                    .push(text(format!("Image ({})", &item.mime_type)).size(12.0))
+                    .align_y(iced::Alignment::Center),
+            );
             col.push(text(time_ago).size(11.0))
         } else if item.is_html() {
             let preview_text = item.plain_text.as_deref().unwrap_or(&item.content);
             let preview = truncate_content(preview_text, 120);
             let mut col = column().spacing(2);
             col = col.push(text(preview).size(13.0));
-            col = col.push(text("📄 HTML content").size(11.0));
+            col = col.push(
+                row()
+                    .spacing(4)
+                    .push(icon::from_name("text-html-symbolic").size(12).icon())
+                    .push(text("HTML content").size(11.0))
+                    .align_y(iced::Alignment::Center),
+            );
             col.push(text(time_ago).size(11.0))
         } else if item.is_files() {
             let file_infos = file_handler::parse_uri_list(&item.content);
@@ -757,29 +828,43 @@ impl App {
                 for info in file_infos.iter().take(3) {
                     let size_str = file_handler::format_file_size(info.size);
                     let status = if info.exists { "" } else { " ⚠️ missing" };
-                    let file_text = format!("📄 {} ({}){}", info.name, size_str, status);
+                    let file_text = format!("{} ({}){}", info.name, size_str, status);
                     col = col.push(text(file_text).size(12.0));
                 }
                 if file_count > 3 {
                     col = col.push(text(format!("  ... and {} more", file_count - 3)).size(11.0));
                 }
             }
-            col = col.push(text(format!("📁 {file_count} file(s)")).size(11.0));
+            col = col.push(
+                row()
+                    .spacing(4)
+                    .push(icon::from_name("document-open-symbolic").size(12).icon())
+                    .push(text(format!("{file_count} file(s)")).size(11.0))
+                    .align_y(iced::Alignment::Center),
+            );
             col.push(text(time_ago).size(11.0))
         } else {
             let preview = truncate_content(&item.content, 120);
             let char_count = item.content.len();
             let word_count = item.content.split_whitespace().count();
-            let meta = format!("{char_count} chars, {word_count} words");
+            let meta = format!("{char_count} chars · {word_count} words");
             let mut col = column().spacing(2).push(text(preview).size(13.0));
             if item.sensitive {
-                col = col.push(text("⚠️ Sensitive content").size(11.0));
+                col = col.push(
+                    row()
+                        .spacing(4)
+                        .push(icon::from_name("dialog-warning-symbolic").size(12).icon())
+                        .push(text("Sensitive content").size(11.0))
+                        .align_y(iced::Alignment::Center),
+                );
             }
             col = col.push(
                 row()
                     .spacing(8)
                     .push(text(time_ago).size(11.0))
-                    .push(text(meta).size(10.0)),
+                    .push(text("·").size(11.0))
+                    .push(text(meta).size(10.0))
+                    .align_y(iced::Alignment::Center),
             );
             col
         };
@@ -986,11 +1071,29 @@ impl App {
     fn view_settings(&self) -> Element<'_, Message> {
         let mut content = column().spacing(12).width(Length::Fill);
 
+        // Daemon status
+        content = content.push(text("Status").size(16.0));
+        let daemon_status = if self.daemon_running {
+            "● Daemon is running — clipboard changes are being captured"
+        } else {
+            "○ Daemon is not running — run: author-clipboard-daemon"
+        };
+        let daemon_btn = if self.daemon_running {
+            widget::button::suggested(daemon_status)
+                .width(Length::Fill)
+                .padding([10, 16])
+        } else {
+            widget::button::standard(daemon_status)
+                .width(Length::Fill)
+                .padding([10, 16])
+        };
+        content = content.push(daemon_btn);
+
         // Incognito toggle
         let incognito_label = if self.incognito {
-            "🕶️ Incognito Mode: ON — clipboard history is paused"
+            "Incognito Mode: ON — clipboard history is paused"
         } else {
-            "👁️ Incognito Mode: OFF — clipboard history is active"
+            "Incognito Mode: OFF — clipboard history is active"
         };
         let incognito_btn = if self.incognito {
             widget::button::suggested(incognito_label)
@@ -1009,19 +1112,19 @@ impl App {
         // Clear all button
         content = content.push(text("Data").size(16.0));
         content = content.push(
-            widget::button::destructive("🗑️ Clear All Clipboard History")
+            widget::button::destructive("Clear All Clipboard History")
                 .on_press(Message::ClearAll)
                 .width(Length::Fill)
                 .padding([10, 16]),
         );
         content = content.push(
-            widget::button::text("📤 Export Clipboard History")
+            widget::button::text("Export Clipboard History")
                 .on_press(Message::ExportData)
                 .width(Length::Fill)
                 .padding([10, 16]),
         );
         content = content.push(
-            widget::button::text("📥 Import Clipboard History")
+            widget::button::text("Import Clipboard History")
                 .on_press(Message::ImportData)
                 .width(Length::Fill)
                 .padding([10, 16]),
@@ -1041,7 +1144,7 @@ impl App {
                 #[allow(clippy::cast_precision_loss)]
                 let size_kb = stats.total_size_bytes as f64 / 1024.0;
                 let stats_text = format!(
-                    "📊 {} items total • {} pinned • {size_kb:.1} KB stored",
+                    "{} items total · {} pinned · {size_kb:.1} KB stored",
                     stats.total_items, stats.pinned_items,
                 );
                 content = content.push(text(stats_text).size(13.0));
@@ -1050,23 +1153,23 @@ impl App {
 
         // Keyboard shortcut
         content = content.push(text("Keyboard").size(16.0));
-        content = content
-            .push(text(format!("⌨️ Shortcut: {}", self.config.keyboard_shortcut)).size(13.0));
+        content =
+            content.push(text(format!("Shortcut: {}", self.config.keyboard_shortcut)).size(13.0));
         content = content
             .push(text("Press the shortcut to quickly open the clipboard picker").size(12.0));
 
         // Quick paste
         content = content.push(text("Quick Paste").size(16.0));
         let paste_status = match &self.paste_backend {
-            Some(backend) => format!("✅ Backend: {backend}"),
-            None => "❌ No backend found (install wtype or ydotool)".to_string(),
+            Some(backend) => format!("Backend: {backend}"),
+            None => "No backend found (install wtype or ydotool)".to_string(),
         };
         content = content.push(text(paste_status).size(13.0));
 
         let qp_label = if self.quick_paste_enabled {
-            "⌨️ Quick Paste: ON — items will be typed directly"
+            "Quick Paste: ON — items will be typed directly"
         } else {
-            "📋 Quick Paste: OFF — items copied to clipboard"
+            "Quick Paste: OFF — items copied to clipboard"
         };
         let qp_btn = if self.quick_paste_enabled {
             widget::button::suggested(qp_label)
@@ -1233,6 +1336,14 @@ impl App {
 }
 
 // ── Utility functions ─────────────────────────────────────────────────
+
+/// Check if the clipboard daemon process is running.
+fn check_daemon_running() -> bool {
+    std::process::Command::new("pgrep")
+        .args(["-f", "author-clipboard-daemon"])
+        .output()
+        .is_ok_and(|o| o.status.success())
+}
 
 fn truncate_content(content: &str, max_len: usize) -> String {
     let single_line = content.replace('\n', " ").replace('\r', "");
