@@ -165,7 +165,7 @@ cargo test -p author-clipboard-shared
 
 - **`README.md`** - High-level feature overview and quick start
 - **`PROJECT_PLAN.md`** - Detailed development roadmap, phases, and success criteria
-- **`plans/SETUP_AND_DEV_GUIDE.md`** - Step-by-step setup for beginners
+- **`docs/DEVELOPMENT.md`** - Development tooling and workflow reference
 - **Cargo.toml** (root) - Workspace configuration and shared dependency versions
 
 ## When Adding Features
@@ -313,7 +313,7 @@ Before submitting a PR, ensure:
 
 ### Getting Help
 
-- **Architecture questions**: Check `PROJECT_PLAN.md` and `plans/SETUP_AND_DEV_GUIDE.md`
+- **Architecture questions**: Check `PROJECT_PLAN.md` and `docs/DEVELOPMENT.md`
 - **Wayland-specific questions**: See comments in `crates/clipboard-daemon/` and referenced `wayland-protocols` documentation
 - **COSMIC/libcosmic questions**: Refer to [libcosmic examples](https://github.com/pop-os/libcosmic)
 - **Rust async patterns**: See Tokio documentation for `select!`, `spawn`, etc.

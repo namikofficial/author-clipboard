@@ -188,7 +188,7 @@ Check `PROJECT_PLAN.md` for the current phase. Work should align with the active
 
 ## Getting Help
 
-- **Architecture**: See `PROJECT_PLAN.md` and `plans/SETUP_AND_DEV_GUIDE.md`
+- **Architecture**: See `PROJECT_PLAN.md` and `docs/DEVELOPMENT.md`
 - **Wayland**: Comments in `crates/clipboard-daemon/` and [protocol docs](https://wayland.app/protocols/)
 - **COSMIC/libcosmic**: [libcosmic examples](https://github.com/pop-os/libcosmic)
 - **Rust async**: [Tokio documentation](https://tokio.rs/)

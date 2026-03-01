@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- Clipboard body -->
+  <rect x="12" y="10" width="40" height="48" rx="4" ry="4"
+        fill="#4A90D9" stroke="#2C5F8A" stroke-width="2"/>
+  <!-- Clipboard clip -->
+  <rect x="22" y="4" width="20" height="12" rx="3" ry="3"
+        fill="#6BB5E0" stroke="#2C5F8A" stroke-width="2"/>
+  <!-- Text lines -->
+  <rect x="20" y="24" width="24" height="3" rx="1" fill="white" opacity="0.9"/>
+  <rect x="20" y="32" width="20" height="3" rx="1" fill="white" opacity="0.7"/>
+  <rect x="20" y="40" width="16" height="3" rx="1" fill="white" opacity="0.5"/>
+</svg>
