@@ -8,6 +8,7 @@ use std::os::fd::AsFd;
 use anyhow::{Context, Result};
 use author_clipboard_shared::config::Config;
 use author_clipboard_shared::image_store;
+use author_clipboard_shared::ipc::{IpcMessage, IpcServer};
 use author_clipboard_shared::types::{AuditEventKind, ClipboardItem};
 use author_clipboard_shared::Database;
 use tracing::{debug, error, info, warn};
@@ -420,6 +421,56 @@ fn is_screen_locked() -> bool {
     }
 }
 
+/// Spawn a background thread running the IPC server that listens for
+/// toggle/show/hide commands and writes a visibility signal file for the applet.
+fn spawn_ipc_server(data_dir: std::path::PathBuf) {
+    std::thread::spawn(move || {
+        let server = match IpcServer::bind() {
+            Ok(s) => {
+                info!(
+                    "🔌 IPC server listening at {}",
+                    author_clipboard_shared::ipc::socket_path().display()
+                );
+                s
+            }
+            Err(e) => {
+                warn!("Failed to start IPC server: {e}");
+                return;
+            }
+        };
+
+        let visibility_path = data_dir.join(".visibility_toggle");
+
+        loop {
+            match server.accept() {
+                Ok(msg) => match msg {
+                    IpcMessage::Toggle | IpcMessage::Show | IpcMessage::Hide => {
+                        info!("🎯 IPC received: {msg:?}");
+                        let signal = match msg {
+                            IpcMessage::Toggle => "toggle",
+                            IpcMessage::Show => "show",
+                            IpcMessage::Hide => "hide",
+                            _ => continue,
+                        };
+                        if let Err(e) = std::fs::write(&visibility_path, signal) {
+                            warn!("Failed to write visibility signal: {e}");
+                        }
+                    }
+                    IpcMessage::Ping => {
+                        debug!("IPC ping received");
+                    }
+                    _ => {
+                        debug!("IPC message: {msg:?}");
+                    }
+                },
+                Err(e) => {
+                    debug!("IPC accept error (may be transient): {e}");
+                }
+            }
+        }
+    });
+}
+
 fn run() -> Result<()> {
     let config = Config::default();
 
@@ -462,6 +513,9 @@ fn run() -> Result<()> {
             was_locked = locked;
         }
     });
+
+    // Spawn IPC server thread for shortcut activation
+    spawn_ipc_server(config.data_dir.clone());
 
     let conn = Connection::connect_to_env().context(
         "Failed to connect to Wayland display. \
