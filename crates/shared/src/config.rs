@@ -11,6 +11,8 @@ pub struct Config {
     pub ttl_seconds: u64,
     /// How often the cleanup task runs (in seconds).
     pub cleanup_interval_seconds: u64,
+    /// Keyboard shortcut to open the clipboard picker (e.g., "Super+V")
+    pub keyboard_shortcut: String,
 }
 
 impl Default for Config {
@@ -24,6 +26,7 @@ impl Default for Config {
             data_dir,
             ttl_seconds: 7 * 24 * 3600,    // 7 days
             cleanup_interval_seconds: 300, // 5 minutes
+            keyboard_shortcut: "Super+V".to_string(),
         }
     }
 }

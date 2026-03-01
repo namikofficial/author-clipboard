@@ -182,6 +182,12 @@ impl Dispatch<ZwlrDataControlDeviceV1, ()> for AppState {
                     let has_text = mime_types
                         .is_some_and(|types| types.iter().any(|t| t.starts_with("text/plain")));
 
+                    let has_html =
+                        mime_types.is_some_and(|types| types.iter().any(|t| t == "text/html"));
+
+                    let has_uri_list =
+                        mime_types.is_some_and(|types| types.iter().any(|t| t == "text/uri-list"));
+
                     if let Some(mime) = image_mime {
                         // Handle image clipboard
                         match Self::read_offer_bytes(&offer, &mime) {
@@ -224,6 +230,90 @@ impl Dispatch<ZwlrDataControlDeviceV1, ()> for AppState {
                             }
                             Err(e) => warn!("Failed to read image clipboard: {e}"),
                         }
+                    } else if has_html {
+                        // Handle HTML clipboard content
+                        match Self::read_offer_bytes(&offer, "text/html") {
+                            Ok(html_data) if html_data.is_empty() => {
+                                debug!("Ignoring empty HTML clipboard");
+                            }
+                            Ok(html_data) if html_data.len() > state.config.max_item_size => {
+                                debug!(
+                                    "Ignoring oversized HTML clipboard ({} bytes)",
+                                    html_data.len()
+                                );
+                            }
+                            Ok(html_data) => {
+                                let html_content = String::from_utf8_lossy(&html_data).to_string();
+                                // Also read plain text version for search indexing
+                                let plain_text = if has_text {
+                                    Self::read_offer_content(&offer).unwrap_or_default()
+                                } else {
+                                    String::new()
+                                };
+                                let plain_text = plain_text.trim().to_string();
+
+                                if state.last_content.as_deref() == Some(&html_content) {
+                                    debug!("Ignoring duplicate HTML clipboard content");
+                                } else {
+                                    let preview = if plain_text.len() > 80 {
+                                        format!("{}...", &plain_text[..80])
+                                    } else if plain_text.is_empty() {
+                                        "HTML content".to_string()
+                                    } else {
+                                        plain_text.clone()
+                                    };
+
+                                    let item =
+                                        ClipboardItem::new_html(html_content.clone(), plain_text);
+                                    match state.db.insert_or_bump(&item) {
+                                        Ok(_) => info!("📄 Stored HTML: {preview}"),
+                                        Err(e) => warn!("DB insert failed for HTML: {e}"),
+                                    }
+                                    if let Err(e) =
+                                        state.db.enforce_max_items(state.config.max_items)
+                                    {
+                                        warn!("Cleanup failed: {e}");
+                                    }
+                                    state.last_content = Some(html_content);
+                                }
+                            }
+                            Err(e) => warn!("Failed to read HTML clipboard: {e}"),
+                        }
+                    } else if has_uri_list {
+                        // Handle file list clipboard content
+                        match Self::read_offer_bytes(&offer, "text/uri-list") {
+                            Ok(data) if data.is_empty() => {
+                                debug!("Ignoring empty file list clipboard");
+                            }
+                            Ok(data) => {
+                                let file_list = String::from_utf8_lossy(&data).trim().to_string();
+                                if file_list.is_empty() {
+                                    debug!("Ignoring empty file list");
+                                } else if state.last_content.as_deref() == Some(&file_list) {
+                                    debug!("Ignoring duplicate file list clipboard");
+                                } else {
+                                    let file_count = file_list
+                                        .lines()
+                                        .filter(|l| !l.starts_with('#') && !l.is_empty())
+                                        .count();
+
+                                    let item = ClipboardItem::new_files(file_list.clone());
+                                    match state.db.insert_or_bump(&item) {
+                                        Ok(_) => {
+                                            info!("📁 Stored file list ({file_count} files)");
+                                        }
+                                        Err(e) => warn!("DB insert failed for file list: {e}"),
+                                    }
+                                    if let Err(e) =
+                                        state.db.enforce_max_items(state.config.max_items)
+                                    {
+                                        warn!("Cleanup failed: {e}");
+                                    }
+                                    state.last_content = Some(file_list);
+                                }
+                            }
+                            Err(e) => warn!("Failed to read file list clipboard: {e}"),
+                        }
                     } else if has_text {
                         match Self::read_offer_content(&offer) {
                             Ok(content) => {
@@ -265,7 +355,7 @@ impl Dispatch<ZwlrDataControlDeviceV1, ()> for AppState {
                             }
                         }
                     } else {
-                        debug!("Selection has no text/plain MIME type, skipping");
+                        debug!("Selection has no supported MIME type, skipping");
                     }
 
                     offer.destroy();

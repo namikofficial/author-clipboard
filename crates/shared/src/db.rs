@@ -52,35 +52,79 @@ impl Database {
                 use_count INTEGER NOT NULL DEFAULT 1,
                 UNIQUE(category, content)
             );
-            CREATE INDEX IF NOT EXISTS idx_recently_category ON recently_used(category, used_at DESC);",
+            CREATE INDEX IF NOT EXISTS idx_recently_category ON recently_used(category, used_at DESC);
+
+            CREATE TABLE IF NOT EXISTS schema_version (
+                version INTEGER NOT NULL
+            );",
         )?;
         Ok(())
     }
 
-    /// Run schema migrations for existing databases.
+    /// Run versioned schema migrations for existing databases.
     fn migrate(&self) -> SqlResult<()> {
-        // Check if content_type column exists; add it if missing (upgrade from v1 schema)
-        let has_content_type: bool = self
-            .conn
-            .prepare("SELECT content_type FROM clipboard_items LIMIT 0")
-            .is_ok();
-        if !has_content_type {
-            self.conn.execute_batch(
-                "ALTER TABLE clipboard_items ADD COLUMN content_type TEXT NOT NULL DEFAULT 'text';
-                 CREATE INDEX IF NOT EXISTS idx_content_type ON clipboard_items(content_type);",
-            )?;
+        let version = self.get_schema_version();
+
+        if version < 1 {
+            // v1: Add content_type column (legacy migration)
+            let has_content_type = self
+                .conn
+                .prepare("SELECT content_type FROM clipboard_items LIMIT 0")
+                .is_ok();
+            if !has_content_type {
+                self.conn.execute_batch(
+                    "ALTER TABLE clipboard_items ADD COLUMN content_type TEXT NOT NULL DEFAULT 'text';
+                     CREATE INDEX IF NOT EXISTS idx_content_type ON clipboard_items(content_type);",
+                )?;
+            }
+            self.set_schema_version(1)?;
         }
 
-        // Add sensitive column if missing
-        let has_sensitive: bool = self
-            .conn
-            .prepare("SELECT sensitive FROM clipboard_items LIMIT 0")
-            .is_ok();
-        if !has_sensitive {
-            self.conn.execute_batch(
-                "ALTER TABLE clipboard_items ADD COLUMN sensitive INTEGER NOT NULL DEFAULT 0;",
-            )?;
+        if version < 2 {
+            // v2: Add sensitive column
+            let has_sensitive = self
+                .conn
+                .prepare("SELECT sensitive FROM clipboard_items LIMIT 0")
+                .is_ok();
+            if !has_sensitive {
+                self.conn.execute_batch(
+                    "ALTER TABLE clipboard_items ADD COLUMN sensitive INTEGER NOT NULL DEFAULT 0;",
+                )?;
+            }
+            self.set_schema_version(2)?;
         }
+
+        if version < 3 {
+            // v3: Add plain_text column for HTML search indexing
+            let has_plain_text = self
+                .conn
+                .prepare("SELECT plain_text FROM clipboard_items LIMIT 0")
+                .is_ok();
+            if !has_plain_text {
+                self.conn
+                    .execute_batch("ALTER TABLE clipboard_items ADD COLUMN plain_text TEXT;")?;
+            }
+            self.set_schema_version(3)?;
+        }
+
+        Ok(())
+    }
+
+    fn get_schema_version(&self) -> i64 {
+        let result = self.conn.query_row(
+            "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+            [],
+            |row| row.get(0),
+        );
+        result.unwrap_or_default()
+    }
+
+    fn set_schema_version(&self, version: i64) -> SqlResult<()> {
+        self.conn.execute("DELETE FROM schema_version", [])?;
+        self.conn.execute(
+            "INSERT INTO schema_version (version) VALUES (?1)",
+            [version],
+        )?;
         Ok(())
     }
 
@@ -90,8 +134,8 @@ impl Database {
     pub fn insert_item(&self, item: &ClipboardItem) -> SqlResult<i64> {
         self.conn.execute(
             "INSERT INTO clipboard_items
-                (content_hash, content, mime_type, content_type, timestamp, pinned, source_app, sensitive)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                (content_hash, content, mime_type, content_type, timestamp, pinned, source_app, sensitive, plain_text)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             (
                 item.content_hash.cast_signed(),
                 &item.content,
@@ -101,6 +145,7 @@ impl Database {
                 i32::from(item.pinned),
                 &item.source_app,
                 i32::from(item.sensitive),
+                &item.plain_text,
             ),
         )?;
         Ok(self.conn.last_insert_rowid())
@@ -138,7 +183,7 @@ impl Database {
     /// Get the most recent items, pinned first.
     pub fn get_recent(&self, limit: usize) -> SqlResult<Vec<ClipboardItem>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, content_hash, content, mime_type, content_type, timestamp, pinned, source_app, sensitive
+            "SELECT id, content_hash, content, mime_type, content_type, timestamp, pinned, source_app, sensitive, plain_text
              FROM clipboard_items
              ORDER BY pinned DESC, timestamp DESC
              LIMIT ?1",
@@ -150,9 +195,9 @@ impl Database {
     pub fn search(&self, query: &str, limit: usize) -> SqlResult<Vec<ClipboardItem>> {
         let pattern = format!("%{query}%");
         let mut stmt = self.conn.prepare(
-            "SELECT id, content_hash, content, mime_type, content_type, timestamp, pinned, source_app, sensitive
+            "SELECT id, content_hash, content, mime_type, content_type, timestamp, pinned, source_app, sensitive, plain_text
              FROM clipboard_items
-             WHERE content LIKE ?1
+             WHERE (content LIKE ?1 OR plain_text LIKE ?1)
              ORDER BY pinned DESC, timestamp DESC
              LIMIT ?2",
         )?;
@@ -162,7 +207,7 @@ impl Database {
     /// Get a single item by id.
     pub fn get_by_id(&self, id: i64) -> SqlResult<Option<ClipboardItem>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, content_hash, content, mime_type, content_type, timestamp, pinned, source_app, sensitive
+            "SELECT id, content_hash, content, mime_type, content_type, timestamp, pinned, source_app, sensitive, plain_text
              FROM clipboard_items WHERE id = ?1",
         )?;
         let mut items = stmt.query_map([id], Self::row_to_item)?;
@@ -329,6 +374,7 @@ impl Database {
             pinned: row.get::<_, i32>(6)? != 0,
             source_app: row.get(7)?,
             sensitive: row.get::<_, i32>(8).unwrap_or(0) != 0,
+            plain_text: row.get(9).ok(),
         })
     }
 
@@ -497,5 +543,53 @@ mod tests {
         let symbols = db.get_recently_used("symbol", 10).unwrap();
         assert_eq!(symbols.len(), 1);
         assert_eq!(symbols[0], "→");
+    }
+
+    #[test]
+    fn test_schema_version() {
+        let db = make_db();
+        // After init, version should be 3 (latest)
+        let version = db.get_schema_version();
+        assert_eq!(version, 3);
+    }
+
+    #[test]
+    fn test_html_item() {
+        let db = make_db();
+        let item = ClipboardItem::new_html("<b>Hello</b>".to_string(), "Hello".to_string());
+        let id = db.insert_item(&item).unwrap();
+        let stored = db.get_by_id(id).unwrap().unwrap();
+        assert_eq!(stored.content_type, ContentType::Html);
+        assert_eq!(stored.plain_text, Some("Hello".to_string()));
+        assert_eq!(stored.mime_type, "text/html");
+    }
+
+    #[test]
+    fn test_files_item() {
+        let db = make_db();
+        let item = ClipboardItem::new_files(
+            "file:///home/user/doc.pdf\nfile:///home/user/img.png".to_string(),
+        );
+        let id = db.insert_item(&item).unwrap();
+        let stored = db.get_by_id(id).unwrap().unwrap();
+        assert_eq!(stored.content_type, ContentType::Files);
+        assert_eq!(stored.mime_type, "text/uri-list");
+        let names = stored.file_names();
+        assert_eq!(names, vec!["doc.pdf", "img.png"]);
+    }
+
+    #[test]
+    fn test_search_html_plain_text() {
+        let db = make_db();
+        let item = ClipboardItem::new_html(
+            "<p>Some HTML content</p>".to_string(),
+            "Some HTML content".to_string(),
+        );
+        db.insert_item(&item).unwrap();
+
+        // Should find via plain_text search
+        let results = db.search("HTML content", 10).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].content_type, ContentType::Html);
     }
 }

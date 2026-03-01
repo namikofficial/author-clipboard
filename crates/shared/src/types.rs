@@ -12,6 +12,8 @@ use serde::{Deserialize, Serialize};
 pub enum ContentType {
     Text,
     Image,
+    Html,
+    Files,
 }
 
 impl ContentType {
@@ -19,6 +21,8 @@ impl ContentType {
         match self {
             Self::Text => "text",
             Self::Image => "image",
+            Self::Html => "html",
+            Self::Files => "files",
         }
     }
 }
@@ -29,6 +33,8 @@ impl std::str::FromStr for ContentType {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(match s {
             "image" => Self::Image,
+            "html" => Self::Html,
+            "files" => Self::Files,
             _ => Self::Text,
         })
     }
@@ -55,6 +61,8 @@ pub struct ClipboardItem {
     pub source_app: Option<String>,
     /// Whether this item contains sensitive content
     pub sensitive: bool,
+    /// Plain text representation for search indexing (used for HTML items)
+    pub plain_text: Option<String>,
 }
 
 impl ClipboardItem {
@@ -71,6 +79,7 @@ impl ClipboardItem {
             pinned: false,
             source_app: None,
             sensitive,
+            plain_text: None,
         }
     }
 
@@ -87,6 +96,42 @@ impl ClipboardItem {
             pinned: false,
             source_app: None,
             sensitive: false,
+            plain_text: None,
+        }
+    }
+
+    /// Create a new HTML clipboard item with both HTML content and plain text for search.
+    pub fn new_html(html_content: String, plain_text: String) -> Self {
+        let content_hash = Self::hash_content(&html_content);
+        Self {
+            id: 0,
+            content_hash,
+            content: html_content,
+            mime_type: "text/html".to_string(),
+            content_type: ContentType::Html,
+            timestamp: Utc::now(),
+            pinned: false,
+            source_app: None,
+            sensitive: false,
+            plain_text: Some(plain_text),
+        }
+    }
+
+    /// Create a new file list clipboard item.
+    /// `file_list` is the raw text/uri-list content.
+    pub fn new_files(file_list: String) -> Self {
+        let content_hash = Self::hash_content(&file_list);
+        Self {
+            id: 0,
+            content_hash,
+            content: file_list,
+            mime_type: "text/uri-list".to_string(),
+            content_type: ContentType::Files,
+            timestamp: Utc::now(),
+            pinned: false,
+            source_app: None,
+            sensitive: false,
+            plain_text: None,
         }
     }
 
@@ -107,6 +152,33 @@ impl ClipboardItem {
     /// Whether this is an image item.
     pub fn is_image(&self) -> bool {
         self.content_type == ContentType::Image
+    }
+
+    /// Whether this is an HTML item.
+    pub fn is_html(&self) -> bool {
+        self.content_type == ContentType::Html
+    }
+
+    /// Whether this is a file list item.
+    pub fn is_files(&self) -> bool {
+        self.content_type == ContentType::Files
+    }
+
+    /// Parse file URIs from a text/uri-list content.
+    pub fn file_names(&self) -> Vec<String> {
+        if !self.is_files() {
+            return Vec::new();
+        }
+        self.content
+            .lines()
+            .filter(|l| !l.starts_with('#'))
+            .filter_map(|uri| {
+                let path = uri.strip_prefix("file://").unwrap_or(uri);
+                std::path::Path::new(path)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+            })
+            .collect()
     }
 
     /// Get the full image path given the data directory.

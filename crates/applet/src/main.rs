@@ -224,6 +224,8 @@ impl cosmic::Application for App {
                             &image_store::image_path(&self.config.data_dir, &item.content),
                             &item.mime_type,
                         )
+                    } else if item.is_html() {
+                        set_clipboard_html(&item.content, item.plain_text.as_deref().unwrap_or(""))
                     } else {
                         set_clipboard_text(&item.content)
                     };
@@ -320,6 +322,11 @@ impl cosmic::Application for App {
                                             &item.content,
                                         ),
                                         &item.mime_type,
+                                    )
+                                } else if item.is_html() {
+                                    set_clipboard_html(
+                                        &item.content,
+                                        item.plain_text.as_deref().unwrap_or(""),
                                     )
                                 } else {
                                     set_clipboard_text(&item.content)
@@ -592,6 +599,27 @@ impl App {
             }
             col = col.push(text(format!("🖼️ Image ({})", &item.mime_type)).size(12.0));
             col.push(text(time_ago).size(11.0))
+        } else if item.is_html() {
+            let preview_text = item.plain_text.as_deref().unwrap_or(&item.content);
+            let preview = truncate_content(preview_text, 120);
+            let mut col = column().spacing(2);
+            col = col.push(text(preview).size(13.0));
+            col = col.push(text("📄 HTML content").size(11.0));
+            col.push(text(time_ago).size(11.0))
+        } else if item.is_files() {
+            let names = item.file_names();
+            let file_count = names.len();
+            let preview = if names.is_empty() {
+                "No files".to_string()
+            } else if names.len() <= 3 {
+                names.join(", ")
+            } else {
+                format!("{}, {} and {} more", names[0], names[1], file_count - 2)
+            };
+            let mut col = column().spacing(2);
+            col = col.push(text(preview).size(13.0));
+            col = col.push(text(format!("📁 {file_count} file(s)")).size(11.0));
+            col.push(text(time_ago).size(11.0))
         } else {
             let preview = truncate_content(&item.content, 120);
             let mut col = column().spacing(2).push(text(preview).size(13.0));
@@ -827,6 +855,13 @@ impl App {
             }
         }
 
+        // Keyboard shortcut
+        content = content.push(text("Keyboard").size(16.0));
+        content = content
+            .push(text(format!("⌨️ Shortcut: {}", self.config.keyboard_shortcut)).size(13.0));
+        content = content
+            .push(text("Press the shortcut to quickly open the clipboard picker").size(12.0));
+
         // Info
         content = content.push(text("About").size(16.0));
         content = content.push(text("Author Clipboard v0.1.0").size(13.0));
@@ -910,5 +945,29 @@ fn set_clipboard_image(
     }
 
     child.wait()?;
+    Ok(())
+}
+
+fn set_clipboard_html(html: &str, plain_text: &str) -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    // Set HTML content as the primary type
+    let mut child = Command::new("wl-copy")
+        .args(["--type", "text/html"])
+        .stdin(Stdio::piped())
+        .spawn()?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(html.as_bytes())?;
+    }
+
+    child.wait()?;
+
+    // Also set plain text as fallback (best effort)
+    if !plain_text.is_empty() {
+        let _ = set_clipboard_text(plain_text);
+    }
+
     Ok(())
 }
