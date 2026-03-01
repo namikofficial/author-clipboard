@@ -56,9 +56,9 @@ enum Command {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
-        Command::Toggle => send_ipc(&IpcMessage::Toggle)?,
-        Command::Show => send_ipc(&IpcMessage::Show)?,
-        Command::Hide => send_ipc(&IpcMessage::Hide)?,
+        Command::Toggle => toggle_applet()?,
+        Command::Show => launch_applet()?,
+        Command::Hide => kill_applet()?,
         Command::ShowAt { x, y } => send_ipc(&IpcMessage::ShowAt { x, y })?,
         Command::Ping => {
             match send_ipc(&IpcMessage::Ping) {
@@ -158,5 +158,55 @@ fn send_ipc(message: &IpcMessage) -> Result<()> {
             anyhow::bail!("Failed to send IPC message: {e}");
         }
     }
+    Ok(())
+}
+
+fn is_applet_running() -> bool {
+    std::process::Command::new("pgrep")
+        .args(["-f", "author-clipboard$"])
+        .output()
+        .is_ok_and(|o| o.status.success())
+}
+
+fn toggle_applet() -> Result<()> {
+    if is_applet_running() {
+        kill_applet()
+    } else {
+        launch_applet()
+    }
+}
+
+fn launch_applet() -> Result<()> {
+    if is_applet_running() {
+        println!("Applet already running");
+        return Ok(());
+    }
+    std::process::Command::new("author-clipboard")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .context("Failed to launch applet. Is author-clipboard in PATH?")?;
+    println!("Applet launched");
+    Ok(())
+}
+
+fn kill_applet() -> Result<()> {
+    let output = std::process::Command::new("pgrep")
+        .args(["-f", "author-clipboard$"])
+        .output()
+        .context("Failed to run pgrep")?;
+    if !output.status.success() {
+        println!("Applet not running");
+        return Ok(());
+    }
+    let pids = String::from_utf8_lossy(&output.stdout);
+    for pid in pids.lines() {
+        let pid = pid.trim();
+        if !pid.is_empty() {
+            let _ = std::process::Command::new("kill").arg(pid).output();
+        }
+    }
+    println!("Applet stopped");
     Ok(())
 }
