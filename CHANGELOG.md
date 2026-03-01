@@ -5,7 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
-## [0.2.0] - 2026-03-01
+## [0.3.0] - 2026-03-01
+
+### 🐛 Bug Fixes
+
+- **applet:** scroll follows selection, Enter works
+### 📚 Documentation
+
+- update project plan and README for phases 9-10
+### 🚀 Features
+
+- **applet:** add advanced keyboard navigation
+- **applet:** use COSMIC icons and daemon status## [0.2.0] - 2026-03-01
 
 ### 🐛 Bug Fixes
 
