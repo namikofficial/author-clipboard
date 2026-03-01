@@ -71,6 +71,7 @@ struct App {
     incognito: bool,
     quick_paste_enabled: bool,
     paste_backend: Option<PasteBackend>,
+    visibility_signal_path: std::path::PathBuf,
 }
 
 // ── Messages ──────────────────────────────────────────────────────────
@@ -152,6 +153,7 @@ impl cosmic::Application for App {
             .build();
 
         let incognito = config.is_incognito();
+        let visibility_signal_path = config.data_dir.join(".visibility_toggle");
 
         let mut app = App {
             core,
@@ -168,6 +170,7 @@ impl cosmic::Application for App {
             incognito,
             quick_paste_enabled: false,
             paste_backend: quick_paste::detect_backend(),
+            visibility_signal_path,
         };
 
         let command = app.update_title();
@@ -199,7 +202,7 @@ impl cosmic::Application for App {
         });
 
         let tick =
-            cosmic::iced::time::every(std::time::Duration::from_secs(2)).map(|_| Message::Tick);
+            cosmic::iced::time::every(std::time::Duration::from_millis(500)).map(|_| Message::Tick);
 
         Subscription::batch([keyboard, tick])
     }
@@ -211,8 +214,24 @@ impl cosmic::Application for App {
                 if self.active_tab == AppTab::Clipboard {
                     self.refresh_items();
                 }
+                // Check for visibility toggle signal from daemon
+                if self.visibility_signal_path.exists() {
+                    if let Ok(signal) = std::fs::read_to_string(&self.visibility_signal_path) {
+                        let _ = std::fs::remove_file(&self.visibility_signal_path);
+                        let signal = signal.trim();
+                        match signal {
+                            "toggle" | "show" => {
+                                info!("Received visibility signal: {signal}");
+                                return self.toggle_window_visibility();
+                            }
+                            "hide" => {
+                                info!("Received hide signal");
+                            }
+                            _ => {}
+                        }
+                    }
+                }
             }
-
             Message::TabSelected(entity) => {
                 self.tab_model.activate(entity);
                 if let Some(&tab) = self.tab_model.data::<AppTab>(entity) {
@@ -1071,6 +1090,14 @@ impl App {
             .width(Length::Fill)
             .height(Length::Fill)
             .into()
+    }
+
+    fn toggle_window_visibility(&mut self) -> Task<Message> {
+        // Bring window to front and focus it
+        if let Some(id) = self.core.main_window_id() {
+            return cosmic::iced::window::gain_focus(id);
+        }
+        Task::none()
     }
 
     fn update_title(&mut self) -> Task<Message> {
