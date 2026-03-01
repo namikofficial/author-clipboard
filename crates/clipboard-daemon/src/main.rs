@@ -4,6 +4,7 @@
 //! and stores them in a local `SQLite` database.
 
 use std::os::fd::AsFd;
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use author_clipboard_shared::config::Config;
@@ -70,10 +71,18 @@ impl AppState {
     }
 
     /// Read raw bytes from a clipboard offer via a pipe.
-    fn read_offer_bytes(offer: &ZwlrDataControlOfferV1, mime_type: &str) -> Result<Vec<u8>> {
+    fn read_offer_bytes(
+        offer: &ZwlrDataControlOfferV1,
+        mime_type: &str,
+        conn: &Connection,
+    ) -> Result<Vec<u8>> {
         let (read_fd, write_fd) = rustix::pipe::pipe().context("Failed to create pipe")?;
 
         offer.receive(mime_type.to_string(), write_fd.as_fd());
+
+        // Flush the Wayland connection so the compositor receives the
+        // receive request before we try to read from the pipe.
+        conn.flush().context("Failed to flush Wayland connection")?;
 
         // Close the write end so we get EOF after the compositor writes.
         drop(write_fd);
@@ -87,8 +96,8 @@ impl AppState {
     }
 
     /// Read text content from a clipboard offer via a pipe.
-    fn read_offer_content(offer: &ZwlrDataControlOfferV1) -> Result<String> {
-        let data = Self::read_offer_bytes(offer, "text/plain;charset=utf-8")?;
+    fn read_offer_content(offer: &ZwlrDataControlOfferV1, conn: &Connection) -> Result<String> {
+        let data = Self::read_offer_bytes(offer, "text/plain;charset=utf-8", conn)?;
         String::from_utf8(data).context("Clipboard content is not valid UTF-8")
     }
 }
@@ -153,7 +162,7 @@ impl Dispatch<ZwlrDataControlDeviceV1, ()> for AppState {
         _proxy: &ZwlrDataControlDeviceV1,
         event: zwlr_data_control_device_v1::Event,
         _data: &(),
-        _conn: &Connection,
+        conn: &Connection,
         _qh: &QueueHandle<Self>,
     ) {
         match event {
@@ -191,7 +200,7 @@ impl Dispatch<ZwlrDataControlDeviceV1, ()> for AppState {
 
                     if let Some(mime) = image_mime {
                         // Handle image clipboard
-                        match Self::read_offer_bytes(&offer, &mime) {
+                        match Self::read_offer_bytes(&offer, &mime, conn) {
                             Ok(data) if data.is_empty() => {
                                 debug!("Ignoring empty image clipboard");
                             }
@@ -233,7 +242,7 @@ impl Dispatch<ZwlrDataControlDeviceV1, ()> for AppState {
                         }
                     } else if has_html {
                         // Handle HTML clipboard content
-                        match Self::read_offer_bytes(&offer, "text/html") {
+                        match Self::read_offer_bytes(&offer, "text/html", conn) {
                             Ok(html_data) if html_data.is_empty() => {
                                 debug!("Ignoring empty HTML clipboard");
                             }
@@ -247,7 +256,7 @@ impl Dispatch<ZwlrDataControlDeviceV1, ()> for AppState {
                                 let html_content = String::from_utf8_lossy(&html_data).to_string();
                                 // Also read plain text version for search indexing
                                 let plain_text = if has_text {
-                                    Self::read_offer_content(&offer).unwrap_or_default()
+                                    Self::read_offer_content(&offer, conn).unwrap_or_default()
                                 } else {
                                     String::new()
                                 };
@@ -282,7 +291,7 @@ impl Dispatch<ZwlrDataControlDeviceV1, ()> for AppState {
                         }
                     } else if has_uri_list {
                         // Handle file list clipboard content
-                        match Self::read_offer_bytes(&offer, "text/uri-list") {
+                        match Self::read_offer_bytes(&offer, "text/uri-list", conn) {
                             Ok(data) if data.is_empty() => {
                                 debug!("Ignoring empty file list clipboard");
                             }
@@ -316,7 +325,7 @@ impl Dispatch<ZwlrDataControlDeviceV1, ()> for AppState {
                             Err(e) => warn!("Failed to read file list clipboard: {e}"),
                         }
                     } else if has_text {
-                        match Self::read_offer_content(&offer) {
+                        match Self::read_offer_content(&offer, conn) {
                             Ok(content) => {
                                 let content = content.trim().to_string();
                                 if content.is_empty() {
@@ -381,6 +390,18 @@ impl Dispatch<ZwlrDataControlDeviceV1, ()> for AppState {
                 state.device = None;
             }
             zwlr_data_control_device_v1::Event::PrimarySelection { .. } | _ => {}
+        }
+    }
+
+    fn event_created_child(
+        opcode: u16,
+        qhandle: &QueueHandle<Self>,
+    ) -> Arc<dyn wayland_client::backend::ObjectData> {
+        // Opcode 0 = data_offer event, which creates a ZwlrDataControlOfferV1
+        if opcode == 0 {
+            qhandle.make_data::<ZwlrDataControlOfferV1, _>(())
+        } else {
+            panic!("unknown opcode for event_created_child: {opcode}");
         }
     }
 }
