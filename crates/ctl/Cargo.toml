@@ -1,0 +1,17 @@
+[package]
+name = "author-clipboard-ctl"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "author-clipboard-ctl"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+author-clipboard-shared = { path = "../shared" }
+clap.workspace = true
+anyhow.workspace = true
+serde_json.workspace = true
