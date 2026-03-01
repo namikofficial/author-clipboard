@@ -65,4 +65,4 @@ wayland-protocols-wlr = { version = "0.2", features = ["client"] }
 rustix = { version = "0.38", features = ["pipe"] }
 
 # COSMIC (check for latest version)
-libcosmic = { git = "https://github.com/pop-os/libcosmic.git" }
+libcosmic = { git = "https://github.com/pop-os/libcosmic.git", default-features = false, features = ["winit", "wgpu", "tokio"] }
