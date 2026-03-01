@@ -8,7 +8,9 @@ mod kaomoji;
 mod symbols;
 
 use author_clipboard_shared::config::Config;
+use author_clipboard_shared::file_handler;
 use author_clipboard_shared::image_store;
+use author_clipboard_shared::quick_paste::{self, PasteBackend};
 use author_clipboard_shared::types::{AuditEventKind, ClipboardItem};
 use author_clipboard_shared::Database;
 use cosmic::app::{Core, Settings, Task};
@@ -67,6 +69,8 @@ struct App {
     symbol_category_idx: usize,
     kaomoji_category_idx: usize,
     incognito: bool,
+    quick_paste_enabled: bool,
+    paste_backend: Option<PasteBackend>,
 }
 
 // ── Messages ──────────────────────────────────────────────────────────
@@ -91,6 +95,11 @@ enum Message {
     ToggleIncognito,
     ExportData,
     ImportData,
+    #[allow(dead_code)]
+    QuickPaste(i64),
+    ToggleQuickPaste,
+    #[allow(dead_code)]
+    OpenFileManager(String),
 }
 
 // ── Application trait ─────────────────────────────────────────────────
@@ -157,6 +166,8 @@ impl cosmic::Application for App {
             symbol_category_idx: 0,
             kaomoji_category_idx: 0,
             incognito,
+            quick_paste_enabled: false,
+            paste_backend: quick_paste::detect_backend(),
         };
 
         let command = app.update_title();
@@ -449,6 +460,49 @@ impl cosmic::Application for App {
                     }
                 }
             }
+            Message::QuickPaste(id) => {
+                if let Some(db) = &self.db {
+                    if let Ok(Some(item)) = db.get_by_id(id) {
+                        if item.sensitive && !self.quick_paste_enabled {
+                            warn!(
+                                "⚠️ Quick paste blocked: sensitive content requires confirmation"
+                            );
+                        } else if let Some(backend) = &self.paste_backend {
+                            match quick_paste::quick_paste(&item.content, backend) {
+                                Ok(result) => {
+                                    if result.success {
+                                        info!("⌨️ Quick pasted via {:?}", result.backend_used);
+                                    } else {
+                                        warn!(
+                                            "Quick paste failed: {}",
+                                            result.message.unwrap_or_default()
+                                        );
+                                    }
+                                }
+                                Err(e) => warn!("Quick paste error: {e}"),
+                            }
+                        } else {
+                            warn!("No paste backend available (install wtype or ydotool)");
+                        }
+                    }
+                }
+            }
+            Message::ToggleQuickPaste => {
+                self.quick_paste_enabled = !self.quick_paste_enabled;
+                info!(
+                    "Quick paste: {}",
+                    if self.quick_paste_enabled {
+                        "enabled"
+                    } else {
+                        "disabled"
+                    }
+                );
+            }
+            Message::OpenFileManager(path) => {
+                if let Err(e) = std::process::Command::new("xdg-open").arg(&path).spawn() {
+                    warn!("Failed to open file manager: {e}");
+                }
+            }
         }
 
         Task::none()
@@ -532,6 +586,9 @@ impl cosmic::Application for App {
         let mut status_parts = vec![status_text];
         if self.incognito {
             status_parts.push("🕶️ Incognito".to_string());
+        }
+        if self.quick_paste_enabled {
+            status_parts.push("⌨️ Quick Paste".to_string());
         }
         let full_status = status_parts.join(" • ");
 
@@ -669,17 +726,23 @@ impl App {
             col = col.push(text("📄 HTML content").size(11.0));
             col.push(text(time_ago).size(11.0))
         } else if item.is_files() {
-            let names = item.file_names();
-            let file_count = names.len();
-            let preview = if names.is_empty() {
-                "No files".to_string()
-            } else if names.len() <= 3 {
-                names.join(", ")
-            } else {
-                format!("{}, {} and {} more", names[0], names[1], file_count - 2)
-            };
+            let file_infos = file_handler::parse_uri_list(&item.content);
+            let file_count = file_infos.len();
             let mut col = column().spacing(2);
-            col = col.push(text(preview).size(13.0));
+
+            if file_infos.is_empty() {
+                col = col.push(text("No files").size(13.0));
+            } else {
+                for info in file_infos.iter().take(3) {
+                    let size_str = file_handler::format_file_size(info.size);
+                    let status = if info.exists { "" } else { " ⚠️ missing" };
+                    let file_text = format!("📄 {} ({}){}", info.name, size_str, status);
+                    col = col.push(text(file_text).size(12.0));
+                }
+                if file_count > 3 {
+                    col = col.push(text(format!("  ... and {} more", file_count - 3)).size(11.0));
+                }
+            }
             col = col.push(text(format!("📁 {file_count} file(s)")).size(11.0));
             col.push(text(time_ago).size(11.0))
         } else {
@@ -871,6 +934,7 @@ impl App {
 
     // ── Settings tab view ─────────────────────────────────────────────
 
+    #[allow(clippy::too_many_lines)]
     fn view_settings(&self) -> Element<'_, Message> {
         let mut content = column().spacing(12).width(Length::Fill);
 
@@ -942,6 +1006,37 @@ impl App {
             .push(text(format!("⌨️ Shortcut: {}", self.config.keyboard_shortcut)).size(13.0));
         content = content
             .push(text("Press the shortcut to quickly open the clipboard picker").size(12.0));
+
+        // Quick paste
+        content = content.push(text("Quick Paste").size(16.0));
+        let paste_status = match &self.paste_backend {
+            Some(backend) => format!("✅ Backend: {backend}"),
+            None => "❌ No backend found (install wtype or ydotool)".to_string(),
+        };
+        content = content.push(text(paste_status).size(13.0));
+
+        let qp_label = if self.quick_paste_enabled {
+            "⌨️ Quick Paste: ON — items will be typed directly"
+        } else {
+            "📋 Quick Paste: OFF — items copied to clipboard"
+        };
+        let qp_btn = if self.quick_paste_enabled {
+            widget::button::suggested(qp_label)
+                .on_press(Message::ToggleQuickPaste)
+                .width(Length::Fill)
+                .padding([10, 16])
+        } else {
+            widget::button::text(qp_label)
+                .on_press(Message::ToggleQuickPaste)
+                .width(Length::Fill)
+                .padding([10, 16])
+        };
+        content = content.push(qp_btn);
+        if self.quick_paste_enabled {
+            content = content.push(
+                text("⚠️ Quick paste will type content directly into the focused application. Sensitive items require explicit confirmation.").size(11.0)
+            );
+        }
 
         // Security audit log
         content = content.push(text("Security Log").size(16.0));
