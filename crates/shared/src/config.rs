@@ -13,6 +13,10 @@ pub struct Config {
     pub cleanup_interval_seconds: u64,
     /// Keyboard shortcut to open the clipboard picker (e.g., "Super+V")
     pub keyboard_shortcut: String,
+    /// Whether to encrypt sensitive clipboard items at rest.
+    pub encrypt_sensitive: bool,
+    /// Whether to clear sensitive clipboard items when screen locks.
+    pub clear_on_lock: bool,
 }
 
 impl Default for Config {
@@ -27,6 +31,8 @@ impl Default for Config {
             ttl_seconds: 7 * 24 * 3600,    // 7 days
             cleanup_interval_seconds: 300, // 5 minutes
             keyboard_shortcut: "Super+V".to_string(),
+            encrypt_sensitive: false,
+            clear_on_lock: true,
         }
     }
 }

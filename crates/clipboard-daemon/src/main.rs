@@ -8,7 +8,7 @@ use std::os::fd::AsFd;
 use anyhow::{Context, Result};
 use author_clipboard_shared::config::Config;
 use author_clipboard_shared::image_store;
-use author_clipboard_shared::types::ClipboardItem;
+use author_clipboard_shared::types::{AuditEventKind, ClipboardItem};
 use author_clipboard_shared::Database;
 use tracing::{debug, error, info, warn};
 use wayland_client::protocol::wl_registry;
@@ -337,7 +337,17 @@ impl Dispatch<ZwlrDataControlDeviceV1, ()> for AppState {
                                     let item = ClipboardItem::new_text(content.clone());
 
                                     match state.db.insert_or_bump(&item) {
-                                        Ok(_) => info!("📋 Stored: {preview}"),
+                                        Ok(_) => {
+                                            info!("📋 Stored: {preview}");
+                                            if item.sensitive {
+                                                let _ = state.db.log_audit_event(
+                                                    &AuditEventKind::SensitiveItemDetected,
+                                                    Some(&format!(
+                                                        "Sensitive text item stored ({preview})"
+                                                    )),
+                                                );
+                                            }
+                                        }
                                         Err(e) => warn!("DB insert failed: {e}"),
                                     }
 
@@ -395,6 +405,21 @@ impl Dispatch<ZwlrDataControlOfferV1, ()> for AppState {
 // WlSeat events not needed — just need the object for get_data_device.
 delegate_noop!(AppState: ignore WlSeat);
 
+/// Check if the screen is currently locked via loginctl.
+fn is_screen_locked() -> bool {
+    let output = std::process::Command::new("loginctl")
+        .args(["show-session", "auto", "--property=LockedHint", "--value"])
+        .output();
+
+    match output {
+        Ok(out) => {
+            let value = String::from_utf8_lossy(&out.stdout);
+            value.trim() == "yes"
+        }
+        Err(_) => false,
+    }
+}
+
 fn run() -> Result<()> {
     let config = Config::default();
 
@@ -408,6 +433,35 @@ fn run() -> Result<()> {
     // Ensure image storage directories exist
     image_store::ensure_dirs(&config.data_dir)
         .context("Failed to create image storage directories")?;
+
+    // Spawn screen lock monitor thread
+    let lock_db_path = config.db_path();
+    let clear_on_lock = config.clear_on_lock;
+    std::thread::spawn(move || {
+        let mut was_locked = false;
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(5));
+
+            if !clear_on_lock {
+                continue;
+            }
+
+            let locked = is_screen_locked();
+            if locked && !was_locked {
+                info!("🔒 Screen locked — clearing sensitive items");
+                if let Ok(lock_db) = Database::open(&lock_db_path) {
+                    match lock_db.clear_sensitive() {
+                        Ok(count) if count > 0 => {
+                            info!("Cleared {count} sensitive items on lock");
+                        }
+                        Ok(_) => debug!("No sensitive items to clear"),
+                        Err(e) => warn!("Failed to clear sensitive items: {e}"),
+                    }
+                }
+            }
+            was_locked = locked;
+        }
+    });
 
     let conn = Connection::connect_to_env().context(
         "Failed to connect to Wayland display. \

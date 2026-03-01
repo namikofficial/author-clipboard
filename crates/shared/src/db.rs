@@ -56,7 +56,15 @@ impl Database {
 
             CREATE TABLE IF NOT EXISTS schema_version (
                 version INTEGER NOT NULL
-            );",
+            );
+
+            CREATE TABLE IF NOT EXISTS audit_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_kind TEXT NOT NULL,
+                details TEXT,
+                timestamp TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp DESC);",
         )?;
         Ok(())
     }
@@ -261,6 +269,15 @@ impl Database {
         Ok(affected)
     }
 
+    /// Delete all non-pinned sensitive items (used on screen lock).
+    pub fn clear_sensitive(&self) -> SqlResult<usize> {
+        let affected = self.conn.execute(
+            "DELETE FROM clipboard_items WHERE pinned = 0 AND sensitive = 1",
+            [],
+        )?;
+        Ok(affected)
+    }
+
     /// Delete all items (including pinned).
     pub fn clear_all(&self) -> SqlResult<usize> {
         let affected = self.conn.execute("DELETE FROM clipboard_items", [])?;
@@ -355,6 +372,49 @@ impl Database {
             .query_map(rusqlite::params![category, limit], |row| row.get(0))?
             .collect::<SqlResult<Vec<String>>>()?;
         Ok(items)
+    }
+
+    // ── Audit Log ─────────────────────────────────────────────────────
+
+    /// Record a security audit event.
+    pub fn log_audit_event(
+        &self,
+        kind: &crate::types::AuditEventKind,
+        details: Option<&str>,
+    ) -> SqlResult<()> {
+        self.conn.execute(
+            "INSERT INTO audit_log (event_kind, details, timestamp) VALUES (?1, ?2, ?3)",
+            rusqlite::params![kind.as_str(), details, chrono::Utc::now().to_rfc3339()],
+        )?;
+        Ok(())
+    }
+
+    /// Get recent audit events.
+    pub fn get_audit_log(&self, limit: usize) -> SqlResult<Vec<crate::types::AuditEvent>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, event_kind, details, timestamp FROM audit_log ORDER BY timestamp DESC LIMIT ?1",
+        )?;
+        let events = stmt
+            .query_map([limit], |row| {
+                Ok(crate::types::AuditEvent {
+                    id: row.get(0)?,
+                    event_kind: row.get(1)?,
+                    details: row.get(2)?,
+                    timestamp: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(3)?)
+                        .map_or_else(|_| chrono::Utc::now(), |dt| dt.with_timezone(&chrono::Utc)),
+                })
+            })?
+            .collect::<SqlResult<Vec<_>>>()?;
+        Ok(events)
+    }
+
+    /// Clear old audit log entries (keep last N).
+    pub fn trim_audit_log(&self, keep: usize) -> SqlResult<usize> {
+        let affected = self.conn.execute(
+            "DELETE FROM audit_log WHERE id NOT IN (SELECT id FROM audit_log ORDER BY timestamp DESC LIMIT ?1)",
+            [keep],
+        )?;
+        Ok(affected)
     }
 
     // ── Helpers ────────────────────────────────────────────────────────
@@ -543,6 +603,59 @@ mod tests {
         let symbols = db.get_recently_used("symbol", 10).unwrap();
         assert_eq!(symbols.len(), 1);
         assert_eq!(symbols[0], "→");
+    }
+
+    #[test]
+    fn test_clear_sensitive() {
+        let db = make_db();
+        // Regular item
+        db.insert_item(&ClipboardItem::new_text("normal text".to_string()))
+            .unwrap();
+        // Sensitive item
+        let mut sensitive = ClipboardItem::new_text("not actually sensitive".to_string());
+        sensitive.sensitive = true;
+        db.insert_item(&sensitive).unwrap();
+        // Pinned sensitive item (should NOT be cleared)
+        let mut pinned_sensitive = ClipboardItem::new_text("pinned secret".to_string());
+        pinned_sensitive.sensitive = true;
+        let pinned_id = db.insert_item(&pinned_sensitive).unwrap();
+        db.set_pinned(pinned_id, true).unwrap();
+
+        assert_eq!(db.get_recent(10).unwrap().len(), 3);
+
+        let cleared = db.clear_sensitive().unwrap();
+        assert_eq!(cleared, 1); // Only the unpinned sensitive item
+
+        let remaining = db.get_recent(10).unwrap();
+        assert_eq!(remaining.len(), 2); // normal + pinned sensitive
+    }
+
+    #[test]
+    fn test_audit_log() {
+        use crate::types::AuditEventKind;
+        let db = make_db();
+        db.log_audit_event(&AuditEventKind::IncognitoToggled, Some("enabled"))
+            .unwrap();
+        db.log_audit_event(&AuditEventKind::HistoryCleared, None)
+            .unwrap();
+
+        let events = db.get_audit_log(10).unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].event_kind, "history_cleared");
+        assert_eq!(events[1].event_kind, "incognito_toggled");
+    }
+
+    #[test]
+    fn test_trim_audit_log() {
+        use crate::types::AuditEventKind;
+        let db = make_db();
+        for _ in 0..10 {
+            db.log_audit_event(&AuditEventKind::ItemDeleted, None)
+                .unwrap();
+        }
+        let trimmed = db.trim_audit_log(5).unwrap();
+        assert_eq!(trimmed, 5);
+        assert_eq!(db.get_audit_log(100).unwrap().len(), 5);
     }
 
     #[test]

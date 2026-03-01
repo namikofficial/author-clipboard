@@ -15,3 +15,9 @@ thiserror.workspace = true
 directories.workspace = true
 tracing.workspace = true
 image.workspace = true
+aes-gcm.workspace = true
+rand.workspace = true
+base64.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

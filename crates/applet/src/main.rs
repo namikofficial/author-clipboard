@@ -9,7 +9,7 @@ mod symbols;
 
 use author_clipboard_shared::config::Config;
 use author_clipboard_shared::image_store;
-use author_clipboard_shared::types::ClipboardItem;
+use author_clipboard_shared::types::{AuditEventKind, ClipboardItem};
 use author_clipboard_shared::Database;
 use cosmic::app::{Core, Settings, Task};
 use cosmic::iced::alignment::Horizontal;
@@ -272,6 +272,11 @@ impl cosmic::Application for App {
                 if let Some(db) = &self.db {
                     if let Err(e) = db.delete_item(id) {
                         warn!("Failed to delete item: {e}");
+                    } else {
+                        let _ = db.log_audit_event(
+                            &AuditEventKind::ItemDeleted,
+                            Some(&format!("Item {id} deleted")),
+                        );
                     }
                     self.refresh_items();
                 }
@@ -281,6 +286,8 @@ impl cosmic::Application for App {
                 if let Some(db) = &self.db {
                     if let Err(e) = db.clear_unpinned() {
                         warn!("Failed to clear items: {e}");
+                    } else {
+                        let _ = db.log_audit_event(&AuditEventKind::HistoryCleared, None);
                     }
                     self.refresh_items();
                 }
@@ -383,6 +390,12 @@ impl cosmic::Application for App {
                             "🕶️  Incognito mode {}",
                             if state { "enabled" } else { "disabled" }
                         );
+                        if let Some(db) = &self.db {
+                            let _ = db.log_audit_event(
+                                &AuditEventKind::IncognitoToggled,
+                                Some(if state { "enabled" } else { "disabled" }),
+                            );
+                        }
                     }
                     Err(e) => warn!("Failed to toggle incognito: {e}"),
                 }
@@ -861,6 +874,27 @@ impl App {
             .push(text(format!("⌨️ Shortcut: {}", self.config.keyboard_shortcut)).size(13.0));
         content = content
             .push(text("Press the shortcut to quickly open the clipboard picker").size(12.0));
+
+        // Security audit log
+        content = content.push(text("Security Log").size(16.0));
+        if let Some(db) = &self.db {
+            if let Ok(events) = db.get_audit_log(10) {
+                if events.is_empty() {
+                    content = content.push(text("No security events recorded").size(12.0));
+                } else {
+                    for event in &events {
+                        let time = crate::format_time_ago(event.timestamp);
+                        let detail = event.details.as_deref().unwrap_or("");
+                        let line = if detail.is_empty() {
+                            format!("• {} — {time}", event.event_kind)
+                        } else {
+                            format!("• {} — {detail} ({time})", event.event_kind)
+                        };
+                        content = content.push(text(line).size(12.0));
+                    }
+                }
+            }
+        }
 
         // Info
         content = content.push(text("About").size(16.0));

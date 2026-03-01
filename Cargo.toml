@@ -69,3 +69,8 @@ libcosmic = { git = "https://github.com/pop-os/libcosmic.git", default-features 
 
 # Image processing
 image = "0.25"
+
+# Encryption
+aes-gcm = "0.10"
+rand = "0.8"
+base64 = "0.22"

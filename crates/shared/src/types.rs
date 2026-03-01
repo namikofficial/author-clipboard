@@ -207,3 +207,51 @@ pub struct DbStats {
     pub pinned_items: usize,
     pub total_size_bytes: u64,
 }
+
+/// Security audit event types
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AuditEventKind {
+    /// A sensitive item was detected and stored
+    SensitiveItemDetected,
+    /// Incognito mode was toggled
+    IncognitoToggled,
+    /// Clipboard history was cleared
+    HistoryCleared,
+    /// Data was exported
+    DataExported,
+    /// Data was imported
+    DataImported,
+    /// An item was deleted
+    ItemDeleted,
+    /// Sensitive items were auto-cleared (e.g., on screen lock)
+    SensitiveItemsCleared,
+}
+
+impl AuditEventKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::SensitiveItemDetected => "sensitive_item_detected",
+            Self::IncognitoToggled => "incognito_toggled",
+            Self::HistoryCleared => "history_cleared",
+            Self::DataExported => "data_exported",
+            Self::DataImported => "data_imported",
+            Self::ItemDeleted => "item_deleted",
+            Self::SensitiveItemsCleared => "sensitive_items_cleared",
+        }
+    }
+}
+
+impl std::fmt::Display for AuditEventKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// A recorded audit event
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuditEvent {
+    pub id: i64,
+    pub event_kind: String,
+    pub details: Option<String>,
+    pub timestamp: DateTime<Utc>,
+}
