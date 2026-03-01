@@ -275,6 +275,21 @@ enum SecurityLevel {
 - Screen lock clears sensitive items
 - Security audit passes review
 
+
+### Phase 8: Production Tooling ✅ **COMPLETE**
+**Goal:** CLI control tool, config file support, and graceful shutdown
+
+#### Deliverables
+- [x] CLI control tool (`author-clipboard-ctl`) with IPC subcommands
+- [x] JSON config file load/save (`~/.config/author-clipboard/config.json`)
+- [x] Graceful daemon shutdown with IPC socket cleanup
+- [x] `--help` and `--version` CLI arguments for daemon
+- [x] Rustdoc comments on all public shared API items
+
+#### Success Criteria
+- CLI tool can toggle/show/hide/ping daemon via IPC
+- Config file persists across restarts
+- Daemon cleans up socket on exit
 ---
 
 ## 🏗️ Technical Architecture
