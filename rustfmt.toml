@@ -1,0 +1,22 @@
+# Rust formatting configuration (equivalent to Prettier in Node.js)
+# Docs: https://rust-lang.github.io/rustfmt/
+
+# Use the 2021 edition style
+edition = "2021"
+
+# Max line width
+max_width = 100
+
+# Use block indent
+tab_spaces = 4
+
+# Imports
+reorder_imports = true
+reorder_modules = true
+
+# Formatting
+use_field_init_shorthand = true
+use_try_shorthand = true
+
+# Consistent newlines
+newline_style = "Unix"

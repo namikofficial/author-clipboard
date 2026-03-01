@@ -7,6 +7,9 @@ edition.workspace = true
 name = "author-clipboard-daemon"
 path = "src/main.rs"
 
+[lints]
+workspace = true
+
 [dependencies]
 author-clipboard-shared = { path = "../shared" }
 tokio.workspace = true
@@ -16,3 +19,4 @@ anyhow.workspace = true
 wayland-client.workspace = true
 wayland-protocols.workspace = true
 wayland-protocols-wlr.workspace = true
+rustix.workspace = true

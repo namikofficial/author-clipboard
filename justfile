@@ -6,6 +6,8 @@
 default:
     @just --list
 
+# ── Build ──────────────────────────────────────────────────────────────
+
 # Build all crates
 build:
     cargo build
@@ -16,39 +18,47 @@ build-release:
 
 # Run quick checks without full compilation
 check:
-    cargo check
+    cargo check --all-targets
+
+# ── Code Quality ───────────────
 
 # Format all code
 fmt:
-    cargo fmt
+    cargo fmt --all
+
+# Check formatting without changes
+fmt-check:
+    cargo fmt --all -- --check
 
 # Run clippy linter
 lint:
-    cargo clippy -- -D warnings
+    cargo clippy --all-targets --all-features -- -D warnings
 
-# Run clippy with fixes
+# Run clippy with auto-fix
 lint-fix:
-    cargo clippy --fix
+    cargo clippy --all-targets --all-features --fix --allow-dirty --allow-staged
+
+# ── Testing ────────────────────────────────────────────────────────────
 
 # Run all tests
 test:
-    cargo test
+    cargo test --all
 
-# Clean build artifacts
-clean:
-    cargo clean
+# Run tests with output
+test-verbose:
+    cargo test --all -- --nocapture
 
-# Update dependencies
-update:
-    cargo update
+# ── Full Verification ──────────────────────────────────────────────────
 
-# Generate and open documentation
-docs:
-    cargo doc --open
+# Full development check (format, lint, test, build)
+verify: fmt-check lint test build
+    @echo "✅ All checks passed!"
 
-# Development mode - watch for changes and rebuild
-dev:
-    cargo watch -x check
+# Format + fix lints, then verify
+fix: fmt lint-fix
+    @echo "✅ Auto-fixes applied. Run 'just verify' to confirm."
+
+# ── Run ────────────────────────────────────────────────────────────────
 
 # Run the clipboard daemon
 daemon:
@@ -62,25 +72,47 @@ applet:
 daemon-bg:
     cargo run -p author-clipboard-daemon &
 
-# Full development check (format, lint, test, build)
-verify: fmt lint test build
-    @echo "✅ All checks passed!"
+# Development mode - watch for changes and rebuild
+dev:
+    cargo watch -x check
 
-# Setup development environment
-setup:
+# ── Maintenance ────────────────────────────────────────────────────────
+
+# Clean build artifacts
+clean:
+    cargo clean
+
+# Update dependencies
+update:
+    cargo update
+
+# Clean slate - remove all build artifacts and lock files
+reset: clean
+    rm -f Cargo.lock
+
+# Generate and open documentation
+docs:
+    cargo doc --open
+
+# Quick development cycle
+quick: check test
+    @echo "⚡ Quick check complete!"
+
+# ── Setup ──────────────────────────────────────────────────────────────
+
+# Setup development environment (first-time)
+setup: setup-hooks
     @echo "🔧 Setting up author-clipboard development environment..."
     rustup component add rustfmt clippy rust-analyzer
     @echo "📋 Installing additional tools..."
     cargo install cargo-watch
     @echo "✅ Development environment ready!"
 
-# Clean slate - remove all build artifacts and lock files
-reset: clean
-    rm -f Cargo.lock
-
-# Quick development cycle
-quick: check test
-    @echo "⚡ Quick check complete!"
+# Install git hooks (conventional commits + pre-commit checks)
+setup-hooks:
+    @echo "🪝 Installing git hooks..."
+    git config core.hooksPath .githooks
+    @echo "✅ Git hooks installed (pre-commit: fmt+clippy, commit-msg: conventional commits)"
 
 # Install system dependencies (Ubuntu/Debian)
 install-deps:
@@ -100,12 +132,21 @@ install-deps:
 # Check for potential issues
 doctor:
     @echo "🩺 Running project health check..."
-    @echo "Rust version:"
+    @echo ""
+    @echo "── Toolchain ──"
     @rustc --version
-    @echo "Cargo version:" 
     @cargo --version
-    @echo "Checking Wayland support..."
-    @which wl-copy || echo "❌ wl-clipboard not found - install with: sudo apt install wl-clipboard"
-    @echo "Checking workspace structure..."
-    @ls -la crates/
+    @echo ""
+    @echo "── Components ──"
+    @rustup component list --installed | grep -E "(rustfmt|clippy|rust-analyzer)" || echo "❌ Missing components - run: just setup"
+    @echo ""
+    @echo "── Git Hooks ──"
+    @git config core.hooksPath && echo "✅ Git hooks configured" || echo "❌ Git hooks not installed - run: just setup-hooks"
+    @echo ""
+    @echo "── Wayland ──"
+    @which wl-copy > /dev/null 2>&1 && echo "✅ wl-clipboard found" || echo "❌ wl-clipboard not found - run: just install-deps"
+    @echo ""
+    @echo "── Workspace ──"
+    @ls crates/
+    @echo ""
     @echo "✅ Health check complete!"

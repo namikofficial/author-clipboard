@@ -12,8 +12,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         let data_dir = ProjectDirs::from("com", "namik", "author-clipboard")
-            .map(|dirs| dirs.data_dir().to_path_buf())
-            .unwrap_or_else(|| PathBuf::from("."));
+            .map_or_else(|| PathBuf::from("."), |dirs| dirs.data_dir().to_path_buf());
 
         Self {
             max_items: 100,
