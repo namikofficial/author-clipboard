@@ -109,6 +109,11 @@ enum Message {
     NextTab,
     PreviousTab,
     QuickSelect(usize),
+    DeleteSelected,
+    SelectFirst,
+    SelectLast,
+    PageDown,
+    PageUp,
 }
 
 // ── Application trait ─────────────────────────────────────────────────
@@ -210,6 +215,11 @@ impl cosmic::Application for App {
             Key::Named(iced::keyboard::key::Named::ArrowDown) => Some(Message::SelectNext),
             Key::Named(iced::keyboard::key::Named::ArrowUp) => Some(Message::SelectPrevious),
             Key::Named(iced::keyboard::key::Named::Enter) => Some(Message::CopySelected),
+            Key::Named(iced::keyboard::key::Named::Home) => Some(Message::SelectFirst),
+            Key::Named(iced::keyboard::key::Named::End) => Some(Message::SelectLast),
+            Key::Named(iced::keyboard::key::Named::PageDown) => Some(Message::PageDown),
+            Key::Named(iced::keyboard::key::Named::PageUp) => Some(Message::PageUp),
+            Key::Named(iced::keyboard::key::Named::Delete) => Some(Message::DeleteSelected),
             Key::Named(iced::keyboard::key::Named::Tab) if modifiers.control() => {
                 if modifiers.shift() {
                     Some(Message::PreviousTab)
@@ -226,6 +236,7 @@ impl cosmic::Application for App {
             Key::Character("7") if modifiers.control() => Some(Message::QuickSelect(6)),
             Key::Character("8") if modifiers.control() => Some(Message::QuickSelect(7)),
             Key::Character("9") if modifiers.control() => Some(Message::QuickSelect(8)),
+            Key::Character("d") if modifiers.control() => Some(Message::DeleteSelected),
             _ => None,
         });
 
@@ -511,6 +522,70 @@ impl cosmic::Application for App {
                     return self.copy_selected_item();
                 }
             }
+
+            Message::DeleteSelected => {
+                if self.active_tab == AppTab::Clipboard {
+                    if let Some(index) = self.selected_index {
+                        if let Some(item) = self.items.get(index) {
+                            let id = item.id;
+                            if let Some(db) = &self.db {
+                                if let Err(e) = db.delete_item(id) {
+                                    warn!("Failed to delete item: {e}");
+                                } else {
+                                    let _ = db.log_audit_event(
+                                        &AuditEventKind::ItemDeleted,
+                                        Some(&format!("Item {id} deleted via keyboard")),
+                                    );
+                                }
+                                self.refresh_items();
+                                // Adjust selection if needed
+                                let len = self.items.len();
+                                if len == 0 {
+                                    self.selected_index = None;
+                                } else if index >= len {
+                                    self.selected_index = Some(len - 1);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Message::SelectFirst => {
+                let len = self.visible_item_count();
+                if len > 0 {
+                    self.selected_index = Some(0);
+                }
+                return self.scroll_to_selected();
+            }
+
+            Message::SelectLast => {
+                let len = self.visible_item_count();
+                if len > 0 {
+                    self.selected_index = Some(len - 1);
+                }
+                return self.scroll_to_selected();
+            }
+
+            Message::PageDown => {
+                let len = self.visible_item_count();
+                if len > 0 {
+                    let page_size = 10;
+                    let current = self.selected_index.unwrap_or(0);
+                    self.selected_index = Some((current + page_size).min(len - 1));
+                }
+                return self.scroll_to_selected();
+            }
+
+            Message::PageUp => {
+                let len = self.visible_item_count();
+                if len > 0 {
+                    let page_size = 10;
+                    let current = self.selected_index.unwrap_or(0);
+                    self.selected_index = Some(current.saturating_sub(page_size));
+                }
+                return self.scroll_to_selected();
+            }
         }
 
         Task::none()
@@ -620,7 +695,7 @@ impl cosmic::Application for App {
         }
         let full_status = status_parts.join(" · ");
 
-        let hints = "↑↓ Nav · Enter Paste · Esc Close · Ctrl+N Quick · Ctrl+Tab";
+        let hints = "↑↓ Nav · PgUp/Dn · Home/End · Enter Paste · Del Remove · Esc Close";
 
         let status_bar = container(
             row()
@@ -1212,7 +1287,7 @@ impl App {
 
         // Info
         content = content.push(text("About").size(16.0));
-        content = content.push(text("Author Clipboard v0.2.0").size(13.0));
+        content = content.push(text("Author Clipboard v0.3.0").size(13.0));
         content =
             content.push(text("COSMIC clipboard manager with emoji & symbol pickers").size(12.0));
         content =
