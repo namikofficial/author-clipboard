@@ -5,16 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
-## [Unreleased]
+## [0.2.0] - 2026-03-01
 
 ### 🐛 Bug Fixes
 
+- **applet:** escape closes, click pastes, keyboard nav works
+- **daemon:** fix Wayland clipboard capture crash and hang
 - **pre-commit:** improve comments and streamline staged file checks
 - update repository URL to use the official GitHub account
 ### 📚 Documentation
 
 - **development:** dev guide with tooling and workflow details
 - **shared:** add rustdoc comments to public API
+- update README with applet usage and install instructions
+- add Super+V keyboard shortcut setup instructions
+- mark Phase 8 as complete in project plan
+- regenerate changelog from git history
+- update README with current features and CLI reference
 - 📋 mark Phase 2 and Phase 5 as complete
 - update documentation references and remove outdated README
 - enhance local testing guide with steps & troubleshooting tips
@@ -22,12 +29,18 @@ and this project adheres to [Conventional Commits](https://www.conventionalcommi
 ### 📦 Dependencies
 
 - **deps:** update libcosmic and add chrono to applet workspace
+### 🔧 Refactoring
+
+- **applet:** remove signal-file visibility toggle
 ### 🔨 Miscellaneous
 
 - update Cargo.lock for clap dependency
 - add clap dependency and ctl crate to workspace
 ### 🚀 Features
 
+- **applet:** toggle functionality for applet launch and termination
+- **applet:** add window visibility toggle functionality
+- **applet:** add visibility toggle via daemon signal file
 - **applet:** ⌨️ add quick paste UI and enhanced file display
 - **applet:** implement initial application structure and UI components
 - **clipboard-daemon:** integrate database and config for history state
