@@ -1,6 +1,6 @@
 [Unit]
 Description=Author Clipboard Daemon - Clipboard history monitor
-Documentation=https://github.com/namik/author-clipboard
+Documentation=https://github.com/namikofficial/author-clipboard
 After=graphical-session.target
 PartOf=graphical-session.target
 

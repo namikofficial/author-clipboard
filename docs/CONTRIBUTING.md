@@ -14,7 +14,7 @@ Thank you for your interest in contributing to author-clipboard! This guide will
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/namik/author-clipboard
+git clone https://github.com/namikofficial/author-clipboard
 cd author-clipboard
 
 # 2. Install system dependencies (Ubuntu/Debian)

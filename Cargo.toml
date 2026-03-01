@@ -11,7 +11,7 @@ version = "0.1.0"
 edition = "2021"
 license = "GPL-3.0"
 authors = ["Namik"]
-repository = "https://github.com/namik/author-clipboard"
+repository = "https://github.com/namikofficial/author-clipboard"
 
 # Clippy lint configuration (equivalent to ESLint in Node.js)
 [workspace.lints.clippy]

@@ -14,7 +14,7 @@ and this project adheres to [Conventional Commits](https://www.conventionalcommi
 """
 body = """
 {%- macro remote_url() -%}
-  https://github.com/namik/author-clipboard
+  https://github.com/namikofficial/author-clipboard
 {%- endmacro -%}
 
 {% if version -%}

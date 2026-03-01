@@ -41,7 +41,7 @@ The missing productivity tool for COSMIC desktop users. A beautiful, fast, nativ
 
 1. **Clone and setup:**
    ```bash
-   git clone https://github.com/namik/author-clipboard
+   git clone https://github.com/namikofficial/author-clipboard
    cd author-clipboard
    just setup  # Install dev tools and dependencies
    ```
