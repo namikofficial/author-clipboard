@@ -85,7 +85,6 @@ enum Message {
     TogglePin(i64),
     DeleteItem(i64),
     ClearAll,
-    SelectItem(usize),
     SelectNext,
     SelectPrevious,
     CopySelected,
@@ -170,19 +169,23 @@ impl cosmic::Application for App {
             paste_backend: quick_paste::detect_backend(),
         };
 
-        let command = app.update_title();
+        let command = Task::batch([
+            app.update_title(),
+            cosmic::widget::text_input::focus(SEARCH_INPUT_ID()),
+        ]);
 
         (app, command)
     }
 
     fn on_escape(&mut self) -> Task<Self::Message> {
-        if !self.search_query.is_empty() {
-            self.search_query.clear();
-            if self.active_tab == AppTab::Clipboard {
-                self.refresh_items();
-            }
-            self.selected_index = None;
+        if self.search_query.is_empty() {
+            std::process::exit(0);
         }
+        self.search_query.clear();
+        if self.active_tab == AppTab::Clipboard {
+            self.refresh_items();
+        }
+        self.selected_index = None;
         Task::none()
     }
 
@@ -242,7 +245,10 @@ impl cosmic::Application for App {
                         set_clipboard_text(&item.content)
                     };
                     match result {
-                        Ok(()) => info!("Copied item {} to clipboard", id),
+                        Ok(()) => {
+                            info!("Copied item {} to clipboard", id);
+                            std::process::exit(0);
+                        }
                         Err(e) => warn!("Failed to set clipboard: {e}"),
                     }
                 }
@@ -266,6 +272,7 @@ impl cosmic::Application for App {
                                 }
                             }
                         }
+                        std::process::exit(0);
                     }
                     Err(e) => warn!("Failed to copy: {e}"),
                 }
@@ -305,10 +312,6 @@ impl cosmic::Application for App {
                 }
             }
 
-            Message::SelectItem(index) => {
-                self.selected_index = Some(index);
-            }
-
             Message::SelectNext => {
                 let len = self.visible_item_count();
                 if len > 0 {
@@ -331,6 +334,7 @@ impl cosmic::Application for App {
 
             Message::CopySelected => {
                 if let Some(index) = self.selected_index {
+                    let mut copied = false;
                     match self.active_tab {
                         AppTab::Clipboard => {
                             if let Some(item) = self.items.get(index) {
@@ -350,30 +354,40 @@ impl cosmic::Application for App {
                                 } else {
                                     set_clipboard_text(&item.content)
                                 };
-                                if let Err(e) = result {
-                                    warn!("Failed to copy: {e}");
+                                match result {
+                                    Ok(()) => copied = true,
+                                    Err(e) => warn!("Failed to copy: {e}"),
                                 }
                             }
                         }
                         AppTab::Emoji => {
                             let emojis = self.filtered_emojis();
                             if let Some(&e) = emojis.get(index) {
-                                let _ = set_clipboard_text(e);
+                                if set_clipboard_text(e).is_ok() {
+                                    copied = true;
+                                }
                             }
                         }
                         AppTab::Symbols => {
                             let syms = self.filtered_symbols();
                             if let Some(&(s, _)) = syms.get(index) {
-                                let _ = set_clipboard_text(s);
+                                if set_clipboard_text(s).is_ok() {
+                                    copied = true;
+                                }
                             }
                         }
                         AppTab::Kaomoji => {
                             let items = self.filtered_kaomoji();
                             if let Some(&k) = items.get(index) {
-                                let _ = set_clipboard_text(k);
+                                if set_clipboard_text(k).is_ok() {
+                                    copied = true;
+                                }
                             }
                         }
                         AppTab::Settings => {}
+                    }
+                    if copied {
+                        std::process::exit(0);
                     }
                 }
             }
@@ -760,14 +774,31 @@ impl App {
             .push(delete_btn)
             .align_y(iced::Alignment::Center);
 
+        let is_selected = self.selected_index == Some(index);
+
         let item_btn = widget::button::custom(row_content)
             .width(Length::Fill)
             .padding([8, 8])
             .on_press(Message::CopyItem(item.id));
 
-        widget::mouse_area(item_btn)
-            .on_press(Message::SelectItem(index))
-            .into()
+        if is_selected {
+            container(item_btn)
+                .style(|theme| {
+                    let cosmic = theme.cosmic();
+                    let [r, g, b, a] = cosmic.accent.base.into();
+                    cosmic::iced_widget::container::Style {
+                        background: Some(cosmic::iced::Color::from_rgba(r, g, b, a * 0.3).into()),
+                        border: cosmic::iced::Border {
+                            radius: 8.0.into(),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    }
+                })
+                .into()
+        } else {
+            item_btn.into()
+        }
     }
 
     // ── Emoji tab view ────────────────────────────────────────────────
