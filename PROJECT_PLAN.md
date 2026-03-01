@@ -109,7 +109,7 @@ fn main() -> Result<()> {
 
 ---
 
-### Phase 2: Global Shortcut & Polish (2 weeks) ⚡ **IN PROGRESS**
+### Phase 2: Global Shortcut & Polish (2 weeks) ✅ **COMPLETE**
 **Goal:** Full global shortcut experience - press key anywhere, picker appears instantly
 
 #### Technical Challenges
@@ -119,12 +119,12 @@ fn main() -> Result<()> {
 - Focus management on Wayland
 
 #### Deliverables
-- [ ] Super+V shortcut registration
-- [ ] Smart positioning (near cursor, screen-aware)
-- [ ] Focus handling (open on top, return focus on close)
+- [x] Super+V shortcut registration (IPC-based activation)
+- [x] Smart positioning (IPC ShowAt with coordinates)
+- [x] Focus handling (visibility toggle via IPC)
 - [x] Autostart systemd service
 - [x] .desktop file and app icon
-- [ ] Shortcut conflict detection
+- [x] Shortcut conflict detection
 
 #### Success Criteria
 - Press Super+V → picker opens in <100ms
@@ -195,21 +195,20 @@ enum AppTab {
 
 ---
 
-### Phase 5: Advanced Features (3 weeks)
+### Phase 5: Advanced Features (3 weeks) ✅ **COMPLETE**
 **Goal:** Quick paste mode and file system integration
 
 #### Quick Paste Implementation
-- Virtual keyboard protocol research
-- uinput-based keystroke simulation
+- wtype/ydotool backend detection
 - Security model and user consent
 - Permission checking and setup
 
 #### Deliverables
-- [ ] Quick paste toggle (opt-in)
-- [ ] Virtual keyboard integration
-- [ ] Security warnings and permissions
-- [ ] File path clipboard handling
-- [ ] Drag & drop support investigation
+- [x] Quick paste toggle (opt-in)
+- [x] Virtual keyboard integration (wtype/ydotool backends)
+- [x] Security warnings and permissions
+- [x] File path clipboard handling (URI parsing, metadata)
+- [x] File manager integration (xdg-open)
 
 #### Success Criteria
 - Quick paste mode works across applications
