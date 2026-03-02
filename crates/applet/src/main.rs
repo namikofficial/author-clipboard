@@ -1309,9 +1309,23 @@ impl App {
         content = content.push(qp_btn);
         if self.quick_paste_enabled {
             content = content.push(
-                text("⚠️ Quick paste will type content directly into the focused application. Sensitive items require explicit confirmation.").size(11.0)
+                text("Quick paste will type content directly into the focused application. Sensitive items require explicit confirmation.").size(11.0)
             );
         }
+
+        // Configuration
+        content = content.push(text("Configuration").size(16.0));
+        content =
+            content.push(text(format!("Max history: {} items", self.config.max_items)).size(13.0));
+        #[allow(clippy::cast_precision_loss)]
+        let ttl_days = self.config.ttl_seconds as f64 / 86400.0;
+        content = content
+            .push(text(format!("Auto-expire: {ttl_days:.0} days (unpinned items)")).size(13.0));
+        #[allow(clippy::cast_precision_loss)]
+        let max_kb = self.config.max_item_size as f64 / 1024.0;
+        content = content.push(text(format!("Max item size: {max_kb:.0} KB")).size(13.0));
+        content = content
+            .push(text(format!("Config file: {}", Config::config_path().display())).size(11.0));
 
         // Security audit log
         content = content.push(text("Security Log").size(16.0));
@@ -1337,10 +1351,13 @@ impl App {
         // Info
         content = content.push(text("About").size(16.0));
         content = content.push(text("Author Clipboard v0.3.0").size(13.0));
-        content =
-            content.push(text("COSMIC clipboard manager with emoji & symbol pickers").size(12.0));
+        content = content
+            .push(text("COSMIC clipboard manager with emoji, symbol & kaomoji pickers").size(12.0));
         content =
             content.push(text(format!("Data: {}", self.config.data_dir.display())).size(12.0));
+        content = content.push(text("License: GPL-3.0").size(12.0));
+        content =
+            content.push(text("https://github.com/namikofficial/author-clipboard").size(11.0));
 
         scrollable(content)
             .width(Length::Fill)

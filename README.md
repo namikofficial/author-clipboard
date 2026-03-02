@@ -39,9 +39,10 @@
 
 ### Prerequisites
 
-- Linux with COSMIC desktop environment
+- Linux with a Wayland compositor supporting `wlr-data-control` (see [Installation](#installation))
 - Rust toolchain (1.70+)
-- Wayland compositor with `wlr-data-control` support
+- `wl-copy` command (`wl-clipboard` package)
+- For COSMIC desktop: `COSMIC_DATA_CONTROL_ENABLED=1` environment variable set
 
 ### Build and Run
 
@@ -50,7 +51,7 @@ git clone https://github.com/namikofficial/author-clipboard
 cd author-clipboard
 just setup         # Install dev tools
 just build         # Build all components
-just daemon        # Run clipboard daemon
+just daemon        # Run clipboard daemon (background)
 just applet        # Run GUI applet
 ```
 
@@ -114,13 +115,102 @@ Config file location: `~/.config/author-clipboard/config.json`
 
 ```json
 {
-  "max_items": 500,
-  "max_age_days": 30,
+  "max_items": 100,
+  "max_item_size": 1048576,
+  "ttl_seconds": 604800,
+  "cleanup_interval_seconds": 300,
   "keyboard_shortcut": "Super+V",
   "clear_on_lock": true,
   "encrypt_sensitive": false
 }
 ```
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `max_items` | 100 | Maximum clipboard items to retain |
+| `max_item_size` | 1048576 | Max size per item in bytes (1 MB) |
+| `ttl_seconds` | 604800 | Auto-expire unpinned items after N seconds (7 days) |
+| `cleanup_interval_seconds` | 300 | How often cleanup runs (5 minutes) |
+| `keyboard_shortcut` | `"Super+V"` | Display-only reference for configured shortcut |
+| `clear_on_lock` | true | Clear sensitive items on screen lock |
+| `encrypt_sensitive` | false | Encrypt sensitive items at rest (AES-256-GCM) |
+
+---
+
+## Installation
+
+### From Source (Recommended)
+
+```bash
+git clone https://github.com/namikofficial/author-clipboard
+cd author-clipboard
+just setup         # Install dev tools (rustfmt, clippy, cargo-watch)
+just build         # Build all components
+just install       # Install binaries, .desktop file, icon, systemd service
+just enable        # Enable and start the daemon service
+```
+
+### Binary Install (After Building)
+
+```bash
+cargo install --path crates/clipboard-daemon
+cargo install --path crates/applet
+cargo install --path crates/ctl
+```
+
+Binaries are installed to `~/.cargo/bin/`. Ensure this is in your `$PATH`.
+
+### Wayland Requirements
+
+This clipboard manager requires `wlr-data-control-unstable-v1` protocol support from your Wayland compositor.
+
+**Supported compositors:**
+- COSMIC (with `COSMIC_DATA_CONTROL_ENABLED=1`)
+- Sway
+- Hyprland
+- Any wlroots-based compositor
+
+**Not supported:**
+- GNOME/Mutter (does not expose `wlr-data-control` for security reasons)
+- KDE/KWin (uses different clipboard protocol)
+
+#### Enabling on COSMIC Desktop
+
+COSMIC requires explicitly enabling the data control protocol. Add this environment variable before starting the compositor:
+
+```bash
+# Option 1: Add to your shell profile (~/.bashrc, ~/.zshrc, etc.)
+export COSMIC_DATA_CONTROL_ENABLED=1
+
+# Option 2: Add to /etc/environment (system-wide)
+echo "COSMIC_DATA_CONTROL_ENABLED=1" | sudo tee -a /etc/environment
+
+# Option 3: Add to COSMIC compositor config
+# ~/.config/cosmic-comp/env (create if needed)
+COSMIC_DATA_CONTROL_ENABLED=1
+```
+
+**Security note:** Enabling `COSMIC_DATA_CONTROL_ENABLED=1` allows any application with Wayland access to read clipboard contents. This is required for clipboard managers to function but broadens clipboard access. Only enable if you trust all running applications.
+
+After setting the variable, log out and back in (or restart the compositor) for it to take effect.
+
+#### Verifying Protocol Support
+
+```bash
+# Check if the protocol is available
+# If author-clipboard-daemon starts without errors, the protocol is supported
+author-clipboard-daemon
+
+# Common error if unsupported:
+# "Required protocol zwlr_data_control_manager_v1 not supported by compositor"
+```
+
+### Known Limitations
+
+- **Wayland only** — X11/XWayland clipboard events are not captured directly
+- **Compositor-dependent** — requires `wlr-data-control` protocol support
+- **COSMIC-specific** — UI uses libcosmic; runs on other compositors but looks native only on COSMIC
+- **No Flatpak/Snap packaging yet** — must build from source currently
 
 ---
 
