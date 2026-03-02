@@ -23,10 +23,13 @@ use tracing::{error, info, warn};
 
 const APP_ID: &str = "com.namikofficial.author-clipboard";
 const SEARCH_INPUT_ID: fn() -> widget::Id = || widget::Id::new("search-input");
-const CLIPBOARD_SCROLL_ID: fn() -> widget::Id = || widget::Id::new("clipboard-scroll");
+
+fn clipboard_scroll_id() -> widget::Id {
+    widget::Id::new("clipboard-scroll")
+}
 
 /// Approximate height of each clipboard item row in pixels (for scroll offset calculation).
-const ITEM_ROW_HEIGHT: f32 = 76.0;
+const ITEM_ROW_HEIGHT: f32 = 68.0;
 /// Approximate visible height of the scrollable area.
 const VISIBLE_SCROLL_HEIGHT: f32 = 460.0;
 
@@ -83,6 +86,7 @@ struct App {
     snippet_search: String,
     snippet_name_input: String,
     snippet_content_input: String,
+    scroll_offset_y: f32,
 }
 
 // ── Messages ──────────────────────────────────────────────────────────
@@ -125,6 +129,7 @@ enum Message {
     SnippetCopy(i64),
     SnippetNameInput(String),
     SnippetContentInput(String),
+    ScrollOffsetChanged(f32),
 }
 
 // ── Application trait ─────────────────────────────────────────────────
@@ -205,6 +210,7 @@ impl cosmic::Application for App {
             snippet_search: String::new(),
             snippet_name_input: String::new(),
             snippet_content_input: String::new(),
+            scroll_offset_y: 0.0,
         };
 
         let command = Task::batch([
@@ -282,6 +288,7 @@ impl cosmic::Application for App {
                     self.active_tab = tab;
                     self.search_query.clear();
                     self.selected_index = None;
+                    self.scroll_offset_y = 0.0;
                 }
             }
 
@@ -291,6 +298,7 @@ impl cosmic::Application for App {
                     self.refresh_items();
                 }
                 self.selected_index = None;
+                self.scroll_offset_y = 0.0;
             }
 
             Message::CopyItem(id) => {
@@ -663,6 +671,11 @@ impl cosmic::Application for App {
                 self.snippet_content_input = v;
                 return Task::none();
             }
+
+            Message::ScrollOffsetChanged(y) => {
+                self.scroll_offset_y = y;
+                return Task::none();
+            }
         }
 
         Task::none()
@@ -929,7 +942,8 @@ impl App {
             }
 
             scrollable(list)
-                .id(CLIPBOARD_SCROLL_ID())
+                .id(clipboard_scroll_id())
+                .on_scroll(|viewport| Message::ScrollOffsetChanged(viewport.absolute_offset().y))
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .into()
@@ -1564,15 +1578,36 @@ impl App {
     fn scroll_to_selected(&self) -> Task<Message> {
         if let Some(idx) = self.selected_index {
             #[allow(clippy::cast_precision_loss)]
-            let target_y = idx as f32 * ITEM_ROW_HEIGHT;
-            let scroll_y = (target_y - VISIBLE_SCROLL_HEIGHT / 2.0).max(0.0);
-            cosmic::iced_widget::scrollable::scroll_to(
-                CLIPBOARD_SCROLL_ID(),
-                cosmic::iced_widget::scrollable::AbsoluteOffset {
-                    x: 0.0,
-                    y: scroll_y,
-                },
-            )
+            let item_top = idx as f32 * ITEM_ROW_HEIGHT;
+            let item_bottom = item_top + ITEM_ROW_HEIGHT;
+
+            let visible_top = self.scroll_offset_y;
+            let visible_bottom = self.scroll_offset_y + VISIBLE_SCROLL_HEIGHT;
+
+            if item_top < visible_top {
+                // Item is above visible area — scroll up so it's at top with padding
+                let target_y = (item_top - 8.0).max(0.0);
+                cosmic::iced_widget::scrollable::scroll_to(
+                    clipboard_scroll_id(),
+                    cosmic::iced_widget::scrollable::AbsoluteOffset {
+                        x: 0.0,
+                        y: target_y,
+                    },
+                )
+            } else if item_bottom > visible_bottom {
+                // Item is below visible area — scroll down so it's at bottom with padding
+                let target_y = item_bottom - VISIBLE_SCROLL_HEIGHT + 8.0;
+                cosmic::iced_widget::scrollable::scroll_to(
+                    clipboard_scroll_id(),
+                    cosmic::iced_widget::scrollable::AbsoluteOffset {
+                        x: 0.0,
+                        y: target_y,
+                    },
+                )
+            } else {
+                // Item is already visible
+                Task::none()
+            }
         } else {
             Task::none()
         }
