@@ -5,7 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
-## [0.3.0] - 2026-03-01
+## [0.3.1] - 2026-03-02
+
+### 🐛 Bug Fixes
+
+- scroll position, layout, URI detection, IPC security
+### 📚 Documentation
+
+- add Phase 11-14 to project plan, update status
+- add LICENSE, fix config, add install guide## [0.3.0] - 2026-03-01
 
 ### 🐛 Bug Fixes
 
