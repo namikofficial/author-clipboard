@@ -5,7 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
-## [0.3.1] - 2026-03-02
+## [0.5.0] - 2026-03-02
+
+### 👷 CI
+
+- optimize CI to single job, add tag-triggered release workflow
+### 🚀 Features
+
+- update version to 0.5.0 and format libcosmic dependencies
+- update version to 0.4.0 & enhance clipboard manager functionality
+- add security policy documentation## [0.3.1] - 2026-03-02
 
 ### 🐛 Bug Fixes
 
