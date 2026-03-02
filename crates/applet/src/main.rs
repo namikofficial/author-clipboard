@@ -41,15 +41,13 @@ fn kaomoji_scroll_id() -> widget::Id {
     widget::Id::new("kaomoji-scroll")
 }
 
-/// Approximate height of each clipboard item row in pixels (for scroll offset calculation).
-const ITEM_ROW_HEIGHT: f32 = 68.0;
-/// Approximate visible height of the scrollable area.
-const VISIBLE_SCROLL_HEIGHT: f32 = 460.0;
 /// Picker grid columns and row heights used for keyboard navigation + scrolling.
-const EMOJI_COLS: usize = 8;
-const SYMBOL_COLS: usize = 5;
+const EMOJI_COLS: usize = 6;
+const SYMBOL_COLS: usize = 4;
 const KAOMOJI_COLS: usize = 2;
-const PICKER_ROW_HEIGHT: f32 = 44.0;
+const UI_TITLE_SIZE: f32 = 17.0;
+const UI_SECTION_SIZE: f32 = 15.0;
+const UI_META_SIZE: f32 = 11.0;
 
 fn map_key_to_message(key: &Key, modifiers: iced::keyboard::Modifiers) -> Option<Message> {
     match key.as_ref() {
@@ -63,6 +61,11 @@ fn map_key_to_message(key: &Key, modifiers: iced::keyboard::Modifiers) -> Option
         Key::Named(iced::keyboard::key::Named::PageDown) => Some(Message::PageDown),
         Key::Named(iced::keyboard::key::Named::PageUp) => Some(Message::PageUp),
         Key::Named(iced::keyboard::key::Named::Delete) => Some(Message::DeleteSelected),
+        Key::Named(iced::keyboard::key::Named::Tab)
+            if modifiers.shift() && !modifiers.control() =>
+        {
+            Some(Message::PreviousTab)
+        }
         Key::Named(iced::keyboard::key::Named::Tab) if modifiers.control() => {
             if modifiers.shift() {
                 Some(Message::PreviousTab)
@@ -149,6 +152,11 @@ struct App {
 
 #[derive(Clone, Debug)]
 enum Message {
+    KeyPressed {
+        key: Key,
+        modifiers: iced::keyboard::Modifiers,
+        captured: bool,
+    },
     Tick,
     TabSelected(widget::segmented_button::Entity),
     SearchChanged(String),
@@ -250,12 +258,12 @@ impl cosmic::Application for App {
             .unwrap_or_default();
 
         let tab_model = widget::segmented_button::Model::builder()
-            .insert(|b| b.text("📋 Clipboard").data(AppTab::Clipboard).activate())
-            .insert(|b| b.text("😀 Emoji").data(AppTab::Emoji))
-            .insert(|b| b.text("🔣 Symbols").data(AppTab::Symbols))
-            .insert(|b| b.text("顔 Kaomoji").data(AppTab::Kaomoji))
-            .insert(|b| b.text("📝 Snippets").data(AppTab::Snippets))
-            .insert(|b| b.text("⚙️ Settings").data(AppTab::Settings))
+            .insert(|b| b.text("Clipboard").data(AppTab::Clipboard).activate())
+            .insert(|b| b.text("Emoji").data(AppTab::Emoji))
+            .insert(|b| b.text("Symbols").data(AppTab::Symbols))
+            .insert(|b| b.text("Kaomoji").data(AppTab::Kaomoji))
+            .insert(|b| b.text("Snippets").data(AppTab::Snippets))
+            .insert(|b| b.text("Settings").data(AppTab::Settings))
             .build();
 
         let incognito = config.is_incognito();
@@ -289,10 +297,7 @@ impl cosmic::Application for App {
             content_denylist_input: String::new(),
         };
 
-        let command = Task::batch([
-            app.update_title(),
-            cosmic::widget::text_input::focus(SEARCH_INPUT_ID()),
-        ]);
+        let command = app.update_title();
 
         (app, command)
     }
@@ -317,9 +322,13 @@ impl cosmic::Application for App {
     }
 
     fn subscription(&self) -> Subscription<Self::Message> {
-        let keyboard = event::listen_with(|event, _, _| match event {
+        let keyboard = event::listen_with(|event, status, _| match event {
             iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers, .. }) => {
-                map_key_to_message(&key, modifiers)
+                Some(Message::KeyPressed {
+                    key,
+                    modifiers,
+                    captured: matches!(status, event::Status::Captured),
+                })
             }
             _ => None,
         });
@@ -333,6 +342,23 @@ impl cosmic::Application for App {
     #[allow(clippy::too_many_lines)]
     fn update(&mut self, message: Self::Message) -> Task<Self::Message> {
         match message {
+            Message::KeyPressed {
+                key,
+                modifiers,
+                captured,
+            } => {
+                if let Some(mapped) = map_key_to_message(&key, modifiers) {
+                    // Let tab switching work globally. In Settings/Snippets, avoid reacting to keys captured by input widgets.
+                    if captured
+                        && matches!(self.active_tab, AppTab::Settings | AppTab::Snippets)
+                        && !matches!(mapped, Message::NextTab | Message::PreviousTab)
+                    {
+                        return Task::none();
+                    }
+                    return self.update(mapped);
+                }
+                return Task::none();
+            }
             Message::Tick => {
                 if self.active_tab == AppTab::Clipboard {
                     self.smart_refresh_items();
@@ -349,6 +375,7 @@ impl cosmic::Application for App {
                     self.emoji_selected_idx = None;
                     self.symbol_selected_idx = None;
                     self.kaomoji_selected_idx = None;
+                    return self.scroll_active_tab_to_top();
                 }
             }
 
@@ -362,6 +389,7 @@ impl cosmic::Application for App {
                 self.emoji_selected_idx = None;
                 self.symbol_selected_idx = None;
                 self.kaomoji_selected_idx = None;
+                return self.scroll_active_tab_to_top();
             }
 
             Message::CopyItem(id) => {
@@ -450,7 +478,7 @@ impl cosmic::Application for App {
                         let len = self.filtered_emojis().len();
                         if len > 0 {
                             let next = match self.emoji_selected_idx {
-                                Some(i) => i + EMOJI_COLS,
+                                Some(i) => i + 1,
                                 None => 0,
                             };
                             self.emoji_selected_idx = Some(next.min(len - 1));
@@ -461,7 +489,7 @@ impl cosmic::Application for App {
                         let len = self.filtered_symbols().len();
                         if len > 0 {
                             let next = match self.symbol_selected_idx {
-                                Some(i) => i + SYMBOL_COLS,
+                                Some(i) => i + 1,
                                 None => 0,
                             };
                             self.symbol_selected_idx = Some(next.min(len - 1));
@@ -472,7 +500,7 @@ impl cosmic::Application for App {
                         let len = self.filtered_kaomoji().len();
                         if len > 0 {
                             let next = match self.kaomoji_selected_idx {
-                                Some(i) => i + KAOMOJI_COLS,
+                                Some(i) => i + 1,
                                 None => 0,
                             };
                             self.kaomoji_selected_idx = Some(next.min(len - 1));
@@ -497,33 +525,24 @@ impl cosmic::Application for App {
                     AppTab::Emoji => {
                         let len = self.filtered_emojis().len();
                         if len > 0 {
-                            self.emoji_selected_idx = Some(
-                                self.emoji_selected_idx
-                                    .unwrap_or(0)
-                                    .saturating_sub(EMOJI_COLS),
-                            );
+                            self.emoji_selected_idx =
+                                Some(self.emoji_selected_idx.unwrap_or(0).saturating_sub(1));
                         }
                         self.scroll_emoji_to_selected()
                     }
                     AppTab::Symbols => {
                         let len = self.filtered_symbols().len();
                         if len > 0 {
-                            self.symbol_selected_idx = Some(
-                                self.symbol_selected_idx
-                                    .unwrap_or(0)
-                                    .saturating_sub(SYMBOL_COLS),
-                            );
+                            self.symbol_selected_idx =
+                                Some(self.symbol_selected_idx.unwrap_or(0).saturating_sub(1));
                         }
                         self.scroll_symbol_to_selected()
                     }
                     AppTab::Kaomoji => {
                         let len = self.filtered_kaomoji().len();
                         if len > 0 {
-                            self.kaomoji_selected_idx = Some(
-                                self.kaomoji_selected_idx
-                                    .unwrap_or(0)
-                                    .saturating_sub(KAOMOJI_COLS),
-                            );
+                            self.kaomoji_selected_idx =
+                                Some(self.kaomoji_selected_idx.unwrap_or(0).saturating_sub(1));
                         }
                         self.scroll_kaomoji_to_selected()
                     }
@@ -640,18 +659,21 @@ impl cosmic::Application for App {
                 self.emoji_category_idx = idx;
                 self.selected_index = None;
                 self.emoji_selected_idx = None;
+                return self.scroll_active_tab_to_top();
             }
 
             Message::SymbolCategory(idx) => {
                 self.symbol_category_idx = idx;
                 self.selected_index = None;
                 self.symbol_selected_idx = None;
+                return self.scroll_active_tab_to_top();
             }
 
             Message::KaomojiCategory(idx) => {
                 self.kaomoji_category_idx = idx;
                 self.selected_index = None;
                 self.kaomoji_selected_idx = None;
+                return self.scroll_active_tab_to_top();
             }
 
             Message::ToggleIncognito => {
@@ -766,10 +788,12 @@ impl cosmic::Application for App {
 
             Message::NextTab => {
                 self.cycle_tab(true);
+                return self.scroll_active_tab_to_top();
             }
 
             Message::PreviousTab => {
                 self.cycle_tab(false);
+                return self.scroll_active_tab_to_top();
             }
 
             Message::QuickSelect(idx) => {
@@ -1099,8 +1123,7 @@ impl cosmic::Application for App {
             AppTab::Emoji => "Search emoji...",
             AppTab::Symbols => "Search symbols...",
             AppTab::Kaomoji => "Search kaomoji...",
-            AppTab::Snippets => "Search snippets...",
-            AppTab::Settings => "Search settings...",
+            AppTab::Snippets | AppTab::Settings => "",
         };
 
         let search_bar = text_input(search_placeholder, &self.search_query)
@@ -1114,7 +1137,7 @@ impl cosmic::Application for App {
                     .into(),
             )
             .width(Length::Fill)
-            .padding(8);
+            .padding(10);
 
         let incognito_btn = {
             let icon_name = if self.incognito {
@@ -1139,6 +1162,26 @@ impl cosmic::Application for App {
                     text("Clear unpinned").size(12.0),
                     widget::tooltip::Position::Bottom,
                 ))
+                .align_y(iced::Alignment::Center),
+            AppTab::Snippets => row()
+                .spacing(6)
+                .push(
+                    container(
+                        text("Use the snippets search/input fields below").size(UI_META_SIZE),
+                    )
+                    .width(Length::Fill)
+                    .padding([10, 12]),
+                )
+                .push(incognito_btn)
+                .align_y(iced::Alignment::Center),
+            AppTab::Settings => row()
+                .spacing(6)
+                .push(
+                    container(text("Settings are shown below").size(UI_META_SIZE))
+                        .width(Length::Fill)
+                        .padding([10, 12]),
+                )
+                .push(incognito_btn)
                 .align_y(iced::Alignment::Center),
             _ => row()
                 .spacing(6)
@@ -1232,10 +1275,32 @@ impl cosmic::Application for App {
         });
 
         let content = column()
-            .spacing(8)
+            .spacing(10)
             .padding(12)
-            .push(tab_bar)
-            .push(header)
+            .push(container(tab_bar).padding([4, 6]).style(|theme| {
+                let cosmic = theme.cosmic();
+                let [r, g, b, _] = cosmic.bg_divider().into();
+                cosmic::iced_widget::container::Style {
+                    background: Some(cosmic::iced::Color::from_rgba(r, g, b, 0.25).into()),
+                    border: cosmic::iced::Border {
+                        radius: 10.0.into(),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                }
+            }))
+            .push(container(header).padding([2, 2]).style(|theme| {
+                let cosmic = theme.cosmic();
+                let [r, g, b, _] = cosmic.bg_divider().into();
+                cosmic::iced_widget::container::Style {
+                    background: Some(cosmic::iced::Color::from_rgba(r, g, b, 0.15).into()),
+                    border: cosmic::iced::Border {
+                        radius: 10.0.into(),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                }
+            }))
             .push(tab_content)
             .push(status_bar);
 
@@ -1246,6 +1311,28 @@ impl cosmic::Application for App {
 // ── Helper methods ────────────────────────────────────────────────────
 
 impl App {
+    fn scroll_active_tab_to_top(&self) -> Task<Message> {
+        match self.active_tab {
+            AppTab::Clipboard => cosmic::iced_widget::scrollable::scroll_to(
+                clipboard_scroll_id(),
+                cosmic::iced_widget::scrollable::AbsoluteOffset { x: 0.0, y: 0.0 },
+            ),
+            AppTab::Emoji => cosmic::iced_widget::scrollable::scroll_to(
+                emoji_scroll_id(),
+                cosmic::iced_widget::scrollable::AbsoluteOffset { x: 0.0, y: 0.0 },
+            ),
+            AppTab::Symbols => cosmic::iced_widget::scrollable::scroll_to(
+                symbol_scroll_id(),
+                cosmic::iced_widget::scrollable::AbsoluteOffset { x: 0.0, y: 0.0 },
+            ),
+            AppTab::Kaomoji => cosmic::iced_widget::scrollable::scroll_to(
+                kaomoji_scroll_id(),
+                cosmic::iced_widget::scrollable::AbsoluteOffset { x: 0.0, y: 0.0 },
+            ),
+            AppTab::Snippets | AppTab::Settings => Task::none(),
+        }
+    }
+
     fn refresh_items(&mut self) {
         if let Some(db) = &self.db {
             let result = if self.search_query.is_empty() {
@@ -1328,6 +1415,28 @@ impl App {
     // ── Clipboard tab view ────────────────────────────────────────────
 
     fn view_clipboard(&self) -> Element<'_, Message> {
+        let total_items = self.items.len();
+        let pinned_items = self.items.iter().filter(|i| i.pinned).count();
+        let sensitive_items = self.items.iter().filter(|i| i.sensitive).count();
+        let summary_row = row()
+            .spacing(6)
+            .align_y(iced::Alignment::Center)
+            .push(
+                widget::button::standard(format!("Total {total_items}"))
+                    .padding([4, 10])
+                    .width(Length::Shrink),
+            )
+            .push(
+                widget::button::standard(format!("Pinned {pinned_items}"))
+                    .padding([4, 10])
+                    .width(Length::Shrink),
+            )
+            .push(
+                widget::button::standard(format!("Sensitive {sensitive_items}"))
+                    .padding([4, 10])
+                    .width(Length::Shrink),
+            );
+
         if self.items.is_empty() {
             let (icon_name, msg) = if self.search_query.is_empty() {
                 (
@@ -1339,16 +1448,22 @@ impl App {
             };
 
             container(
-                column()
-                    .spacing(12)
+                column().spacing(12).push(summary_row).push(
+                    container(
+                        column()
+                            .spacing(12)
+                            .align_x(Horizontal::Center)
+                            .push(icon::from_name(icon_name).size(48).icon())
+                            .push(text(msg).size(14.0).align_x(Horizontal::Center)),
+                    )
+                    .width(Length::Fill)
+                    .height(Length::Fill)
                     .align_x(Horizontal::Center)
-                    .push(icon::from_name(icon_name).size(48).icon())
-                    .push(text(msg).size(14.0).align_x(Horizontal::Center)),
+                    .align_y(iced::alignment::Vertical::Center),
+                ),
             )
             .width(Length::Fill)
             .height(Length::Fill)
-            .align_x(Horizontal::Center)
-            .align_y(iced::alignment::Vertical::Center)
             .into()
         } else {
             let mut list = column().spacing(4).padding([0, 4]);
@@ -1357,11 +1472,34 @@ impl App {
                 list = list.push(self.clipboard_item_row(item, index));
             }
 
-            scrollable(list)
-                .id(clipboard_scroll_id())
-                .on_scroll(|viewport| Message::ScrollOffsetChanged(viewport.absolute_offset().y))
-                .width(Length::Fill)
-                .height(Length::Fill)
+            column()
+                .spacing(8)
+                .push(summary_row)
+                .push(
+                    container(
+                        scrollable(list)
+                            .id(clipboard_scroll_id())
+                            .on_scroll(|viewport| {
+                                Message::ScrollOffsetChanged(viewport.absolute_offset().y)
+                            })
+                            .width(Length::Fill)
+                            .height(Length::Fill),
+                    )
+                    .padding([4, 6])
+                    .style(|theme| {
+                        let cosmic = theme.cosmic();
+                        let [r, g, b, _] = cosmic.bg_divider().into();
+                        cosmic::iced_widget::container::Style {
+                            background: Some(cosmic::iced::Color::from_rgba(r, g, b, 0.25).into()),
+                            border: cosmic::iced::Border {
+                                radius: 8.0.into(),
+                                ..Default::default()
+                            },
+                            ..Default::default()
+                        }
+                    })
+                    .height(Length::Fill),
+                )
                 .into()
         }
     }
@@ -1521,6 +1659,7 @@ impl App {
 
     // ── Emoji tab view ────────────────────────────────────────────────
 
+    #[allow(clippy::too_many_lines)]
     fn view_emoji(&self) -> Element<'_, Message> {
         let mut content = column().spacing(8);
 
@@ -1530,9 +1669,39 @@ impl App {
         } else {
             emoji::search(&self.search_query)
         };
+        let valid_emoji_idx = self.emoji_selected_idx.filter(|&i| i < emojis.len());
+        let selected_label = valid_emoji_idx.map_or(String::from("No selection"), |i| {
+            format!("Selected {}", i + 1)
+        });
+        let selected_emoji = valid_emoji_idx
+            .and_then(|i| emojis.get(i).copied())
+            .unwrap_or("—");
+        let codepoints = if selected_emoji == "—" {
+            String::from("U+----")
+        } else {
+            selected_emoji
+                .chars()
+                .map(|c| format!("U+{:04X}", u32::from(c)))
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        content = content.push(
+            row()
+                .align_y(iced::Alignment::Center)
+                .push(text("Emoji").size(UI_TITLE_SIZE))
+                .push(cosmic::iced::widget::horizontal_space())
+                .push(text(selected_label).size(UI_META_SIZE)),
+        );
+        content = content.push(
+            row()
+                .spacing(8)
+                .align_y(iced::Alignment::Center)
+                .push(widget::button::standard(selected_emoji).padding([4, 10]))
+                .push(text(codepoints).size(UI_META_SIZE)),
+        );
 
         if let Some(db) = &self.db {
-            if let Ok(recent) = db.get_recently_used("emoji", 12) {
+            if let Ok(recent) = db.get_recently_used("emoji", 8) {
                 if !recent.is_empty() {
                     let mut recent_row = row().spacing(4).align_y(iced::Alignment::Center);
                     recent_row = recent_row.push(text("Recent:").size(12.0));
@@ -1544,30 +1713,31 @@ impl App {
                                 .padding([4, 8]),
                         );
                     }
-                    content = content.push(widget::scrollable::horizontal(recent_row));
+                    content = content.push(recent_row);
                 }
             }
         }
+        content = content.push(text("────────────────────────────────").size(UI_META_SIZE));
 
         if self.search_query.is_empty() {
-            let mut cat_row = row().spacing(6);
+            let mut cat_row = row().spacing(8);
             for (idx, cat) in emoji::CATEGORIES.iter().enumerate() {
                 let label = format!("{} {}", cat.icon, cat.name);
                 let btn = if idx == self.emoji_category_idx {
                     widget::button::suggested(label)
                         .on_press(Message::EmojiCategory(idx))
-                        .padding([5, 12])
+                        .padding([6, 14])
                 } else {
                     widget::button::text(label)
                         .on_press(Message::EmojiCategory(idx))
-                        .padding([5, 12])
+                        .padding([6, 14])
                 };
                 cat_row = cat_row.push(btn);
             }
             content = content.push(widget::scrollable::horizontal(cat_row));
-            content = content.push(text(format!("{} emoji", emojis.len())).size(11.0));
+            content = content.push(text(format!("{} emoji", emojis.len())).size(UI_META_SIZE));
         } else {
-            content = content.push(text(format!("{} results", emojis.len())).size(11.0));
+            content = content.push(text(format!("{} results", emojis.len())).size(UI_META_SIZE));
         }
 
         if emojis.is_empty() {
@@ -1589,22 +1759,22 @@ impl App {
             .into();
         }
 
-        let mut grid = column().spacing(2);
+        let mut grid = column().spacing(6);
         let mut flat_idx = 0usize;
         for chunk in emojis.chunks(EMOJI_COLS) {
-            let mut grid_row = row().spacing(2);
+            let mut grid_row = row().spacing(6);
             for &emoji_char in chunk {
                 let is_selected = self.emoji_selected_idx == Some(flat_idx);
                 let btn = if is_selected {
                     widget::button::suggested(emoji_char)
                         .on_press(Message::CopyText(emoji_char.to_string()))
                         .width(Length::Fill)
-                        .padding([10, 6])
+                        .padding([12, 8])
                 } else {
                     widget::button::text(emoji_char)
                         .on_press(Message::CopyText(emoji_char.to_string()))
                         .width(Length::Fill)
-                        .padding([10, 6])
+                        .padding([12, 8])
                 };
                 grid_row = grid_row.push(btn);
                 flat_idx += 1;
@@ -1616,10 +1786,26 @@ impl App {
         }
 
         content = content.push(
-            scrollable(grid)
-                .id(emoji_scroll_id())
-                .width(Length::Fill)
-                .height(Length::Fill),
+            container(
+                scrollable(grid)
+                    .id(emoji_scroll_id())
+                    .width(Length::Fill)
+                    .height(Length::Fill),
+            )
+            .padding([6, 8])
+            .height(Length::Fill)
+            .style(|theme| {
+                let cosmic = theme.cosmic();
+                let [r, g, b, _] = cosmic.bg_divider().into();
+                cosmic::iced_widget::container::Style {
+                    background: Some(cosmic::iced::Color::from_rgba(r, g, b, 0.25).into()),
+                    border: cosmic::iced::Border {
+                        radius: 8.0.into(),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                }
+            }),
         );
 
         content.into()
@@ -1627,6 +1813,7 @@ impl App {
 
     // ── Symbols tab view ──────────────────────────────────────────────
 
+    #[allow(clippy::too_many_lines)]
     fn view_symbols(&self) -> Element<'_, Message> {
         let mut content = column().spacing(8);
 
@@ -1636,9 +1823,30 @@ impl App {
         } else {
             symbols::search(&self.search_query)
         };
+        let valid_symbol_idx = self.symbol_selected_idx.filter(|&i| i < syms.len());
+        let selected_label = valid_symbol_idx.map_or(String::from("No selection"), |i| {
+            format!("Selected {}", i + 1)
+        });
+        let selected_symbol = valid_symbol_idx
+            .and_then(|i| syms.get(i).copied())
+            .unwrap_or(("—", "No symbol selected"));
+        content = content.push(
+            row()
+                .align_y(iced::Alignment::Center)
+                .push(text("Symbols").size(UI_TITLE_SIZE))
+                .push(cosmic::iced::widget::horizontal_space())
+                .push(text(selected_label).size(UI_META_SIZE)),
+        );
+        content = content.push(
+            row()
+                .spacing(8)
+                .align_y(iced::Alignment::Center)
+                .push(widget::button::standard(selected_symbol.0).padding([4, 10]))
+                .push(text(selected_symbol.1).size(UI_META_SIZE)),
+        );
 
         if let Some(db) = &self.db {
-            if let Ok(recent) = db.get_recently_used("symbol", 12) {
+            if let Ok(recent) = db.get_recently_used("symbol", 8) {
                 if !recent.is_empty() {
                     let mut recent_row = row().spacing(4).align_y(iced::Alignment::Center);
                     recent_row = recent_row.push(text("Recent:").size(12.0));
@@ -1650,30 +1858,31 @@ impl App {
                                 .padding([4, 8]),
                         );
                     }
-                    content = content.push(widget::scrollable::horizontal(recent_row));
+                    content = content.push(recent_row);
                 }
             }
         }
+        content = content.push(text("────────────────────────────────").size(UI_META_SIZE));
 
         if self.search_query.is_empty() {
-            let mut cat_row = row().spacing(6);
+            let mut cat_row = row().spacing(8);
             for (idx, cat) in symbols::CATEGORIES.iter().enumerate() {
                 let label = format!("{} {}", cat.icon, cat.name);
                 let btn = if idx == self.symbol_category_idx {
                     widget::button::suggested(label)
                         .on_press(Message::SymbolCategory(idx))
-                        .padding([5, 12])
+                        .padding([6, 14])
                 } else {
                     widget::button::text(label)
                         .on_press(Message::SymbolCategory(idx))
-                        .padding([5, 12])
+                        .padding([6, 14])
                 };
                 cat_row = cat_row.push(btn);
             }
             content = content.push(widget::scrollable::horizontal(cat_row));
-            content = content.push(text(format!("{} symbols", syms.len())).size(11.0));
+            content = content.push(text(format!("{} symbols", syms.len())).size(UI_META_SIZE));
         } else {
-            content = content.push(text(format!("{} results", syms.len())).size(11.0));
+            content = content.push(text(format!("{} results", syms.len())).size(UI_META_SIZE));
         }
 
         if syms.is_empty() {
@@ -1695,22 +1904,22 @@ impl App {
             .into();
         }
 
-        let mut list = column().spacing(2);
+        let mut list = column().spacing(6);
         let mut flat_idx = 0usize;
         for chunk in syms.chunks(SYMBOL_COLS) {
-            let mut grid_row = row().spacing(2);
+            let mut grid_row = row().spacing(6);
             for &(sym, desc) in chunk {
                 let is_selected = self.symbol_selected_idx == Some(flat_idx);
                 let sym_btn = if is_selected {
                     widget::button::suggested(sym)
                         .on_press(Message::CopyText(sym.to_string()))
                         .width(Length::Fill)
-                        .padding([10, 8])
+                        .padding([12, 10])
                 } else {
                     widget::button::text(sym)
                         .on_press(Message::CopyText(sym.to_string()))
                         .width(Length::Fill)
-                        .padding([10, 8])
+                        .padding([12, 10])
                 };
                 let btn = widget::tooltip(
                     sym_btn,
@@ -1727,10 +1936,26 @@ impl App {
         }
 
         content = content.push(
-            scrollable(list)
-                .id(symbol_scroll_id())
-                .width(Length::Fill)
-                .height(Length::Fill),
+            container(
+                scrollable(list)
+                    .id(symbol_scroll_id())
+                    .width(Length::Fill)
+                    .height(Length::Fill),
+            )
+            .padding([6, 8])
+            .height(Length::Fill)
+            .style(|theme| {
+                let cosmic = theme.cosmic();
+                let [r, g, b, _] = cosmic.bg_divider().into();
+                cosmic::iced_widget::container::Style {
+                    background: Some(cosmic::iced::Color::from_rgba(r, g, b, 0.25).into()),
+                    border: cosmic::iced::Border {
+                        radius: 8.0.into(),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                }
+            }),
         );
 
         content.into()
@@ -1738,13 +1963,40 @@ impl App {
 
     // ── Kaomoji tab view ──────────────────────────────────────────────
 
+    #[allow(clippy::too_many_lines)]
     fn view_kaomoji(&self) -> Element<'_, Message> {
         let mut content = column().spacing(8).width(Length::Fill);
 
         let items = self.filtered_kaomoji();
+        let valid_kaomoji_idx = self.kaomoji_selected_idx.filter(|&i| i < items.len());
+        let selected_label = valid_kaomoji_idx.map_or(String::from("No selection"), |i| {
+            format!("Selected {}", i + 1)
+        });
+        let selected_kaomoji = valid_kaomoji_idx
+            .and_then(|i| items.get(i).copied())
+            .unwrap_or("—");
+        let selected_len = if selected_kaomoji == "—" {
+            0
+        } else {
+            selected_kaomoji.chars().count()
+        };
+        content = content.push(
+            row()
+                .align_y(iced::Alignment::Center)
+                .push(text("Kaomoji").size(UI_TITLE_SIZE))
+                .push(cosmic::iced::widget::horizontal_space())
+                .push(text(selected_label).size(UI_META_SIZE)),
+        );
+        content = content.push(
+            row()
+                .spacing(8)
+                .align_y(iced::Alignment::Center)
+                .push(text(selected_kaomoji).size(14.0))
+                .push(text(format!("{selected_len} chars")).size(UI_META_SIZE)),
+        );
 
         if let Some(db) = &self.db {
-            if let Ok(recent) = db.get_recently_used("kaomoji", 10) {
+            if let Ok(recent) = db.get_recently_used("kaomoji", 8) {
                 if !recent.is_empty() {
                     let mut recent_row = row().spacing(4).align_y(iced::Alignment::Center);
                     recent_row = recent_row.push(text("Recent:").size(12.0));
@@ -1756,30 +2008,31 @@ impl App {
                                 .padding([4, 8]),
                         );
                     }
-                    content = content.push(widget::scrollable::horizontal(recent_row));
+                    content = content.push(recent_row);
                 }
             }
         }
+        content = content.push(text("────────────────────────────────").size(UI_META_SIZE));
 
         if self.search_query.is_empty() {
-            let mut cat_row = row().spacing(6);
+            let mut cat_row = row().spacing(8);
             for (idx, cat) in kaomoji::CATEGORIES.iter().enumerate() {
                 let label = format!("{} {}", cat.icon, cat.name);
                 let btn = if idx == self.kaomoji_category_idx {
                     widget::button::suggested(label)
                         .on_press(Message::KaomojiCategory(idx))
-                        .padding([5, 12])
+                        .padding([6, 14])
                 } else {
                     widget::button::text(label)
                         .on_press(Message::KaomojiCategory(idx))
-                        .padding([5, 12])
+                        .padding([6, 14])
                 };
                 cat_row = cat_row.push(btn);
             }
             content = content.push(widget::scrollable::horizontal(cat_row));
-            content = content.push(text(format!("{} kaomoji", items.len())).size(11.0));
+            content = content.push(text(format!("{} kaomoji", items.len())).size(UI_META_SIZE));
         } else {
-            content = content.push(text(format!("{} results", items.len())).size(11.0));
+            content = content.push(text(format!("{} results", items.len())).size(UI_META_SIZE));
         }
 
         if items.is_empty() {
@@ -1795,22 +2048,22 @@ impl App {
                 .align_y(iced::alignment::Vertical::Center),
             );
         } else {
-            let mut list = column().spacing(3).width(Length::Fill);
+            let mut list = column().spacing(6).width(Length::Fill);
             let mut flat_idx = 0usize;
             for chunk in items.chunks(KAOMOJI_COLS) {
-                let mut grid_row = row().spacing(4);
+                let mut grid_row = row().spacing(6);
                 for &kaomoji_str in chunk {
                     let is_selected = self.kaomoji_selected_idx == Some(flat_idx);
                     let btn = if is_selected {
                         widget::button::suggested(kaomoji_str)
                             .on_press(Message::CopyText(kaomoji_str.to_string()))
                             .width(Length::Fill)
-                            .padding([8, 12])
+                            .padding([10, 14])
                     } else {
                         widget::button::text(kaomoji_str)
                             .on_press(Message::CopyText(kaomoji_str.to_string()))
                             .width(Length::Fill)
-                            .padding([8, 12])
+                            .padding([10, 14])
                     };
                     grid_row = grid_row.push(btn);
                     flat_idx += 1;
@@ -1821,10 +2074,26 @@ impl App {
                 list = list.push(grid_row);
             }
             content = content.push(
-                scrollable(list)
-                    .id(kaomoji_scroll_id())
-                    .width(Length::Fill)
-                    .height(Length::Fill),
+                container(
+                    scrollable(list)
+                        .id(kaomoji_scroll_id())
+                        .width(Length::Fill)
+                        .height(Length::Fill),
+                )
+                .padding([6, 8])
+                .height(Length::Fill)
+                .style(|theme| {
+                    let cosmic = theme.cosmic();
+                    let [r, g, b, _] = cosmic.bg_divider().into();
+                    cosmic::iced_widget::container::Style {
+                        background: Some(cosmic::iced::Color::from_rgba(r, g, b, 0.25).into()),
+                        border: cosmic::iced::Border {
+                            radius: 8.0.into(),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    }
+                }),
             );
         }
 
@@ -1835,6 +2104,13 @@ impl App {
 
     fn view_snippets(&self) -> Element<'_, Message> {
         let mut content = column().spacing(8).width(Length::Fill);
+        content = content.push(
+            row()
+                .align_y(iced::Alignment::Center)
+                .push(text("Snippets").size(UI_TITLE_SIZE))
+                .push(cosmic::iced::widget::horizontal_space())
+                .push(text(format!("{} total", self.snippets.len())).size(UI_META_SIZE)),
+        );
 
         // Search bar for snippets
         let search = text_input("Search snippets...", &self.snippet_search)
@@ -1941,10 +2217,45 @@ impl App {
     #[allow(clippy::too_many_lines)]
     fn view_settings(&self) -> Element<'_, Message> {
         let version = env!("CARGO_PKG_VERSION");
-        let mut content = column().spacing(12).width(Length::Fill);
+        let mut content = column().spacing(14).width(Length::Fill);
+        content = content.push(
+            row()
+                .align_y(iced::Alignment::Center)
+                .push(text("Settings").size(UI_TITLE_SIZE))
+                .push(cosmic::iced::widget::horizontal_space())
+                .push(text("Configuration & Diagnostics").size(UI_META_SIZE)),
+        );
+        content = content.push(
+            row()
+                .spacing(8)
+                .push(
+                    widget::button::standard(if self.daemon_running {
+                        "Daemon Online"
+                    } else {
+                        "Daemon Offline"
+                    })
+                    .padding([5, 10]),
+                )
+                .push(
+                    widget::button::standard(if self.incognito {
+                        "Incognito On"
+                    } else {
+                        "Incognito Off"
+                    })
+                    .padding([5, 10]),
+                )
+                .push(
+                    widget::button::standard(if self.quick_paste_enabled {
+                        "Quick Paste On"
+                    } else {
+                        "Quick Paste Off"
+                    })
+                    .padding([5, 10]),
+                ),
+        );
 
         // ── Status ───────────────────────────────────────────────────
-        content = content.push(text("📡 Status").size(15));
+        content = content.push(text("Status").size(UI_SECTION_SIZE));
         let daemon_status = if self.daemon_running {
             "● Daemon is running — clipboard changes are being captured"
         } else {
@@ -1962,7 +2273,7 @@ impl App {
         content = content.push(daemon_btn);
 
         // ── Privacy ──────────────────────────────────────────────────
-        content = content.push(text("🕶️ Privacy").size(15));
+        content = content.push(text("Privacy").size(UI_SECTION_SIZE));
         let incognito_label = if self.incognito {
             "Incognito Mode: ON — clipboard history is paused"
         } else {
@@ -2018,7 +2329,7 @@ impl App {
         content = content.push(encrypt_btn);
 
         // ── History ──────────────────────────────────────────────────
-        content = content.push(text("📋 History").size(15));
+        content = content.push(text("History").size(UI_SECTION_SIZE));
 
         // Max items buttons
         let max_items_options: &[(usize, &str)] = &[
@@ -2029,7 +2340,7 @@ impl App {
             (1000, "1000"),
         ];
         let mut max_row = row().spacing(6).align_y(iced::Alignment::Center);
-        max_row = max_row.push(text("Max items:").size(13));
+        max_row = max_row.push(text("Max items:").size(13).width(Length::Fixed(130.0)));
         for &(val, label) in max_items_options {
             let btn = if self.config.max_items == val {
                 widget::button::suggested(label)
@@ -2058,7 +2369,7 @@ impl App {
             self.config.ttl_seconds / 86400
         };
         let mut age_row = row().spacing(6).align_y(iced::Alignment::Center);
-        age_row = age_row.push(text("Keep history:").size(13));
+        age_row = age_row.push(text("Keep history:").size(13).width(Length::Fixed(130.0)));
         for &(val_days, label) in age_options {
             let btn = if current_days == val_days {
                 widget::button::suggested(label)
@@ -2077,7 +2388,7 @@ impl App {
         let dedup_options: &[(u64, &str)] =
             &[(0, "Off"), (2, "2s"), (5, "5s"), (10, "10s"), (30, "30s")];
         let mut dedup_row = row().spacing(6).align_y(iced::Alignment::Center);
-        dedup_row = dedup_row.push(text("Dedup window:").size(13));
+        dedup_row = dedup_row.push(text("Dedup window:").size(13).width(Length::Fixed(130.0)));
         for &(val, label) in dedup_options {
             let btn = if self.config.dedup_window_seconds == val {
                 widget::button::suggested(label)
@@ -2100,7 +2411,7 @@ impl App {
             (5 * 1024 * 1024, "5MB"),
         ];
         let mut size_row = row().spacing(6).align_y(iced::Alignment::Center);
-        size_row = size_row.push(text("Max item size:").size(13));
+        size_row = size_row.push(text("Max item size:").size(13).width(Length::Fixed(130.0)));
         for &(val, label) in max_size_options {
             let btn = if self.config.max_item_size == val {
                 widget::button::suggested(label)
@@ -2123,7 +2434,7 @@ impl App {
             (3600, "1h"),
         ];
         let mut cleanup_row = row().spacing(6).align_y(iced::Alignment::Center);
-        cleanup_row = cleanup_row.push(text("Cleanup every:").size(13));
+        cleanup_row = cleanup_row.push(text("Cleanup every:").size(13).width(Length::Fixed(130.0)));
         for &(val, label) in cleanup_options {
             let btn = if self.config.cleanup_interval_seconds == val {
                 widget::button::suggested(label)
@@ -2139,7 +2450,7 @@ impl App {
         content = content.push(cleanup_row);
 
         // ── Quick Paste ──────────────────────────────────────────────
-        content = content.push(text("⚡ Quick Paste").size(15));
+        content = content.push(text("Quick Paste").size(UI_SECTION_SIZE));
         let paste_status = match &self.paste_backend {
             Some(backend) => format!("Backend: {backend}"),
             None => "No backend found (install wtype or ydotool)".to_string(),
@@ -2164,7 +2475,7 @@ impl App {
         content = content.push(qp_btn);
 
         // ── Never Store (MIME Denylist) ───────────────────────────────
-        content = content.push(text("🚫 Never Store (MIME Denylist)").size(15));
+        content = content.push(text("Never Store (MIME Denylist)").size(UI_SECTION_SIZE));
         content = content
             .push(text("MIME types to ignore (e.g. application/x-kde-cutselection):").size(12));
 
@@ -2201,7 +2512,8 @@ impl App {
             content = content.push(entry_row);
         }
 
-        content = content.push(text("🚫 Never Store (Content Pattern Denylist)").size(15));
+        content =
+            content.push(text("Never Store (Content Pattern Denylist)").size(UI_SECTION_SIZE));
         content = content.push(
             text("Patterns support prefix (^otp), suffix (token$), or substring matching.")
                 .size(12),
@@ -2241,7 +2553,7 @@ impl App {
         }
 
         // ── Data ─────────────────────────────────────────────────────
-        content = content.push(text("💾 Data").size(15));
+        content = content.push(text("Data").size(UI_SECTION_SIZE));
         content = content.push(
             widget::button::destructive("Clear All Clipboard History")
                 .on_press(Message::ClearAll)
@@ -2271,7 +2583,7 @@ impl App {
         // ── Statistics ───────────────────────────────────────────────
         if let Some(db) = &self.db {
             if let Ok(stats) = db.get_stats() {
-                content = content.push(text("📊 Statistics").size(15));
+                content = content.push(text("Statistics").size(UI_SECTION_SIZE));
                 #[allow(clippy::cast_precision_loss)]
                 let size_kb = stats.total_size_bytes as f64 / 1024.0;
                 content = content.push(
@@ -2285,7 +2597,7 @@ impl App {
         }
 
         // ── Security Log ─────────────────────────────────────────────
-        content = content.push(text("🔒 Security Log").size(15));
+        content = content.push(text("Security Log").size(UI_SECTION_SIZE));
         if let Some(db) = &self.db {
             if let Ok(events) = db.get_audit_log(10) {
                 if events.is_empty() {
@@ -2306,7 +2618,7 @@ impl App {
         }
 
         // ── Keyboard Shortcuts ───────────────────────────────────────
-        content = content.push(text("⌨️ Keyboard Shortcuts").size(15));
+        content = content.push(text("Keyboard Shortcuts").size(UI_SECTION_SIZE));
         content = content.push(
             text(format!(
                 "Global shortcut: {}",
@@ -2333,7 +2645,7 @@ impl App {
         }
 
         // ── About ────────────────────────────────────────────────────
-        content = content.push(text(format!("ℹ️ About — v{version}")).size(15));
+        content = content.push(text(format!("About — v{version}")).size(UI_SECTION_SIZE));
         content = content.push(text("Author Clipboard — Native COSMIC clipboard manager").size(12));
         content = content.push(text(format!("Data: {}", self.config.data_dir.display())).size(12));
         content =
@@ -2356,37 +2668,19 @@ impl App {
     /// Scroll the clipboard list to keep the selected item visible.
     fn scroll_to_selected(&self) -> Task<Message> {
         if let Some(idx) = self.selected_index {
-            #[allow(clippy::cast_precision_loss)]
-            let item_top = idx as f32 * ITEM_ROW_HEIGHT;
-            let item_bottom = item_top + ITEM_ROW_HEIGHT;
-
-            let visible_top = self.scroll_offset_y;
-            let visible_bottom = self.scroll_offset_y + VISIBLE_SCROLL_HEIGHT;
-
-            if item_top < visible_top {
-                // Item is above visible area — scroll up so it's at top with padding
-                let target_y = (item_top - 8.0).max(0.0);
-                cosmic::iced_widget::scrollable::scroll_to(
+            let len = self.items.len();
+            if len <= 1 {
+                return cosmic::iced_widget::scrollable::snap_to(
                     clipboard_scroll_id(),
-                    cosmic::iced_widget::scrollable::AbsoluteOffset {
-                        x: 0.0,
-                        y: target_y,
-                    },
-                )
-            } else if item_bottom > visible_bottom {
-                // Item is below visible area — scroll down so it's at bottom with padding
-                let target_y = item_bottom - VISIBLE_SCROLL_HEIGHT + 8.0;
-                cosmic::iced_widget::scrollable::scroll_to(
-                    clipboard_scroll_id(),
-                    cosmic::iced_widget::scrollable::AbsoluteOffset {
-                        x: 0.0,
-                        y: target_y,
-                    },
-                )
-            } else {
-                // Item is already visible
-                Task::none()
+                    cosmic::iced_widget::scrollable::RelativeOffset::START,
+                );
             }
+            #[allow(clippy::cast_precision_loss)]
+            let ratio = idx as f32 / (len.saturating_sub(1)) as f32;
+            cosmic::iced_widget::scrollable::snap_to(
+                clipboard_scroll_id(),
+                cosmic::iced_widget::scrollable::RelativeOffset { x: 0.0, y: ratio },
+            )
         } else {
             Task::none()
         }
@@ -2395,16 +2689,24 @@ impl App {
     /// Scroll the emoji grid to keep the selected item visible.
     fn scroll_emoji_to_selected(&self) -> Task<Message> {
         if let Some(idx) = self.emoji_selected_idx {
+            let len = self.filtered_emojis().len();
+            if len == 0 {
+                return Task::none();
+            }
+            let idx = idx.min(len - 1);
+            let total_rows = len.div_ceil(EMOJI_COLS);
+            if total_rows <= 1 {
+                return cosmic::iced_widget::scrollable::snap_to(
+                    emoji_scroll_id(),
+                    cosmic::iced_widget::scrollable::RelativeOffset::START,
+                );
+            }
             let row_idx = idx / EMOJI_COLS;
             #[allow(clippy::cast_precision_loss)]
-            let target_y =
-                (row_idx as f32 * PICKER_ROW_HEIGHT - VISIBLE_SCROLL_HEIGHT / 2.0).max(0.0);
-            cosmic::iced_widget::scrollable::scroll_to(
+            let ratio = row_idx as f32 / (total_rows.saturating_sub(1)) as f32;
+            cosmic::iced_widget::scrollable::snap_to(
                 emoji_scroll_id(),
-                cosmic::iced_widget::scrollable::AbsoluteOffset {
-                    x: 0.0,
-                    y: target_y,
-                },
+                cosmic::iced_widget::scrollable::RelativeOffset { x: 0.0, y: ratio },
             )
         } else {
             Task::none()
@@ -2414,16 +2716,24 @@ impl App {
     /// Scroll the symbol grid to keep the selected item visible.
     fn scroll_symbol_to_selected(&self) -> Task<Message> {
         if let Some(idx) = self.symbol_selected_idx {
+            let len = self.filtered_symbols().len();
+            if len == 0 {
+                return Task::none();
+            }
+            let idx = idx.min(len - 1);
+            let total_rows = len.div_ceil(SYMBOL_COLS);
+            if total_rows <= 1 {
+                return cosmic::iced_widget::scrollable::snap_to(
+                    symbol_scroll_id(),
+                    cosmic::iced_widget::scrollable::RelativeOffset::START,
+                );
+            }
             let row_idx = idx / SYMBOL_COLS;
             #[allow(clippy::cast_precision_loss)]
-            let target_y =
-                (row_idx as f32 * PICKER_ROW_HEIGHT - VISIBLE_SCROLL_HEIGHT / 2.0).max(0.0);
-            cosmic::iced_widget::scrollable::scroll_to(
+            let ratio = row_idx as f32 / (total_rows.saturating_sub(1)) as f32;
+            cosmic::iced_widget::scrollable::snap_to(
                 symbol_scroll_id(),
-                cosmic::iced_widget::scrollable::AbsoluteOffset {
-                    x: 0.0,
-                    y: target_y,
-                },
+                cosmic::iced_widget::scrollable::RelativeOffset { x: 0.0, y: ratio },
             )
         } else {
             Task::none()
@@ -2433,16 +2743,24 @@ impl App {
     /// Scroll the kaomoji list to keep the selected item visible.
     fn scroll_kaomoji_to_selected(&self) -> Task<Message> {
         if let Some(idx) = self.kaomoji_selected_idx {
+            let len = self.filtered_kaomoji().len();
+            if len == 0 {
+                return Task::none();
+            }
+            let idx = idx.min(len - 1);
+            let total_rows = len.div_ceil(KAOMOJI_COLS);
+            if total_rows <= 1 {
+                return cosmic::iced_widget::scrollable::snap_to(
+                    kaomoji_scroll_id(),
+                    cosmic::iced_widget::scrollable::RelativeOffset::START,
+                );
+            }
             let row_idx = idx / KAOMOJI_COLS;
             #[allow(clippy::cast_precision_loss)]
-            let target_y =
-                (row_idx as f32 * PICKER_ROW_HEIGHT - VISIBLE_SCROLL_HEIGHT / 2.0).max(0.0);
-            cosmic::iced_widget::scrollable::scroll_to(
+            let ratio = row_idx as f32 / (total_rows.saturating_sub(1)) as f32;
+            cosmic::iced_widget::scrollable::snap_to(
                 kaomoji_scroll_id(),
-                cosmic::iced_widget::scrollable::AbsoluteOffset {
-                    x: 0.0,
-                    y: target_y,
-                },
+                cosmic::iced_widget::scrollable::RelativeOffset { x: 0.0, y: ratio },
             )
         } else {
             Task::none()
