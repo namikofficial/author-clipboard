@@ -5,35 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
+
 ## [0.5.0] - 2026-03-02
 
 ### 👷 CI
 
 - optimize CI to single job, add tag-triggered release workflow
+
 ### 🚀 Features
 
 - update version to 0.5.0 and format libcosmic dependencies
 - update version to 0.4.0 & enhance clipboard manager functionality
-- add security policy documentation## [0.3.1] - 2026-03-02
+- add security policy documentation
+
+## [0.3.1] - 2026-03-02
 
 ### 🐛 Bug Fixes
 
 - scroll position, layout, URI detection, IPC security
+
 ### 📚 Documentation
 
 - add Phase 11-14 to project plan, update status
-- add LICENSE, fix config, add install guide## [0.3.0] - 2026-03-01
+- add LICENSE, fix config, add install guide
+
+## [0.3.0] - 2026-03-01
 
 ### 🐛 Bug Fixes
 
 - **applet:** scroll follows selection, Enter works
+
 ### 📚 Documentation
 
 - update project plan and README for phases 9-10
+
 ### 🚀 Features
 
 - **applet:** add advanced keyboard navigation
-- **applet:** use COSMIC icons and daemon status## [0.2.0] - 2026-03-01
+- **applet:** use COSMIC icons and daemon status
+
+## [0.2.0] - 2026-03-01
 
 ### 🐛 Bug Fixes
 
@@ -41,6 +52,7 @@ and this project adheres to [Conventional Commits](https://www.conventionalcommi
 - **daemon:** fix Wayland clipboard capture crash and hang
 - **pre-commit:** improve comments and streamline staged file checks
 - update repository URL to use the official GitHub account
+
 ### 📚 Documentation
 
 - **development:** dev guide with tooling and workflow details
@@ -54,16 +66,24 @@ and this project adheres to [Conventional Commits](https://www.conventionalcommi
 - update documentation references and remove outdated README
 - enhance local testing guide with steps & troubleshooting tips
 - add contributing guide for author-clipboard
+
 ### 📦 Dependencies
 
 - **deps:** update libcosmic and add chrono to applet workspace
+
 ### 🔧 Refactoring
 
 - **applet:** remove signal-file visibility toggle
+
 ### 🔨 Miscellaneous
 
 - update Cargo.lock for clap dependency
 - add clap dependency and ctl crate to workspace
+- Add README.md with project overview, features, and development setup
+- Add .gitignore and project.yml for Serena configuration
+- Initialize author-clipboard workspace with multiple crates
+- Add .gitignore file for Rust workspace to exclude build artifacts and temporary files
+
 ### 🚀 Features
 
 - **applet:** toggle functionality for applet launch and termination
@@ -77,6 +97,8 @@ and this project adheres to [Conventional Commits](https://www.conventionalcommi
 - **daemon:** 🎯 add IPC server for shortcut activation
 - **daemon:** clear sensitive clipboard items on screen lock
 - **database:** clipboard item management with deduplication & stats
+- **deps:** add image processing library and update deps in Cargo.toml
+- **emoji:** emoji categories and search functionality for emoji picker
 - **env:** .env.example for dev config & load settings in justfile
 - **pre-commit:** check only staged Rust files
 - **project-plan:** update development phases to reflect progress
@@ -93,3 +115,5 @@ and this project adheres to [Conventional Commits](https://www.conventionalcommi
 - add image handling and incognito mode support
 - add changelog generation and release tasks to justfile
 - add clipboard daemon and applet with Wayland support
+
+

@@ -36,16 +36,20 @@ body = """
 - {{ commit.message }}
   {%- if commit.breaking %} [**BREAKING**]{% endif %}
 {%- endif -%}
-{%- endfor -%}
+{%- endfor %}
 {% endfor %}
 """
 footer = ""
-trim = true
+trim = false
 
 [git]
 conventional_commits = true
-filter_unconventional = true
+filter_unconventional = false
 split_commits = false
+commit_preprocessors = [
+  # Keep only the subject line — strips commit bodies from changelog entries
+  { pattern = '\n[\s\S]*', replace = "" },
+]
 commit_parsers = [
   { message = "^feat", group = "🚀 Features" },
   { message = "^fix", group = "🐛 Bug Fixes" },
@@ -60,6 +64,7 @@ commit_parsers = [
   { message = "^chore\\(deps\\)", group = "📦 Dependencies" },
   { message = "^chore", group = "🔨 Miscellaneous" },
   { message = "^revert", group = "⏪ Reverts" },
+  { message = ".*", group = "🔨 Miscellaneous" },
 ]
 protect_breaking_commits = false
 filter_commits = false
