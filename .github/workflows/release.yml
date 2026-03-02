@@ -1,0 +1,87 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]*"
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  release:
+    name: Build & Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history needed for git-cliff changelog
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-full
+
+      # Full deps including libcosmic requirements
+      - name: Install system dependencies
+        run: |
+          sudo apt-get install -y --no-install-recommends \
+            libwayland-dev libxkbcommon-dev libinput-dev libseat-dev \
+            libgbm-dev libdbus-1-dev libudev-dev libpixman-1-dev pkg-config
+
+      # Quick sanity checks before spending time on a full build
+      - name: Format check
+        run: cargo fmt --all -- --check
+
+      - name: Clippy (shared/daemon/ctl)
+        run: |
+          cargo clippy \
+            -p author-clipboard-shared \
+            -p author-clipboard-daemon \
+            -p author-clipboard-ctl \
+            -- -D warnings
+
+      - name: Tests
+        run: cargo test -p author-clipboard-shared
+
+      # Full release build (includes applet / libcosmic)
+      - name: Build release binaries
+        run: cargo build --release --workspace
+
+      # Install cargo-deb and build the .deb package
+      - name: Install cargo-deb
+        run: cargo install cargo-deb --locked
+
+      - name: Build .deb package
+        run: cargo deb -p author-clipboard-applet --no-build
+
+      # Generate changelog for this tag using git-cliff
+      - name: Generate changelog
+        id: changelog
+        uses: orhun/git-cliff-action@v3
+        with:
+          config: cliff.toml
+          args: --latest --strip header
+        env:
+          OUTPUT: RELEASE_NOTES.md
+          GITHUB_REPO: ${{ github.repository }}
+
+      # Create the GitHub Release with .deb as asset
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          body_path: RELEASE_NOTES.md
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          files: |
+            target/debian/author-clipboard_*.deb
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
