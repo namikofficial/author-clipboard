@@ -26,9 +26,9 @@ const SEARCH_INPUT_ID: fn() -> widget::Id = || widget::Id::new("search-input");
 const CLIPBOARD_SCROLL_ID: fn() -> widget::Id = || widget::Id::new("clipboard-scroll");
 
 /// Approximate height of each clipboard item row in pixels (for scroll offset calculation).
-const ITEM_ROW_HEIGHT: f32 = 64.0;
+const ITEM_ROW_HEIGHT: f32 = 76.0;
 /// Approximate visible height of the scrollable area.
-const VISIBLE_SCROLL_HEIGHT: f32 = 420.0;
+const VISIBLE_SCROLL_HEIGHT: f32 = 460.0;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
@@ -41,7 +41,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("author-clipboard applet starting...");
 
     let settings = Settings::default()
-        .size(Size::new(480.0, 640.0))
+        .size(Size::new(520.0, 700.0))
         .debug(false);
 
     cosmic::app::run::<App>(settings, ())?;
@@ -251,7 +251,7 @@ impl cosmic::Application for App {
         match message {
             Message::Tick => {
                 if self.active_tab == AppTab::Clipboard {
-                    self.refresh_items();
+                    self.smart_refresh_items();
                 }
                 self.daemon_running = check_daemon_running();
             }
@@ -749,6 +749,32 @@ impl App {
         }
     }
 
+    /// Refresh items only when the data has actually changed to preserve scroll position.
+    fn smart_refresh_items(&mut self) {
+        if let Some(db) = &self.db {
+            let result = if self.search_query.is_empty() {
+                db.get_recent(self.config.max_items)
+            } else {
+                db.search(&self.search_query, self.config.max_items)
+            };
+
+            match result {
+                Ok(new_items) => {
+                    // Only update if items changed (compare IDs and pin states)
+                    let changed = new_items.len() != self.items.len()
+                        || new_items
+                            .iter()
+                            .zip(self.items.iter())
+                            .any(|(a, b)| a.id != b.id || a.pinned != b.pinned);
+                    if changed {
+                        self.items = new_items;
+                    }
+                }
+                Err(e) => warn!("Failed to load items: {e}"),
+            }
+        }
+    }
+
     fn visible_item_count(&self) -> usize {
         match self.active_tab {
             AppTab::Clipboard => self.items.len(),
@@ -1014,15 +1040,20 @@ impl App {
             emoji::search(&self.search_query)
         };
 
-        let mut grid = column().spacing(4);
-        let cols = 8;
+        let mut grid = column().spacing(2);
+        let cols = 7;
         for chunk in emojis.chunks(cols) {
-            let mut grid_row = row().spacing(4);
+            let mut grid_row = row().spacing(2);
             for &emoji_char in chunk {
                 let btn = widget::button::text(emoji_char)
                     .on_press(Message::CopyText(emoji_char.to_string()))
-                    .padding([6, 8]);
+                    .width(Length::Fill)
+                    .padding([8, 4]);
                 grid_row = grid_row.push(btn);
+            }
+            // Pad incomplete rows with empty space
+            for _ in chunk.len()..cols {
+                grid_row = grid_row.push(cosmic::iced::widget::horizontal_space());
             }
             grid = grid.push(grid_row);
         }
@@ -1067,19 +1098,23 @@ impl App {
             symbols::search(&self.search_query)
         };
 
-        let mut list = column().spacing(4);
-        let cols = 6;
+        let mut list = column().spacing(2);
+        let cols = 5;
         for chunk in syms.chunks(cols) {
-            let mut grid_row = row().spacing(4);
+            let mut grid_row = row().spacing(2);
             for &(sym, desc) in chunk {
                 let btn = widget::tooltip(
                     widget::button::text(sym)
                         .on_press(Message::CopyText(sym.to_string()))
-                        .padding([8, 12]),
+                        .width(Length::Fill)
+                        .padding([8, 8]),
                     text(desc).size(12.0),
                     widget::tooltip::Position::Bottom,
                 );
                 grid_row = grid_row.push(btn);
+            }
+            for _ in chunk.len()..cols {
+                grid_row = grid_row.push(cosmic::iced::widget::horizontal_space());
             }
             list = list.push(grid_row);
         }
@@ -1094,21 +1129,24 @@ impl App {
     fn view_kaomoji(&self) -> Element<'_, Message> {
         let mut content = column().spacing(8).width(Length::Fill);
 
-        // Category selector (horizontal scrolling row)
+        // Category selector (horizontal scrolling row, compact labels)
         if self.search_query.is_empty() {
-            let mut cat_row = row().spacing(4);
+            let mut cat_row = row().spacing(2);
             for (idx, cat) in kaomoji::CATEGORIES.iter().enumerate() {
-                let label = format!("{} {}", cat.icon, cat.name);
                 let btn = if idx == self.kaomoji_category_idx {
-                    widget::button::suggested(label)
+                    widget::button::suggested(cat.icon)
                         .on_press(Message::KaomojiCategory(idx))
-                        .padding([4, 8])
+                        .padding([4, 6])
                 } else {
-                    widget::button::text(label)
+                    widget::button::text(cat.icon)
                         .on_press(Message::KaomojiCategory(idx))
-                        .padding([4, 8])
+                        .padding([4, 6])
                 };
-                cat_row = cat_row.push(btn);
+                cat_row = cat_row.push(widget::tooltip(
+                    btn,
+                    text(cat.name).size(11.0),
+                    widget::tooltip::Position::Bottom,
+                ));
             }
             content = content.push(widget::scrollable::horizontal(cat_row));
 
@@ -1116,23 +1154,34 @@ impl App {
             content = content.push(text(cat.name).size(13.0));
         }
 
-        // Kaomoji list (vertical, since they're wider than emoji)
+        // Kaomoji list in 2-column grid
         let items = self.filtered_kaomoji();
-        let mut list = column().spacing(4).width(Length::Fill);
-        for (idx, &kaomoji_str) in items.iter().enumerate() {
-            let is_selected = self.selected_index == Some(idx);
-            let btn = if is_selected {
-                widget::button::suggested(kaomoji_str)
-                    .on_press(Message::CopyText(kaomoji_str.to_string()))
-                    .width(Length::Fill)
-                    .padding([6, 12])
-            } else {
-                widget::button::text(kaomoji_str)
-                    .on_press(Message::CopyText(kaomoji_str.to_string()))
-                    .width(Length::Fill)
-                    .padding([6, 12])
-            };
-            list = list.push(btn);
+        let mut list = column().spacing(3).width(Length::Fill);
+        for chunk in items.chunks(2) {
+            let mut grid_row = row().spacing(4);
+            for (sub_idx, &kaomoji_str) in chunk.iter().enumerate() {
+                let global_idx = items
+                    .iter()
+                    .position(|&k| k == kaomoji_str)
+                    .unwrap_or(sub_idx);
+                let is_selected = self.selected_index == Some(global_idx);
+                let btn = if is_selected {
+                    widget::button::suggested(kaomoji_str)
+                        .on_press(Message::CopyText(kaomoji_str.to_string()))
+                        .width(Length::Fill)
+                        .padding([6, 8])
+                } else {
+                    widget::button::text(kaomoji_str)
+                        .on_press(Message::CopyText(kaomoji_str.to_string()))
+                        .width(Length::Fill)
+                        .padding([6, 8])
+                };
+                grid_row = grid_row.push(btn);
+            }
+            if chunk.len() == 1 {
+                grid_row = grid_row.push(cosmic::iced::widget::horizontal_space());
+            }
+            list = list.push(grid_row);
         }
 
         content = content.push(scrollable(list).width(Length::Fill).height(Length::Fill));

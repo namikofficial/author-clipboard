@@ -57,12 +57,30 @@ pub enum IpcError {
 
 /// Returns the default IPC socket path.
 ///
-/// Uses `$XDG_RUNTIME_DIR/author-clipboard.sock` if available,
-/// falls back to `/tmp/author-clipboard.sock`.
+/// Uses `$XDG_RUNTIME_DIR/author-clipboard.sock` if available.
+/// Falls back to a private cache directory with restricted permissions
+/// instead of world-writable `/tmp` to prevent symlink attacks.
 pub fn socket_path() -> PathBuf {
-    std::env::var("XDG_RUNTIME_DIR")
-        .map_or_else(|_| PathBuf::from("/tmp"), PathBuf::from)
-        .join("author-clipboard.sock")
+    if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
+        return PathBuf::from(dir).join("author-clipboard.sock");
+    }
+
+    // Fallback: private cache directory (not /tmp)
+    let cache_dir = directories::ProjectDirs::from("com", "namikofficial", "author-clipboard")
+        .map_or_else(
+            || {
+                let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+                PathBuf::from(home).join(".cache/author-clipboard")
+            },
+            |dirs| dirs.cache_dir().to_path_buf(),
+        );
+    let _ = std::fs::create_dir_all(&cache_dir);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&cache_dir, std::fs::Permissions::from_mode(0o700));
+    }
+    cache_dir.join("author-clipboard.sock")
 }
 
 /// IPC server that listens for incoming connections on a Unix domain socket.

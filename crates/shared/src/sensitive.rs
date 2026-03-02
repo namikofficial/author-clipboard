@@ -92,7 +92,20 @@ fn is_jwt_like(s: &str) -> bool {
 
 fn has_connection_credentials(s: &str) -> bool {
     let lower = s.to_lowercase();
-    // Database connection strings
+    // URI format: scheme://user:password@host
+    if lower.contains("://") && lower.contains('@') {
+        // Check for user:pass@host pattern
+        if let Some(after_scheme) = lower.split("://").nth(1) {
+            if after_scheme.contains(':') && after_scheme.contains('@') {
+                let at_pos = after_scheme.find('@').unwrap_or(0);
+                let colon_pos = after_scheme.find(':').unwrap_or(0);
+                if colon_pos < at_pos {
+                    return true;
+                }
+            }
+        }
+    }
+    // Key=value connection strings
     (lower.contains("password=") || lower.contains("pwd="))
         && (lower.contains("server=")
             || lower.contains("host=")
@@ -200,9 +213,12 @@ mod tests {
         assert!(
             check_sensitivity("Server=localhost;Database=mydb;Password=secret123").is_sensitive
         );
-        assert!(!check_sensitivity("postgresql://user:pass@host:5432/db").is_sensitive);
+        assert!(check_sensitivity("postgresql://user:pass@host:5432/db").is_sensitive);
+        assert!(check_sensitivity("mysql://admin:secret@db.example.com/mydb").is_sensitive);
         // URL with password= param
         assert!(check_sensitivity("host=localhost password=secret").is_sensitive);
+        // Plain URL without credentials should not trigger
+        assert!(!check_sensitivity("https://example.com/page").is_sensitive);
     }
 
     #[test]
