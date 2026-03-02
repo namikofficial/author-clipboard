@@ -41,10 +41,12 @@ fn kaomoji_scroll_id() -> widget::Id {
     widget::Id::new("kaomoji-scroll")
 }
 
-/// Picker grid columns and row heights used for keyboard navigation + scrolling.
-const EMOJI_COLS: usize = 6;
-const SYMBOL_COLS: usize = 4;
-const KAOMOJI_COLS: usize = 2;
+/// Picker grid columns used for keyboard navigation and rendering layout.
+const EMOJI_COLS: usize = 1;
+const SYMBOL_COLS: usize = 1;
+const KAOMOJI_COLS: usize = 1;
+/// Number of rows jumped by PageUp/PageDown in picker tabs.
+const PICKER_PAGE_SIZE: usize = 5;
 const UI_TITLE_SIZE: f32 = 17.0;
 const UI_SECTION_SIZE: f32 = 15.0;
 const UI_META_SIZE: f32 = 11.0;
@@ -348,11 +350,9 @@ impl cosmic::Application for App {
                 captured,
             } => {
                 if let Some(mapped) = map_key_to_message(&key, modifiers) {
-                    // Let tab switching work globally. In Settings/Snippets, avoid reacting to keys captured by input widgets.
-                    if captured
-                        && matches!(self.active_tab, AppTab::Settings | AppTab::Snippets)
-                        && !matches!(mapped, Message::NextTab | Message::PreviousTab)
-                    {
+                    // Let tab switching work globally. When a widget (e.g. search input) has captured
+                    // the key event, don't also fire navigation — prevents desync on picker tabs.
+                    if captured && !matches!(mapped, Message::NextTab | Message::PreviousTab) {
                         return Task::none();
                     }
                     return self.update(mapped);
@@ -478,7 +478,7 @@ impl cosmic::Application for App {
                         let len = self.filtered_emojis().len();
                         if len > 0 {
                             let next = match self.emoji_selected_idx {
-                                Some(i) => i + 1,
+                                Some(i) => i + EMOJI_COLS,
                                 None => 0,
                             };
                             self.emoji_selected_idx = Some(next.min(len - 1));
@@ -489,7 +489,7 @@ impl cosmic::Application for App {
                         let len = self.filtered_symbols().len();
                         if len > 0 {
                             let next = match self.symbol_selected_idx {
-                                Some(i) => i + 1,
+                                Some(i) => i + SYMBOL_COLS,
                                 None => 0,
                             };
                             self.symbol_selected_idx = Some(next.min(len - 1));
@@ -500,7 +500,7 @@ impl cosmic::Application for App {
                         let len = self.filtered_kaomoji().len();
                         if len > 0 {
                             let next = match self.kaomoji_selected_idx {
-                                Some(i) => i + 1,
+                                Some(i) => i + KAOMOJI_COLS,
                                 None => 0,
                             };
                             self.kaomoji_selected_idx = Some(next.min(len - 1));
@@ -525,24 +525,33 @@ impl cosmic::Application for App {
                     AppTab::Emoji => {
                         let len = self.filtered_emojis().len();
                         if len > 0 {
-                            self.emoji_selected_idx =
-                                Some(self.emoji_selected_idx.unwrap_or(0).saturating_sub(1));
+                            self.emoji_selected_idx = Some(
+                                self.emoji_selected_idx
+                                    .unwrap_or(len)
+                                    .saturating_sub(EMOJI_COLS),
+                            );
                         }
                         self.scroll_emoji_to_selected()
                     }
                     AppTab::Symbols => {
                         let len = self.filtered_symbols().len();
                         if len > 0 {
-                            self.symbol_selected_idx =
-                                Some(self.symbol_selected_idx.unwrap_or(0).saturating_sub(1));
+                            self.symbol_selected_idx = Some(
+                                self.symbol_selected_idx
+                                    .unwrap_or(len)
+                                    .saturating_sub(SYMBOL_COLS),
+                            );
                         }
                         self.scroll_symbol_to_selected()
                     }
                     AppTab::Kaomoji => {
                         let len = self.filtered_kaomoji().len();
                         if len > 0 {
-                            self.kaomoji_selected_idx =
-                                Some(self.kaomoji_selected_idx.unwrap_or(0).saturating_sub(1));
+                            self.kaomoji_selected_idx = Some(
+                                self.kaomoji_selected_idx
+                                    .unwrap_or(len)
+                                    .saturating_sub(KAOMOJI_COLS),
+                            );
                         }
                         self.scroll_kaomoji_to_selected()
                     }
@@ -900,27 +909,27 @@ impl cosmic::Application for App {
                     AppTab::Emoji => {
                         let len = self.filtered_emojis().len();
                         if len > 0 {
-                            let page_size = EMOJI_COLS * 5;
                             let current = self.emoji_selected_idx.unwrap_or(0);
-                            self.emoji_selected_idx = Some((current + page_size).min(len - 1));
+                            self.emoji_selected_idx =
+                                Some((current + PICKER_PAGE_SIZE).min(len - 1));
                         }
                         self.scroll_emoji_to_selected()
                     }
                     AppTab::Symbols => {
                         let len = self.filtered_symbols().len();
                         if len > 0 {
-                            let page_size = SYMBOL_COLS * 5;
                             let current = self.symbol_selected_idx.unwrap_or(0);
-                            self.symbol_selected_idx = Some((current + page_size).min(len - 1));
+                            self.symbol_selected_idx =
+                                Some((current + PICKER_PAGE_SIZE).min(len - 1));
                         }
                         self.scroll_symbol_to_selected()
                     }
                     AppTab::Kaomoji => {
                         let len = self.filtered_kaomoji().len();
                         if len > 0 {
-                            let page_size = KAOMOJI_COLS * 6;
                             let current = self.kaomoji_selected_idx.unwrap_or(0);
-                            self.kaomoji_selected_idx = Some((current + page_size).min(len - 1));
+                            self.kaomoji_selected_idx =
+                                Some((current + PICKER_PAGE_SIZE).min(len - 1));
                         }
                         self.scroll_kaomoji_to_selected()
                     }
@@ -940,25 +949,25 @@ impl cosmic::Application for App {
                 return match self.active_tab {
                     AppTab::Emoji => {
                         if !self.filtered_emojis().is_empty() {
-                            let page_size = EMOJI_COLS * 5;
                             let current = self.emoji_selected_idx.unwrap_or(0);
-                            self.emoji_selected_idx = Some(current.saturating_sub(page_size));
+                            self.emoji_selected_idx =
+                                Some(current.saturating_sub(PICKER_PAGE_SIZE));
                         }
                         self.scroll_emoji_to_selected()
                     }
                     AppTab::Symbols => {
                         if !self.filtered_symbols().is_empty() {
-                            let page_size = SYMBOL_COLS * 5;
                             let current = self.symbol_selected_idx.unwrap_or(0);
-                            self.symbol_selected_idx = Some(current.saturating_sub(page_size));
+                            self.symbol_selected_idx =
+                                Some(current.saturating_sub(PICKER_PAGE_SIZE));
                         }
                         self.scroll_symbol_to_selected()
                     }
                     AppTab::Kaomoji => {
                         if !self.filtered_kaomoji().is_empty() {
-                            let page_size = KAOMOJI_COLS * 6;
                             let current = self.kaomoji_selected_idx.unwrap_or(0);
-                            self.kaomoji_selected_idx = Some(current.saturating_sub(page_size));
+                            self.kaomoji_selected_idx =
+                                Some(current.saturating_sub(PICKER_PAGE_SIZE));
                         }
                         self.scroll_kaomoji_to_selected()
                     }
@@ -1768,19 +1777,22 @@ impl App {
                 let btn = if is_selected {
                     widget::button::suggested(emoji_char)
                         .on_press(Message::CopyText(emoji_char.to_string()))
-                        .width(Length::Fill)
+                        .width(Length::FillPortion(1))
                         .padding([12, 8])
                 } else {
                     widget::button::text(emoji_char)
                         .on_press(Message::CopyText(emoji_char.to_string()))
-                        .width(Length::Fill)
+                        .width(Length::FillPortion(1))
                         .padding([12, 8])
                 };
                 grid_row = grid_row.push(btn);
                 flat_idx += 1;
             }
             for _ in chunk.len()..EMOJI_COLS {
-                grid_row = grid_row.push(cosmic::iced::widget::horizontal_space());
+                grid_row = grid_row.push(
+                    container(cosmic::iced::widget::horizontal_space())
+                        .width(Length::FillPortion(1)),
+                );
             }
             grid = grid.push(grid_row);
         }
@@ -1913,12 +1925,12 @@ impl App {
                 let sym_btn = if is_selected {
                     widget::button::suggested(sym)
                         .on_press(Message::CopyText(sym.to_string()))
-                        .width(Length::Fill)
+                        .width(Length::FillPortion(1))
                         .padding([12, 10])
                 } else {
                     widget::button::text(sym)
                         .on_press(Message::CopyText(sym.to_string()))
-                        .width(Length::Fill)
+                        .width(Length::FillPortion(1))
                         .padding([12, 10])
                 };
                 let btn = widget::tooltip(
@@ -1930,7 +1942,10 @@ impl App {
                 flat_idx += 1;
             }
             for _ in chunk.len()..SYMBOL_COLS {
-                grid_row = grid_row.push(cosmic::iced::widget::horizontal_space());
+                grid_row = grid_row.push(
+                    container(cosmic::iced::widget::horizontal_space())
+                        .width(Length::FillPortion(1)),
+                );
             }
             list = list.push(grid_row);
         }
@@ -2057,19 +2072,22 @@ impl App {
                     let btn = if is_selected {
                         widget::button::suggested(kaomoji_str)
                             .on_press(Message::CopyText(kaomoji_str.to_string()))
-                            .width(Length::Fill)
+                            .width(Length::FillPortion(1))
                             .padding([10, 14])
                     } else {
                         widget::button::text(kaomoji_str)
                             .on_press(Message::CopyText(kaomoji_str.to_string()))
-                            .width(Length::Fill)
+                            .width(Length::FillPortion(1))
                             .padding([10, 14])
                     };
                     grid_row = grid_row.push(btn);
                     flat_idx += 1;
                 }
-                if chunk.len() == 1 {
-                    grid_row = grid_row.push(cosmic::iced::widget::horizontal_space());
+                for _ in chunk.len()..KAOMOJI_COLS {
+                    grid_row = grid_row.push(
+                        container(cosmic::iced::widget::horizontal_space())
+                            .width(Length::FillPortion(1)),
+                    );
                 }
                 list = list.push(grid_row);
             }
@@ -2690,20 +2708,15 @@ impl App {
     fn scroll_emoji_to_selected(&self) -> Task<Message> {
         if let Some(idx) = self.emoji_selected_idx {
             let len = self.filtered_emojis().len();
-            if len == 0 {
-                return Task::none();
-            }
-            let idx = idx.min(len - 1);
-            let total_rows = len.div_ceil(EMOJI_COLS);
-            if total_rows <= 1 {
+            if len <= 1 {
                 return cosmic::iced_widget::scrollable::snap_to(
                     emoji_scroll_id(),
                     cosmic::iced_widget::scrollable::RelativeOffset::START,
                 );
             }
-            let row_idx = idx / EMOJI_COLS;
+            let idx = idx.min(len - 1);
             #[allow(clippy::cast_precision_loss)]
-            let ratio = row_idx as f32 / (total_rows.saturating_sub(1)) as f32;
+            let ratio = idx as f32 / (len.saturating_sub(1)) as f32;
             cosmic::iced_widget::scrollable::snap_to(
                 emoji_scroll_id(),
                 cosmic::iced_widget::scrollable::RelativeOffset { x: 0.0, y: ratio },
@@ -2717,20 +2730,15 @@ impl App {
     fn scroll_symbol_to_selected(&self) -> Task<Message> {
         if let Some(idx) = self.symbol_selected_idx {
             let len = self.filtered_symbols().len();
-            if len == 0 {
-                return Task::none();
-            }
-            let idx = idx.min(len - 1);
-            let total_rows = len.div_ceil(SYMBOL_COLS);
-            if total_rows <= 1 {
+            if len <= 1 {
                 return cosmic::iced_widget::scrollable::snap_to(
                     symbol_scroll_id(),
                     cosmic::iced_widget::scrollable::RelativeOffset::START,
                 );
             }
-            let row_idx = idx / SYMBOL_COLS;
+            let idx = idx.min(len - 1);
             #[allow(clippy::cast_precision_loss)]
-            let ratio = row_idx as f32 / (total_rows.saturating_sub(1)) as f32;
+            let ratio = idx as f32 / (len.saturating_sub(1)) as f32;
             cosmic::iced_widget::scrollable::snap_to(
                 symbol_scroll_id(),
                 cosmic::iced_widget::scrollable::RelativeOffset { x: 0.0, y: ratio },
@@ -2744,20 +2752,15 @@ impl App {
     fn scroll_kaomoji_to_selected(&self) -> Task<Message> {
         if let Some(idx) = self.kaomoji_selected_idx {
             let len = self.filtered_kaomoji().len();
-            if len == 0 {
-                return Task::none();
-            }
-            let idx = idx.min(len - 1);
-            let total_rows = len.div_ceil(KAOMOJI_COLS);
-            if total_rows <= 1 {
+            if len <= 1 {
                 return cosmic::iced_widget::scrollable::snap_to(
                     kaomoji_scroll_id(),
                     cosmic::iced_widget::scrollable::RelativeOffset::START,
                 );
             }
-            let row_idx = idx / KAOMOJI_COLS;
+            let idx = idx.min(len - 1);
             #[allow(clippy::cast_precision_loss)]
-            let ratio = row_idx as f32 / (total_rows.saturating_sub(1)) as f32;
+            let ratio = idx as f32 / (len.saturating_sub(1)) as f32;
             cosmic::iced_widget::scrollable::snap_to(
                 kaomoji_scroll_id(),
                 cosmic::iced_widget::scrollable::RelativeOffset { x: 0.0, y: ratio },
