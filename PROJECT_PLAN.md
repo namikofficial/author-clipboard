@@ -2,9 +2,9 @@
 
 > Development roadmap and technical specifications for the COSMIC-native clipboard manager
 
-**Document Version:** 1.0  
-**Last Updated:** March 1, 2026  
-**Project Status:** Phase 11 Complete — v0.3.1
+**Document Version:** 1.1
+**Last Updated:** March 3, 2026
+**Project Status:** Phase 14 Complete — v0.3.1
 
 ---
 
@@ -35,7 +35,7 @@ Build a native, high-performance clipboard manager for COSMIC desktop that deliv
 
 ### Success Metrics
 - Launch to working clipboard history: **< 200ms**
-- Global shortcut response: **< 100ms**  
+- Global shortcut response: **< 100ms**
 - Memory footprint: **< 50MB typical usage**
 - Compatibility: **100% COSMIC DE support**
 - User adoption: **Community feedback positive**
@@ -45,7 +45,7 @@ Build a native, high-performance clipboard manager for COSMIC desktop that deliv
 ## 🚀 Development Phases
 
 ### Phase 0: Clipboard Watcher Prototype ✅ **COMPLETE**
-**Duration:** 1 week  
+**Duration:** 1 week
 **Goal:** Prove Wayland clipboard monitoring works on COSMIC
 
 #### Deliverables
@@ -63,7 +63,7 @@ Build a native, high-performance clipboard manager for COSMIC desktop that deliv
 fn main() -> Result<()> {
     let display = wayland_client::Display::connect_to_env()?;
     let data_control_manager = get_data_control_manager(&display)?;
-    
+
     loop {
         // Listen for clipboard changes
         // Print new content to stdout
@@ -360,45 +360,58 @@ enum SecurityLevel {
 
 ---
 
-### Phase 12: Advanced Features (PLANNED)
-**Goal:** Implement remaining high-value features from security audit
+### Phase 12: Database & CI Hardening ✅ **COMPLETE**
+**Goal:** Production-grade database features and continuous integration
 
-#### Planned Deliverables
-- [ ] Full-text search index (SQLite FTS5) for instant search at scale
-- [ ] Per-item TTL controls (OTP: 2 min, tokens: 1 hour, normal: 7 days)
-- [ ] "Never store" rules: MIME type denylist and regex exclusion rules
-- [ ] Clipboard ignore rules by source application (where Wayland allows)
-- [ ] Encrypted export/import (password-protected JSON backup)
-- [ ] Dedup policy controls (within N seconds, exact only, etc.)
-- [ ] Crash-safe SQLite (WAL mode, journaling)
-- [ ] GitHub Actions CI (fmt, clippy, test, build)
+#### Deliverables
+- [x] Full-text search index (SQLite FTS5 virtual table `clipboard_fts` with LIKE fallback)
+- [x] Per-item TTL controls (`set_item_ttl` per item, `delete_expired` cleanup)
+- [x] Dedup policy controls (`dedup_window_seconds` config, `has_recent_duplicate` check)
+- [x] Crash-safe SQLite (WAL mode via `PRAGMA journal_mode=WAL`)
+- [x] GitHub Actions CI (`.github/workflows/ci.yml`: fmt → clippy → test → build)
 
----
-
-### Phase 13: Packaging & Distribution (PLANNED)
-**Goal:** Make installation easy for end users
-
-#### Planned Deliverables
-- [ ] `.deb` package (Pop!_OS, Ubuntu)
-- [ ] Arch Linux PKGBUILD
-- [ ] Nix flake
-- [ ] Flatpak (if feasible with Wayland protocols)
-- [ ] Systemd user service auto-install and enable/disable commands
-- [ ] COSMIC app store submission
-- [ ] Pre-built binary releases via GitHub Actions
+#### Success Criteria
+- FTS5 search returns results instantly at scale with automatic LIKE fallback
+- Per-item TTL allows fine-grained retention (OTPs, tokens, normal items)
+- Dedup window prevents duplicate entries within configurable time window
+- WAL mode ensures crash safety and concurrent read performance
+- CI runs on every push and PR to `main`
 
 ---
 
-### Phase 14: Security & Encryption (PLANNED)
-**Goal:** Production-grade security features
+### Phase 13: Packaging & Systemd Integration ✅ **COMPLETE**
+**Goal:** Easy installation and service management for end users
 
-#### Planned Deliverables
-- [ ] Proper encryption key management (OS keyring, passphrase, or file key)
-- [ ] Verified at-rest encryption for sensitive items (ciphertext + nonce stored)
-- [ ] Screen lock detection for multiple lockers (loginctl, swaylock, etc.)
-- [ ] Threat model documentation (SECURITY.md)
-- [ ] Permissions model for quick paste backends
-- [ ] CODEOWNERS file for contribution areas
+#### Deliverables
+- [x] Systemd user service (`data/author-clipboard-daemon.service`)
+- [x] `just install` command (builds release, installs binaries + .desktop + icon + systemd service)
+- [x] `just enable` / `just disable` commands (start/stop daemon service)
+- [x] `just status` and `just logs` commands (service status and journal logs)
+- [x] `just uninstall` command (removes binaries, .desktop, icon, systemd service)
+- [x] Packaging documentation (`docs/PACKAGING.md` with Arch PKGBUILD, manual install, cargo install)
+
+#### Success Criteria
+- `just install && just enable` gets a user from source to running daemon
+- Service auto-restarts on failure and starts on graphical session login
+- `just uninstall` cleanly removes all installed files
+
+---
+
+### Phase 14: Security Documentation & Screen Lock ✅ **COMPLETE**
+**Goal:** Production-grade security documentation and multi-locker screen lock detection
+
+#### Deliverables
+- [x] `SECURITY.md` with full threat model (what is/isn't protected, encryption details, sensitive detection patterns)
+- [x] `.github/CODEOWNERS` file for contribution area ownership
+- [x] Screen lock detection module (`shared/src/screen_lock.rs`) supporting `loginctl` and D-Bus `org.freedesktop.ScreenSaver`
+- [x] Vulnerability reporting policy (GitHub Security Advisory)
+- [x] Security best practices for users documented
+
+#### Success Criteria
+- Threat model clearly documents what the project protects against and what it does not
+- Screen lock detection works with systemd-logind and D-Bus screensavers
+- CODEOWNERS routes PRs to the correct reviewers
+- Security policy follows GitHub responsible disclosure practices
 ---
 
 ## 🏗️ Technical Architecture
@@ -410,16 +423,16 @@ graph TB
     A[Wayland Compositor] --> B[wlr-data-control]
     B --> C[clipboard-daemon]
     C --> D[SQLite Database]
-    
+
     E[Global Shortcut] --> F[COSMIC Applet]
     F --> G[Search/Filter]
     F --> H[Tab Navigation]
-    
+
     H --> I[Clipboard Tab]
-    H --> J[Emoji Tab]  
+    H --> J[Emoji Tab]
     H --> K[GIF Tab]
     H --> L[Symbol Tab]
-    
+
     I --> M[Item Selection]
     M --> N[Clipboard API]
     N --> O[Target Application]
@@ -467,19 +480,19 @@ CREATE INDEX idx_pinned ON clipboard_items(pinned);
 
 ## 📊 Implementation Status
 
-### Current Progress (Phase 11 — Complete)
+### Current Progress (Phase 14 — Complete)
 
 | Task | Status | Notes |
 |------|--------|-------|
 | Project structure | ✅ Complete | Workspace, crates, justfile configured |
 | Build system | ✅ Complete | Cargo workspace with pedantic clippy lints |
-| Documentation | ✅ Complete | README, PROJECT_PLAN, setup guide, contributing, dev guide, local testing |
+| Documentation | ✅ Complete | README, PROJECT_PLAN, FEATURES, SECURITY, PACKAGING, setup guide, contributing, dev guide, local testing |
 | Code quality tooling | ✅ Complete | rustfmt, clippy pedantic, pre-commit hooks, conventional commits |
 | Changelog generation | ✅ Complete | git-cliff with `just release` |
 | Wayland clipboard watcher | ✅ Complete | Full wlr-data-control-v1 integration |
-| Database (CRUD + search) | ✅ Complete | Insert, query, search, pin, delete, dedup, cleanup, stats (9 tests) |
+| Database (CRUD + search) | ✅ Complete | Insert, query, FTS5 search, pin, delete, dedup, cleanup, stats, per-item TTL (22 tests) |
 | Daemon → DB pipeline | ✅ Complete | Clipboard items stored in SQLite on copy |
-| Configuration | ✅ Complete | Max items, max size, TTL, cleanup interval, db_path |
+| Configuration | ✅ Complete | Max items, max size, TTL, cleanup interval, db_path, dedup_window_seconds |
 | COSMIC Applet UI | ✅ Complete | Search bar, list view, pin/delete/clear, copy-to-clipboard |
 | Keyboard navigation | ✅ Complete | Full keyboard workflow: arrows, Home/End, PgUp/Dn, Ctrl+D, Ctrl+1-9 |
 | Auto-refresh | ✅ Complete | Smart diff refresh preserves scroll position |
@@ -491,15 +504,37 @@ CREATE INDEX idx_pinned ON clipboard_items(pinned);
 | Sensitive detection | ✅ Complete | OTP, JWT, API keys, private keys, URI credentials, passwords |
 | IPC security | ✅ Complete | Private socket path, no /tmp fallback |
 | LICENSE | ✅ Complete | GPL-3.0 license file added |
+| FTS5 full-text search | ✅ Complete | SQLite FTS5 virtual table with LIKE fallback |
+| WAL mode | ✅ Complete | Crash-safe SQLite via `PRAGMA journal_mode=WAL` |
+| Dedup controls | ✅ Complete | Configurable `dedup_window_seconds`, `has_recent_duplicate` |
+| Per-item TTL | ✅ Complete | `set_item_ttl` per item, `delete_expired` cleanup |
+| GitHub Actions CI | ✅ Complete | fmt → clippy → test → build on push and PR |
+| Systemd service | ✅ Complete | `just install`, `just enable`, `just disable`, `just status`, `just logs` |
+| Packaging docs | ✅ Complete | `docs/PACKAGING.md` with Arch PKGBUILD, manual install, cargo install |
+| SECURITY.md | ✅ Complete | Threat model, encryption details, sensitive detection, disclosure policy |
+| CODEOWNERS | ✅ Complete | `.github/CODEOWNERS` for contribution area ownership |
+| Screen lock detection | ✅ Complete | `loginctl` and D-Bus `org.freedesktop.ScreenSaver` support |
 
-### Upcoming Milestones
+### Completed Milestones
 
-- **Week 1**: Clipboard watcher prints to terminal
-- **Week 3**: Basic text history working
-- **Week 6**: MVP with search and selection  
-- **Week 10**: Global shortcut integration
-- **Month 3**: Rich content and expression pickers
-- **Month 4**: Production-ready release
+- ✅ Clipboard watcher prints to terminal (Phase 0)
+- ✅ Basic text history working (Phase 1)
+- ✅ MVP with search and selection (Phase 1)
+- ✅ Global shortcut integration (Phase 2)
+- ✅ Rich content and expression pickers (Phases 3-4)
+- ✅ Production tooling and CLI (Phase 8)
+- ✅ COSMIC native icons and keyboard navigation (Phases 9-10)
+- ✅ Bug fixes and security hardening (Phase 11)
+- ✅ FTS5, WAL, dedup, per-item TTL, GitHub Actions CI (Phase 12)
+- ✅ Systemd service and packaging docs (Phase 13)
+- ✅ SECURITY.md, CODEOWNERS, screen lock detection (Phase 14)
+
+### Next Milestones
+
+- **Phase 15**: Automation rules, snippets, OCR
+- **Phase 16**: Image enhancements, X11 fallback
+- **Phase 17**: Self-hosted E2EE sync
+- **Phase 18**: Distribution packages (.deb, Flatpak, Nix)
 
 ### Risk Mitigation
 
@@ -523,7 +558,7 @@ CREATE INDEX idx_pinned ON clipboard_items(pinned);
 - [ ] Database queries < 10ms
 - [ ] UI frame rate 60fps minimum
 
-#### Functionality  
+#### Functionality
 - [ ] Clipboard history persistent across reboots
 - [ ] Search results accurate and fast
 - [ ] Global shortcut works in all applications
@@ -585,34 +620,100 @@ CREATE INDEX idx_pinned ON clipboard_items(pinned);
 - [cliphist](https://github.com/sentriz/cliphist) - Simple Wayland clipboard history
 - [wl-clipboard](https://github.com/bugaevc/wl-clipboard) - Wayland clipboard command-line tools
 
-### Inspiration Projects  
+### Inspiration Projects
 - [Modern Clipboard UX](https://support.microsoft.com/en-us/windows/clipboard-in-windows-c436501e-985d-1c8d-97ea-fe46ddf338c6) - Feature reference
 - [gustavosett/Windows-11-Clipboard-History-For-Linux](https://github.com/gustavosett/Windows-11-Clipboard-History-For-Linux) - Similar cross-platform project
 
 ### Development Tools
 - [just](https://github.com/casey/just) - Command runner
-- [cargo-watch](https://github.com/passcod/cargo-watch) - File watching for development  
+- [cargo-watch](https://github.com/passcod/cargo-watch) - File watching for development
 - [rust-analyzer](https://rust-analyzer.github.io/) - Language server
 
 ---
 
 ## 📅 Timeline Summary
 
-| Phase | Duration | Period | Key Deliverable |
-|-------|----------|---------|-----------------|
-| Phase 0 | 1 week | Mar 1-8 | Working clipboard watcher |
-| Phase 1 | 3 weeks | Mar 8-29 | Text history + basic UI |
-| Phase 2 | 2 weeks | Mar 29 - Apr 12 | Global shortcut integration |
-| Phase 3 | 3 weeks | Apr 12 - May 3 | Rich content support |
-| Phase 4 | 4 weeks | May 3-31 | Expression pickers |
-| Phase 5 | 3 weeks | May 31 - Jun 21 | Advanced features |
-| Phase 6 | 2 weeks | Jun 21 - Jul 5 | Settings & polish |
-| Phase 7 | 2 weeks | Jul 5-19 | Security & privacy |
-
-**Target v1.0 Release:** July 19, 2026
+| Phase | Duration | Key Deliverable | Status |
+|-------|----------|-----------------|--------|
+| Phase 0 | 1 week | Working clipboard watcher | ✅ Complete |
+| Phase 1 | 3 weeks | Text history + basic UI | ✅ Complete |
+| Phase 2 | 2 weeks | Global shortcut integration | ✅ Complete |
+| Phase 3 | 3 weeks | Rich content support | ✅ Complete |
+| Phase 4 | 4 weeks | Expression pickers | ✅ Complete |
+| Phase 5 | 3 weeks | Advanced features | ✅ Complete |
+| Phase 6 | 2 weeks | Settings & polish | ✅ Complete |
+| Phase 7 | 2 weeks | Security & privacy | ✅ Complete |
+| Phase 8 | 1 week | CLI tool & config | ✅ Complete |
+| Phase 9 | 1 week | COSMIC native icons | ✅ Complete |
+| Phase 10 | 1 week | Advanced keyboard navigation | ✅ Complete |
+| Phase 11 | 1 week | Bug fixes & security hardening | ✅ Complete |
+| Phase 12 | 1 week | FTS5, WAL, dedup, CI | ✅ Complete |
+| Phase 13 | 1 week | Systemd & packaging | ✅ Complete |
+| Phase 14 | 1 week | SECURITY.md, CODEOWNERS, screen lock | ✅ Complete |
+| Phase 15 | TBD | Automation & content | 📋 Planned |
+| Phase 16 | TBD | Image & X11 support | 📋 Planned |
+| Phase 17 | TBD | Sync & collaboration | 📋 Planned |
+| Phase 18 | TBD | Distribution packaging | 📋 Planned |
+| Phase 19 | TBD | Community & growth | 📋 Planned |
 
 ---
 
-**Document Status:** Living document, updated as project evolves  
-**Next Review:** End of Phase 0 (March 8, 2026)  
+## 🌱 Future Phases (Open-Source / Community Focused)
+
+The project is committed to remaining open-source and free. The following planned phases focus on features, scalability, packaging, community, and optional self-hosted collaboration — no paid tiers or monetization are included.
+
+### Phase 15: Advanced Automation & Content (PLANNED)
+**Goal:** Power-user features for automation and richer content handling.
+
+Planned Deliverables
+- [ ] "Never store" rules: MIME type denylist and regex exclusion rules
+- [ ] Clipboard ignore rules by source application (where Wayland allows)
+- [ ] Encrypted export/import (password-protected JSON backup)
+- [ ] Snippets & templates with token replacement and preview
+- [ ] Per-item hotkeys and multi-step paste macros
+- [ ] OCR pipeline (Tesseract or Rust bindings) and confidence UI for images
+
+### Phase 16: Image & X11 Support (PLANNED)
+**Goal:** Broader clipboard content support and desktop compatibility.
+
+Planned Deliverables
+- [ ] Enhanced image support (more MIME types, better thumbnail quality)
+- [ ] X11 fallback clipboard monitoring (for non-Wayland sessions)
+- [ ] Drag-and-drop clipboard integration
+- [ ] Multi-format paste (choose format when multiple representations available)
+
+### Phase 17: Sync & Collaboration (PLANNED — Self-hosted-first)
+**Goal:** Add secure, privacy-first sync and team sharing options designed for self-hosting.
+
+Planned Deliverables
+- [ ] Design and prototype a minimal self-hosted sync server with end-to-end encryption (E2EE)
+- [ ] Client-side E2EE: key management via OS keyring or passphrase; zero-knowledge server
+- [ ] Optional community-hosted demo instance (volunteer-run) — clearly labeled experimental
+- [ ] Shared clipboards for teams with role-based access for self-hosted deployments (no SaaS billing)
+- [ ] Sync conflict resolution strategy and audit logging
+- [ ] Documentation and deployment manifests (Docker Compose, Nomad, systemd unit)
+
+### Phase 18: Distribution Packaging & Releases (PLANNED)
+**Goal:** Make installation simple across distributions and ensure reproducible, signed releases.
+
+Planned Deliverables
+- [ ] `.deb` package (Pop!_OS, Ubuntu)
+- [ ] Flatpak/AppImage builds (Wayland-friendly sandboxing guidance)
+- [ ] Nix flake
+- [ ] GitHub Actions release workflow with binary artifacts
+- [ ] Reproducible build notes and binary signing instructions (GPG) for releases
+- [ ] COSMIC app store submission
+
+### Phase 19: Community, Docs & Growth (PLANNED)
+**Goal:** Increase adoption via docs, demos, and a welcoming community — all free and open.
+
+Planned Deliverables
+- [ ] Marketing one-pager and demo GIFs for README and store pages (creative commons assets)
+- [ ] Website/landing README improvements and localization scaffolding
+- [ ] Community channels: Discussions, Matrix/Discord link, contribution labels, CODE_OF_CONDUCT
+- [ ] Automated documentation generation for public APIs and developer onboarding
+- [ ] Accessibility automation tests (a11y CI checks)
+
+**Document Status:** Living document, updated as project evolves
+**Last Review:** Phase 14 complete (March 3, 2026)
 **Maintained by:** Project team

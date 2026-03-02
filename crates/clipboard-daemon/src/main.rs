@@ -492,12 +492,39 @@ fn spawn_ipc_server(data_dir: std::path::PathBuf) {
     });
 }
 
+/// Removes the daemon PID file when dropped, ensuring cleanup on exit or panic.
+struct PidFileGuard(std::path::PathBuf);
+impl Drop for PidFileGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
 fn run() -> Result<()> {
     let config = Config::default();
 
     // Ensure data directory exists
     std::fs::create_dir_all(&config.data_dir)
         .with_context(|| format!("Failed to create data dir: {}", config.data_dir.display()))?;
+
+    // Single-instance lock: prevent two daemon processes writing to the same DB.
+    let pid_file_path = config.data_dir.join("daemon.pid");
+    if let Ok(existing_pid) = std::fs::read_to_string(&pid_file_path) {
+        let existing_pid = existing_pid.trim().to_string();
+        // Check if that process is actually running
+        let proc_path = format!("/proc/{existing_pid}");
+        if std::path::Path::new(&proc_path).exists() {
+            anyhow::bail!(
+                "Another daemon instance is already running (PID {existing_pid}). \
+                 Stop it first with: kill {existing_pid}"
+            );
+        }
+        // Stale PID file — previous daemon crashed; remove it and continue.
+        let _ = std::fs::remove_file(&pid_file_path);
+    }
+    let current_pid = std::process::id();
+    std::fs::write(&pid_file_path, current_pid.to_string()).context("Failed to write PID file")?;
+    let _pid_guard = PidFileGuard(pid_file_path);
 
     let db = Database::open(&config.db_path()).context("Failed to open clipboard database")?;
     info!("Database opened at {}", config.db_path().display());

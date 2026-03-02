@@ -17,6 +17,8 @@ pub mod image_store;
 pub mod ipc;
 /// Quick paste via wtype or ydotool backends.
 pub mod quick_paste;
+/// Screen lock detection for clearing sensitive clipboard items.
+pub mod screen_lock;
 /// Sensitive content detection (passwords, tokens, keys).
 pub mod sensitive;
 /// Keyboard shortcut parsing and conflict detection.

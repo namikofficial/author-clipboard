@@ -1,0 +1,13 @@
+# Each line is a file pattern followed by one or more owners
+* @namikofficial
+
+# Crate-specific ownership
+/crates/clipboard-daemon/ @namikofficial
+/crates/applet/ @namikofficial
+/crates/shared/ @namikofficial
+/crates/ctl/ @namikofficial
+
+# Documentation
+/docs/ @namikofficial
+README.md @namikofficial
+SECURITY.md @namikofficial

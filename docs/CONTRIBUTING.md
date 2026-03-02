@@ -55,6 +55,8 @@ The git hooks will also catch issues:
 - **Pre-commit hook**: Checks formatting and runs clippy
 - **Commit-msg hook**: Enforces conventional commit format
 
+**CI will run automatically** on push and PR via GitHub Actions (`.github/workflows/ci.yml`): format check → clippy → test → build.
+
 ### Auto-Fix Issues
 
 ```bash
@@ -154,9 +156,13 @@ some-crate.workspace = true
 
 ```
 author-clipboard/
+├── .github/
+│   ├── workflows/ci.yml     # GitHub Actions CI (fmt, clippy, test, build)
+│   └── CODEOWNERS           # Contribution area ownership
 ├── crates/
 │   ├── clipboard-daemon/    # Background Wayland clipboard watcher
 │   ├── applet/              # COSMIC UI applet (popup interface)
+│   ├── ctl/                 # CLI control tool
 │   └── shared/              # Common library (DB, types, config)
 ├── .githooks/               # Git hooks (pre-commit, commit-msg)
 ├── docs/                    # Developer documentation
@@ -166,6 +172,10 @@ author-clipboard/
 ├── justfile                 # Task runner commands
 └── Cargo.toml               # Workspace + lint configuration
 ```
+
+### Code Ownership
+
+The `.github/CODEOWNERS` file defines ownership for contribution areas. PRs will automatically request reviews from the appropriate owners based on which files are changed.
 
 ## Testing
 

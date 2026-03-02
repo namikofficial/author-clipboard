@@ -34,6 +34,9 @@ fn default_encrypt_sensitive() -> bool {
 fn default_clear_on_lock() -> bool {
     true
 }
+fn default_dedup_window_seconds() -> u64 {
+    2 // Skip duplicate content within 2 seconds
+}
 
 /// Application configuration for author-clipboard.
 ///
@@ -66,6 +69,9 @@ pub struct Config {
     /// Whether to clear sensitive clipboard items when the screen locks.
     #[serde(default = "default_clear_on_lock")]
     pub clear_on_lock: bool,
+    /// Dedup window: skip items with identical hash within this many seconds.
+    #[serde(default = "default_dedup_window_seconds")]
+    pub dedup_window_seconds: u64,
 }
 
 impl Default for Config {
@@ -79,6 +85,7 @@ impl Default for Config {
             keyboard_shortcut: default_keyboard_shortcut(),
             encrypt_sensitive: default_encrypt_sensitive(),
             clear_on_lock: default_clear_on_lock(),
+            dedup_window_seconds: default_dedup_window_seconds(),
         }
     }
 }
@@ -192,6 +199,7 @@ mod tests {
             keyboard_shortcut: "Ctrl+Shift+V".to_string(),
             encrypt_sensitive: true,
             clear_on_lock: false,
+            dedup_window_seconds: 5,
         };
         let json = serde_json::to_string_pretty(&original).unwrap();
         let loaded: Config = serde_json::from_str(&json).unwrap();

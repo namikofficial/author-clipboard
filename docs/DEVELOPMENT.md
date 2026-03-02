@@ -28,6 +28,7 @@ just fix           # Format + fix everything
 # ── Build & Test ──
 just check         # Quick type check (fast, no codegen)
 just build         # Full build
+just build-release # Release build
 just test          # Run all tests
 just test-verbose  # Tests with stdout output
 
@@ -35,6 +36,19 @@ just test-verbose  # Tests with stdout output
 just dev           # Watch mode (auto-rebuild on changes)
 just quick         # Quick check + test
 just verify        # Full verification before commit
+
+# ── Run ──
+just daemon        # Run clipboard daemon
+just applet        # Run applet
+just run           # Run daemon + applet together
+
+# ── Install & Service ──
+just install       # Build release + install binaries, .desktop, icon, systemd service
+just enable        # Enable and start daemon service
+just disable       # Disable and stop daemon service
+just status        # Check daemon service status
+just logs          # View daemon journal logs
+just uninstall     # Remove all installed files and disable service
 
 # ── Setup ──
 just setup         # First-time dev environment setup

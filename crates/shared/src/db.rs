@@ -13,6 +13,13 @@ impl Database {
     /// Open or create a database at the given path, running migrations.
     pub fn open(path: &Path) -> SqlResult<Self> {
         let conn = Connection::open(path)?;
+        // Enable WAL mode for crash safety and better concurrent read performance
+        conn.execute_batch(
+            "PRAGMA journal_mode=WAL;
+             PRAGMA synchronous=NORMAL;
+             PRAGMA busy_timeout=5000;
+             PRAGMA foreign_keys=ON;",
+        )?;
         let db = Self { conn };
         db.init_schema()?;
         db.migrate()?;
@@ -39,7 +46,8 @@ impl Database {
                 timestamp TEXT NOT NULL,
                 pinned INTEGER NOT NULL DEFAULT 0,
                 source_app TEXT,
-                sensitive INTEGER NOT NULL DEFAULT 0
+                sensitive INTEGER NOT NULL DEFAULT 0,
+                ttl_override INTEGER DEFAULT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_timestamp ON clipboard_items(timestamp DESC);
             CREATE INDEX IF NOT EXISTS idx_content_hash ON clipboard_items(content_hash);
@@ -66,7 +74,9 @@ impl Database {
                 details TEXT,
                 timestamp TEXT NOT NULL
             );
-            CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp DESC);",
+            CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp DESC);
+
+            CREATE VIRTUAL TABLE IF NOT EXISTS clipboard_fts USING fts5(content, plain_text, content='clipboard_items', content_rowid='id');",
         )?;
         Ok(())
     }
@@ -115,6 +125,41 @@ impl Database {
                     .execute_batch("ALTER TABLE clipboard_items ADD COLUMN plain_text TEXT;")?;
             }
             self.set_schema_version(3)?;
+        }
+
+        if version < 4 {
+            // v4: Add FTS5 virtual table for full-text search
+            self.conn.execute_batch(
+                "CREATE VIRTUAL TABLE IF NOT EXISTS clipboard_fts USING fts5(content, plain_text, content='clipboard_items', content_rowid='id');
+                 -- Populate FTS with existing data
+                 INSERT OR IGNORE INTO clipboard_fts(rowid, content, plain_text) SELECT id, content, COALESCE(plain_text, '') FROM clipboard_items;
+                 -- Triggers to keep FTS in sync
+                 CREATE TRIGGER IF NOT EXISTS clipboard_fts_insert AFTER INSERT ON clipboard_items BEGIN
+                     INSERT INTO clipboard_fts(rowid, content, plain_text) VALUES (new.id, new.content, COALESCE(new.plain_text, ''));
+                 END;
+                 CREATE TRIGGER IF NOT EXISTS clipboard_fts_delete AFTER DELETE ON clipboard_items BEGIN
+                     INSERT INTO clipboard_fts(clipboard_fts, rowid, content, plain_text) VALUES('delete', old.id, old.content, COALESCE(old.plain_text, ''));
+                 END;
+                 CREATE TRIGGER IF NOT EXISTS clipboard_fts_update AFTER UPDATE OF content, plain_text ON clipboard_items BEGIN
+                     INSERT INTO clipboard_fts(clipboard_fts, rowid, content, plain_text) VALUES('delete', old.id, old.content, COALESCE(old.plain_text, ''));
+                     INSERT INTO clipboard_fts(rowid, content, plain_text) VALUES (new.id, new.content, COALESCE(new.plain_text, ''));
+                 END;",
+            )?;
+            self.set_schema_version(4)?;
+        }
+
+        if version < 5 {
+            // v5: Per-item TTL override
+            let has_ttl_override = self
+                .conn
+                .prepare("SELECT ttl_override FROM clipboard_items LIMIT 0")
+                .is_ok();
+            if !has_ttl_override {
+                self.conn.execute_batch(
+                    "ALTER TABLE clipboard_items ADD COLUMN ttl_override INTEGER DEFAULT NULL;",
+                )?;
+            }
+            self.set_schema_version(5)?;
         }
 
         Ok(())
@@ -201,8 +246,33 @@ impl Database {
         Self::collect_items(&mut stmt, [limit])
     }
 
-    /// Search items by content substring (case-insensitive). Only searches text items.
+    /// Search items by content. Uses FTS5 for performance with LIKE fallback.
     pub fn search(&self, query: &str, limit: usize) -> SqlResult<Vec<ClipboardItem>> {
+        // Try FTS5 first for better performance
+        let fts_result = self.conn.prepare(
+            "SELECT ci.id, ci.content_hash, ci.content, ci.mime_type, ci.content_type, ci.timestamp, ci.pinned, ci.source_app, ci.sensitive, ci.plain_text
+             FROM clipboard_fts fts
+             JOIN clipboard_items ci ON ci.id = fts.rowid
+             WHERE clipboard_fts MATCH ?1
+             ORDER BY ci.pinned DESC, ci.timestamp DESC
+             LIMIT ?2",
+        );
+
+        if let Ok(mut stmt) = fts_result {
+            // FTS5 query: wrap terms for prefix matching
+            let fts_query = query
+                .split_whitespace()
+                .map(|w| format!("\"{}\"*", w.replace('"', "")))
+                .collect::<Vec<_>>()
+                .join(" ");
+            if let Ok(items) =
+                Self::collect_items(&mut stmt, (&fts_query as &dyn rusqlite::ToSql, &limit))
+            {
+                return Ok(items);
+            }
+        }
+
+        // Fallback: LIKE search
         let pattern = format!("%{query}%");
         let mut stmt = self.conn.prepare(
             "SELECT id, content_hash, content, mime_type, content_type, timestamp, pinned, source_app, sensitive, plain_text
@@ -302,10 +372,24 @@ impl Database {
         Ok(affected)
     }
 
+    /// Set a custom TTL override for a specific item (in seconds).
+    /// Pass `None` to clear the override and use the global TTL.
+    pub fn set_item_ttl(&self, item_id: i64, ttl_seconds: Option<u64>) -> SqlResult<()> {
+        self.conn.execute(
+            "UPDATE clipboard_items SET ttl_override = ?1 WHERE id = ?2",
+            rusqlite::params![ttl_seconds.map(u64::cast_signed), item_id],
+        )?;
+        Ok(())
+    }
+
     /// Delete non-pinned items older than the given timestamp.
+    /// Items with a per-item `ttl_override` use their custom TTL instead.
     pub fn delete_expired(&self, before: &chrono::DateTime<chrono::Utc>) -> SqlResult<usize> {
         let affected = self.conn.execute(
-            "DELETE FROM clipboard_items WHERE pinned = 0 AND timestamp < ?1",
+            "DELETE FROM clipboard_items WHERE pinned = 0 AND (
+                (ttl_override IS NULL AND timestamp < ?1)
+                OR (ttl_override IS NOT NULL AND datetime(timestamp, '+' || ttl_override || ' seconds') < datetime('now'))
+            )",
             [before.to_rfc3339()],
         )?;
         Ok(affected)
@@ -444,6 +528,21 @@ impl Database {
             }
         }
         Ok(count)
+    }
+
+    // ── Dedup ──────────────────────────────────────────────────────────
+
+    /// Check if an item with the same hash was inserted within the given window (seconds).
+    #[allow(clippy::cast_possible_wrap)]
+    pub fn has_recent_duplicate(&self, content_hash: u64, window_seconds: u64) -> SqlResult<bool> {
+        let cutoff = chrono::Utc::now() - chrono::Duration::seconds(window_seconds as i64);
+        let cutoff_str = cutoff.to_rfc3339();
+        let count: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM clipboard_items WHERE content_hash = ?1 AND timestamp > ?2",
+            rusqlite::params![content_hash as i64, cutoff_str],
+            |row| row.get(0),
+        )?;
+        Ok(count > 0)
     }
 
     // ── Helpers ────────────────────────────────────────────────────────
@@ -688,11 +787,26 @@ mod tests {
     }
 
     #[test]
+    fn test_dedup_window() {
+        let db = make_db();
+        db.insert_item(&ClipboardItem::new_text("duplicate test".to_string()))
+            .unwrap();
+        // Same content hash should be detected as duplicate
+        assert!(db
+            .has_recent_duplicate(ClipboardItem::hash_content("duplicate test"), 60)
+            .unwrap());
+        // Different content should not be duplicate
+        assert!(!db
+            .has_recent_duplicate(ClipboardItem::hash_content("unique content"), 60)
+            .unwrap());
+    }
+
+    #[test]
     fn test_schema_version() {
         let db = make_db();
-        // After init, version should be 3 (latest)
+        // After init, version should be 5 (latest)
         let version = db.get_schema_version();
-        assert_eq!(version, 3);
+        assert_eq!(version, 5);
     }
 
     #[test]
@@ -736,6 +850,30 @@ mod tests {
     }
 
     #[test]
+    fn test_fts_search() {
+        let db = make_db();
+        db.insert_item(&ClipboardItem::new_text("hello world greeting".to_string()))
+            .unwrap();
+        db.insert_item(&ClipboardItem::new_text(
+            "rust programming language".to_string(),
+        ))
+        .unwrap();
+        db.insert_item(&ClipboardItem::new_text(
+            "hello rust developers".to_string(),
+        ))
+        .unwrap();
+
+        let results = db.search("hello", 10).unwrap();
+        assert_eq!(results.len(), 2);
+
+        let results = db.search("rust", 10).unwrap();
+        assert_eq!(results.len(), 2);
+
+        let results = db.search("nonexistent", 10).unwrap();
+        assert!(results.is_empty());
+    }
+
+    #[test]
     fn test_export_import() {
         let db = make_db();
         db.insert_item(&ClipboardItem::new_text("export test 1".to_string()))
@@ -754,5 +892,18 @@ mod tests {
 
         let items = db2.get_recent(10).unwrap();
         assert_eq!(items.len(), 2);
+    }
+
+    #[test]
+    fn test_per_item_ttl() {
+        let db = make_db();
+        let item = ClipboardItem::new_text("ttl test".to_string());
+        let id = db.insert_item(&item).unwrap();
+
+        // Set custom TTL
+        db.set_item_ttl(id, Some(3600)).unwrap();
+
+        // Clear custom TTL
+        db.set_item_ttl(id, None).unwrap();
     }
 }
