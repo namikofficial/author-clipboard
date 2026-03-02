@@ -173,6 +173,33 @@ uninstall: disable
     systemctl --user daemon-reload
     @echo "🗑️  Uninstalled author-clipboard"
 
+# ── Debian Packaging ───────────────────────────────────────────────────
+
+# Build a .deb package (requires cargo-deb: cargo install cargo-deb)
+deb:
+	@echo "Building release binaries first..."
+	cargo build --release --workspace
+	@echo "Building .deb package..."
+	cargo deb -p author-clipboard-applet --no-build
+	@echo ""
+	@echo "Package built in target/debian/"
+	ls -la target/debian/*.deb 2>/dev/null || echo "No .deb found - check errors above"
+
+# Build .deb and install it locally (for testing)
+deb-install: deb
+	@echo "Installing .deb locally (requires sudo)..."
+	sudo dpkg -i target/debian/author-clipboard_*.deb
+
+# Show what files would be in the .deb (dry run)
+deb-check:
+	cargo deb -p author-clipboard-applet --no-build --no-strip -- --verbose 2>&1 | head -60 || \
+	cargo deb -p author-clipboard-applet --no-build 2>&1 | head -60
+
+# Remove locally installed .deb
+deb-remove:
+	@echo "Removing author-clipboard package..."
+	sudo dpkg -r author-clipboard
+
 # ── Setup ──────────────────────────────────────────────────────────────
 
 # Setup development environment (first-time)

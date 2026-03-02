@@ -8,11 +8,13 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.4.0"
 edition = "2021"
 license = "GPL-3.0"
 authors = ["Namik"]
 repository = "https://github.com/namikofficial/author-clipboard"
+description = "Native COSMIC clipboard manager with history, search, and security"
+homepage = "https://github.com/namikofficial/author-clipboard"
 
 # Clippy lint configuration (equivalent to ESLint in Node.js)
 [workspace.lints.clippy]

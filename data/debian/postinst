@@ -1,0 +1,15 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    configure)
+        # Reload systemd user daemon if running in a user session
+        if command -v systemctl > /dev/null 2>&1; then
+            echo "author-clipboard: Run the following to enable the daemon service:"
+            echo "  systemctl --user daemon-reload"
+            echo "  systemctl --user enable --now author-clipboard-daemon"
+        fi
+        ;;
+esac
+
+exit 0

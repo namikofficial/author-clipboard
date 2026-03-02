@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.namikofficial.author-clipboard</id>
+  <metadata_license>MIT</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+
+  <name>Author Clipboard</name>
+  <summary>Native COSMIC clipboard manager with history, search, and security</summary>
+
+  <description>
+    <p>
+      Author Clipboard is a native clipboard manager for the COSMIC desktop environment.
+      It monitors your clipboard history, provides instant full-text search, and keeps
+      your sensitive data safe with automatic detection and optional encryption.
+    </p>
+    <p>Features:</p>
+    <ul>
+      <li>Persistent clipboard history stored in SQLite with FTS5 full-text search</li>
+      <li>Sensitive content detection (passwords, API keys, tokens, SSH keys)</li>
+      <li>AES-256-GCM encryption for sensitive items</li>
+      <li>Emoji, symbol, and kaomoji pickers</li>
+      <li>Pin frequently used items</li>
+      <li>Quick paste via keyboard shortcuts</li>
+      <li>Screen lock integration — clear sensitive items on lock</li>
+      <li>Export and import clipboard history</li>
+      <li>Wayland-native using wlr-data-control protocol</li>
+    </ul>
+  </description>
+
+  <launchable type="desktop-id">com.namikofficial.author-clipboard.desktop</launchable>
+
+  <url type="homepage">https://github.com/namikofficial/author-clipboard</url>
+  <url type="bugtracker">https://github.com/namikofficial/author-clipboard/issues</url>
+  <url type="vcs-browser">https://github.com/namikofficial/author-clipboard</url>
+
+  <developer id="com.namikofficial">
+    <name>Namik</name>
+  </developer>
+
+  <provides>
+    <binary>author-clipboard</binary>
+    <binary>author-clipboard-daemon</binary>
+    <binary>author-clipboard-ctl</binary>
+  </provides>
+
+  <categories>
+    <category>Utility</category>
+  </categories>
+
+  <keywords>
+    <keyword>clipboard</keyword>
+    <keyword>history</keyword>
+    <keyword>paste</keyword>
+    <keyword>copy</keyword>
+    <keyword>COSMIC</keyword>
+    <keyword>Wayland</keyword>
+  </keywords>
+
+  <releases>
+    <release version="0.4.0" date="2026-03-02">
+      <description>
+        <p>Phase 12-18: FTS5 search, WAL mode, per-item TTL, dedup controls, GitHub Actions CI,
+        systemd packaging, SECURITY.md, screen lock detection, deb packaging, snippets,
+        denylist rules, and X11 detection.</p>
+      </description>
+    </release>
+    <release version="0.3.1" date="2025-01-01">
+      <description>
+        <p>Bug fixes: scroll position, layout, URI credential detection, IPC security hardening.</p>
+      </description>
+    </release>
+    <release version="0.3.0" date="2024-12-01">
+      <description>
+        <p>Phase 9-10: COSMIC native icons and advanced keyboard navigation.</p>
+      </description>
+    </release>
+  </releases>
+
+  <content_rating type="oars-1.1" />
+
+  <supports>
+    <internet>offline-only</internet>
+  </supports>
+</component>

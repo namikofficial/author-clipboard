@@ -11,7 +11,7 @@ use author_clipboard_shared::config::Config;
 use author_clipboard_shared::file_handler;
 use author_clipboard_shared::image_store;
 use author_clipboard_shared::quick_paste::{self, PasteBackend};
-use author_clipboard_shared::types::{AuditEventKind, ClipboardItem};
+use author_clipboard_shared::types::{AuditEventKind, ClipboardItem, Snippet};
 use author_clipboard_shared::Database;
 use cosmic::app::{Core, Settings, Task};
 use cosmic::iced::alignment::Horizontal;
@@ -57,6 +57,7 @@ enum AppTab {
     Emoji,
     Symbols,
     Kaomoji,
+    Snippets,
     Settings,
 }
 
@@ -78,6 +79,10 @@ struct App {
     quick_paste_enabled: bool,
     paste_backend: Option<PasteBackend>,
     daemon_running: bool,
+    snippets: Vec<Snippet>,
+    snippet_search: String,
+    snippet_name_input: String,
+    snippet_content_input: String,
 }
 
 // ── Messages ──────────────────────────────────────────────────────────
@@ -114,6 +119,12 @@ enum Message {
     SelectLast,
     PageDown,
     PageUp,
+    SnippetSearchChanged(String),
+    SnippetAdd(String, String),
+    SnippetDelete(i64),
+    SnippetCopy(i64),
+    SnippetNameInput(String),
+    SnippetContentInput(String),
 }
 
 // ── Application trait ─────────────────────────────────────────────────
@@ -157,11 +168,17 @@ impl cosmic::Application for App {
             .and_then(|db| db.get_recent(config.max_items).ok())
             .unwrap_or_default();
 
+        let snippets = db
+            .as_ref()
+            .and_then(|db| db.list_snippets().ok())
+            .unwrap_or_default();
+
         let tab_model = widget::segmented_button::Model::builder()
             .insert(|b| b.text("📋 Clipboard").data(AppTab::Clipboard).activate())
             .insert(|b| b.text("😀 Emoji").data(AppTab::Emoji))
             .insert(|b| b.text("🔣 Symbols").data(AppTab::Symbols))
             .insert(|b| b.text("顔 Kaomoji").data(AppTab::Kaomoji))
+            .insert(|b| b.text("📝 Snippets").data(AppTab::Snippets))
             .insert(|b| b.text("⚙️ Settings").data(AppTab::Settings))
             .build();
 
@@ -184,6 +201,10 @@ impl cosmic::Application for App {
             quick_paste_enabled: false,
             paste_backend: quick_paste::detect_backend(),
             daemon_running,
+            snippets,
+            snippet_search: String::new(),
+            snippet_name_input: String::new(),
+            snippet_content_input: String::new(),
         };
 
         let command = Task::batch([
@@ -304,7 +325,7 @@ impl cosmic::Application for App {
                                 AppTab::Emoji => Some("emoji"),
                                 AppTab::Symbols => Some("symbol"),
                                 AppTab::Kaomoji => Some("kaomoji"),
-                                AppTab::Clipboard | AppTab::Settings => None,
+                                AppTab::Clipboard | AppTab::Settings | AppTab::Snippets => None,
                             };
                             if let Some(cat) = category {
                                 if let Err(e) = db.record_usage(cat, &content) {
@@ -586,6 +607,62 @@ impl cosmic::Application for App {
                 }
                 return self.scroll_to_selected();
             }
+
+            Message::SnippetSearchChanged(q) => {
+                self.snippet_search.clone_from(&q);
+                if let Some(db) = &self.db {
+                    self.snippets = if q.is_empty() {
+                        db.list_snippets().unwrap_or_default()
+                    } else {
+                        db.search_snippets(&q).unwrap_or_default()
+                    };
+                }
+                return Task::none();
+            }
+
+            Message::SnippetAdd(name, content) => {
+                if let Some(db) = &self.db {
+                    if let Err(e) = db.upsert_snippet(&name, &content) {
+                        warn!("Failed to save snippet: {e}");
+                    } else {
+                        self.snippet_name_input.clear();
+                        self.snippet_content_input.clear();
+                        self.snippets = db.list_snippets().unwrap_or_default();
+                    }
+                }
+                return Task::none();
+            }
+
+            Message::SnippetDelete(id) => {
+                if let Some(db) = &self.db {
+                    if let Err(e) = db.delete_snippet(id) {
+                        warn!("Failed to delete snippet: {e}");
+                    } else {
+                        self.snippets = db.list_snippets().unwrap_or_default();
+                    }
+                }
+                return Task::none();
+            }
+
+            Message::SnippetCopy(id) => {
+                if let Some(s) = self.snippets.iter().find(|s| s.id == id) {
+                    match set_clipboard_text(&s.content) {
+                        Ok(()) => std::process::exit(0),
+                        Err(e) => warn!("Failed to copy snippet: {e}"),
+                    }
+                }
+                return Task::none();
+            }
+
+            Message::SnippetNameInput(v) => {
+                self.snippet_name_input = v;
+                return Task::none();
+            }
+
+            Message::SnippetContentInput(v) => {
+                self.snippet_content_input = v;
+                return Task::none();
+            }
         }
 
         Task::none()
@@ -601,6 +678,7 @@ impl cosmic::Application for App {
             AppTab::Emoji => "Search emoji...",
             AppTab::Symbols => "Search symbols...",
             AppTab::Kaomoji => "Search kaomoji...",
+            AppTab::Snippets => "Search snippets...",
             AppTab::Settings => "Search settings...",
         };
 
@@ -653,6 +731,7 @@ impl cosmic::Application for App {
             AppTab::Emoji => self.view_emoji(),
             AppTab::Symbols => self.view_symbols(),
             AppTab::Kaomoji => self.view_kaomoji(),
+            AppTab::Snippets => self.view_snippets(),
             AppTab::Settings => self.view_settings(),
         };
 
@@ -677,6 +756,10 @@ impl cosmic::Application for App {
             AppTab::Kaomoji => {
                 let count = self.filtered_kaomoji().len();
                 format!("{count} kaomoji")
+            }
+            AppTab::Snippets => {
+                let count = self.snippets.len();
+                format!("{count} snippets")
             }
             AppTab::Settings => String::from("Settings"),
         };
@@ -781,6 +864,7 @@ impl App {
             AppTab::Emoji => self.filtered_emojis().len(),
             AppTab::Symbols => self.filtered_symbols().len(),
             AppTab::Kaomoji => self.filtered_kaomoji().len(),
+            AppTab::Snippets => self.snippets.len(),
             AppTab::Settings => 0,
         }
     }
@@ -1189,6 +1273,111 @@ impl App {
         content.into()
     }
 
+    // ── Snippets tab view ─────────────────────────────────────────────
+
+    fn view_snippets(&self) -> Element<'_, Message> {
+        let mut content = column().spacing(8).width(Length::Fill);
+
+        // Search bar for snippets
+        let search = text_input("Search snippets...", &self.snippet_search)
+            .on_input(Message::SnippetSearchChanged)
+            .leading_icon(
+                icon::from_name("system-search-symbolic")
+                    .size(16)
+                    .icon()
+                    .into(),
+            )
+            .width(Length::Fill)
+            .padding(6);
+        content = content.push(search);
+
+        // Add snippet form
+        let name_input = text_input("Name", &self.snippet_name_input)
+            .on_input(Message::SnippetNameInput)
+            .width(Length::Fill)
+            .padding(6);
+        let content_input = text_input("Content", &self.snippet_content_input)
+            .on_input(Message::SnippetContentInput)
+            .width(Length::Fill)
+            .padding(6);
+        let can_add = !self.snippet_name_input.is_empty() && !self.snippet_content_input.is_empty();
+        let add_btn = if can_add {
+            widget::button::suggested("Add")
+                .on_press(Message::SnippetAdd(
+                    self.snippet_name_input.clone(),
+                    self.snippet_content_input.clone(),
+                ))
+                .padding([6, 12])
+        } else {
+            widget::button::suggested("Add").padding([6, 12])
+        };
+        let form_row = row()
+            .spacing(6)
+            .push(name_input)
+            .push(content_input)
+            .push(add_btn)
+            .align_y(iced::Alignment::Center);
+        content = content.push(form_row);
+
+        // Snippet list
+        if self.snippets.is_empty() {
+            let msg = if self.snippet_search.is_empty() {
+                "No snippets yet — add one above!"
+            } else {
+                "No snippets match your search"
+            };
+            let empty = container(
+                column()
+                    .spacing(8)
+                    .align_x(Horizontal::Center)
+                    .push(icon::from_name("edit-copy-symbolic").size(36).icon())
+                    .push(text(msg).size(13.0).align_x(Horizontal::Center)),
+            )
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .align_x(Horizontal::Center)
+            .align_y(iced::alignment::Vertical::Center);
+            content = content.push(empty);
+        } else {
+            let mut list = column().spacing(4).padding([0, 4]);
+            for snippet in &self.snippets {
+                let preview = truncate_content(&snippet.content, 60);
+                let copy_btn = widget::tooltip(
+                    widget::button::icon(icon::from_name("edit-copy-symbolic").size(16))
+                        .on_press(Message::SnippetCopy(snippet.id))
+                        .padding(4),
+                    text("Copy").size(11.0),
+                    widget::tooltip::Position::Bottom,
+                );
+                let delete_btn = widget::tooltip(
+                    widget::button::icon(icon::from_name("edit-delete-symbolic").size(16))
+                        .on_press(Message::SnippetDelete(snippet.id))
+                        .padding(4),
+                    text("Delete").size(11.0),
+                    widget::tooltip::Position::Bottom,
+                );
+                let info_col = column()
+                    .spacing(2)
+                    .push(text(&snippet.name).size(13.0))
+                    .push(text(preview).size(11.0));
+                let snippet_row = row()
+                    .spacing(8)
+                    .push(container(info_col).width(Length::Fill))
+                    .push(copy_btn)
+                    .push(delete_btn)
+                    .align_y(iced::Alignment::Center);
+                let snippet_btn = widget::button::custom(snippet_row)
+                    .width(Length::Fill)
+                    .padding([8, 8])
+                    .on_press(Message::SnippetCopy(snippet.id));
+                list = list.push(snippet_btn);
+            }
+            content = content.push(scrollable(list).width(Length::Fill).height(Length::Fill));
+        }
+
+        content.into()
+    }
+
     // ── Settings tab view ─────────────────────────────────────────────
 
     #[allow(clippy::too_many_lines)]
@@ -1391,11 +1580,12 @@ impl App {
 
     /// Cycle through tabs forward or backward.
     fn cycle_tab(&mut self, forward: bool) {
-        const TAB_ORDER: [AppTab; 5] = [
+        const TAB_ORDER: [AppTab; 6] = [
             AppTab::Clipboard,
             AppTab::Emoji,
             AppTab::Symbols,
             AppTab::Kaomoji,
+            AppTab::Snippets,
             AppTab::Settings,
         ];
         let current = TAB_ORDER
@@ -1465,6 +1655,13 @@ impl App {
                     let items = self.filtered_kaomoji();
                     if let Some(&k) = items.get(index) {
                         if set_clipboard_text(k).is_ok() {
+                            std::process::exit(0);
+                        }
+                    }
+                }
+                AppTab::Snippets => {
+                    if let Some(s) = self.snippets.get(index) {
+                        if set_clipboard_text(&s.content).is_ok() {
                             std::process::exit(0);
                         }
                     }

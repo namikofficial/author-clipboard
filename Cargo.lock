@@ -648,7 +648,7 @@ dependencies = [
 
 [[package]]
 name = "author-clipboard-applet"
-version = "0.1.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "author-clipboard-shared",
@@ -661,7 +661,7 @@ dependencies = [
 
 [[package]]
 name = "author-clipboard-ctl"
-version = "0.1.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "author-clipboard-shared",
@@ -671,7 +671,7 @@ dependencies = [
 
 [[package]]
 name = "author-clipboard-daemon"
-version = "0.1.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "author-clipboard-shared",
@@ -686,7 +686,7 @@ dependencies = [
 
 [[package]]
 name = "author-clipboard-shared"
-version = "0.1.0"
+version = "0.4.0"
 dependencies = [
  "aes-gcm",
  "base64",

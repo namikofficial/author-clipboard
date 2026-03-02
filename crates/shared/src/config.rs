@@ -37,6 +37,12 @@ fn default_clear_on_lock() -> bool {
 fn default_dedup_window_seconds() -> u64 {
     2 // Skip duplicate content within 2 seconds
 }
+fn default_mime_denylist() -> Vec<String> {
+    vec!["application/x-kde-cutselection".to_string()]
+}
+fn default_content_regex_denylist() -> Vec<String> {
+    vec![]
+}
 
 /// Application configuration for author-clipboard.
 ///
@@ -72,6 +78,13 @@ pub struct Config {
     /// Dedup window: skip items with identical hash within this many seconds.
     #[serde(default = "default_dedup_window_seconds")]
     pub dedup_window_seconds: u64,
+    /// MIME types that should never be stored in clipboard history.
+    #[serde(default = "default_mime_denylist")]
+    pub mime_denylist: Vec<String>,
+    /// Regex patterns (applied to content) that should never be stored.
+    /// Example: use `"^otp:"` or `"^TOTP:"` to block OTP codes.
+    #[serde(default = "default_content_regex_denylist")]
+    pub content_regex_denylist: Vec<String>,
 }
 
 impl Default for Config {
@@ -86,6 +99,8 @@ impl Default for Config {
             encrypt_sensitive: default_encrypt_sensitive(),
             clear_on_lock: default_clear_on_lock(),
             dedup_window_seconds: default_dedup_window_seconds(),
+            mime_denylist: default_mime_denylist(),
+            content_regex_denylist: default_content_regex_denylist(),
         }
     }
 }
@@ -170,6 +185,29 @@ impl Config {
         }
         Ok(enabled)
     }
+
+    /// Check if a MIME type is in the denylist.
+    #[must_use]
+    pub fn is_mime_denied(&self, mime_type: &str) -> bool {
+        self.mime_denylist
+            .iter()
+            .any(|denied| denied == mime_type || mime_type.starts_with(denied.as_str()))
+    }
+
+    /// Check if content matches any pattern in the denylist.
+    /// Supports `^prefix` (starts-with), `suffix$` (ends-with), and plain substring matching.
+    #[must_use]
+    pub fn is_content_denied(&self, content: &str) -> bool {
+        self.content_regex_denylist.iter().any(|pattern| {
+            if let Some(prefix) = pattern.strip_prefix('^') {
+                content.starts_with(prefix)
+            } else if let Some(suffix) = pattern.strip_suffix('$') {
+                content.ends_with(suffix)
+            } else {
+                content.contains(pattern.as_str())
+            }
+        })
+    }
 }
 
 #[cfg(test)]
@@ -200,6 +238,8 @@ mod tests {
             encrypt_sensitive: true,
             clear_on_lock: false,
             dedup_window_seconds: 5,
+            mime_denylist: vec!["application/x-secret".to_string()],
+            content_regex_denylist: vec!["^OTP:".to_string()],
         };
         let json = serde_json::to_string_pretty(&original).unwrap();
         let loaded: Config = serde_json::from_str(&json).unwrap();
@@ -218,5 +258,26 @@ mod tests {
         assert_eq!(cfg.keyboard_shortcut, "Super+V");
         assert!(!cfg.encrypt_sensitive);
         assert!(cfg.clear_on_lock);
+    }
+
+    #[test]
+    fn test_mime_denylist() {
+        let config = Config {
+            mime_denylist: vec!["application/x-secret".to_string()],
+            ..Default::default()
+        };
+        assert!(config.is_mime_denied("application/x-secret"));
+        assert!(!config.is_mime_denied("text/plain"));
+    }
+
+    #[test]
+    fn test_content_denylist() {
+        let config = Config {
+            content_regex_denylist: vec!["^OTP:".to_string(), "SECRET".to_string()],
+            ..Default::default()
+        };
+        assert!(config.is_content_denied("OTP: 123456"));
+        assert!(config.is_content_denied("my SECRET code"));
+        assert!(!config.is_content_denied("normal text"));
     }
 }

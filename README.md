@@ -58,7 +58,57 @@
 
 ### Planned
 - 🗓 Image / file clipboard support
-- 🗓 Packaging (.deb, Arch AUR, Nix flake, Flatpak)
+- ✅ .deb package available — see [Installation](#installation)
+- 🗓 Packaging (Arch AUR, Nix flake, Flatpak)
+
+---
+
+## Installation
+
+### Download .deb Package (Ubuntu 22.04+ / Pop!_OS / Debian)
+
+Download the latest `.deb` from [GitHub Releases](https://github.com/namikofficial/author-clipboard/releases/latest):
+
+```bash
+# Download and install
+wget https://github.com/namikofficial/author-clipboard/releases/latest/download/author-clipboard_0.4.0-1_amd64.deb
+sudo dpkg -i author-clipboard_0.4.0-1_amd64.deb
+
+# Enable and start the daemon
+systemctl --user daemon-reload
+systemctl --user enable --now author-clipboard-daemon
+```
+
+### Build from Source
+
+Requirements: Rust 1.75+, Wayland development libraries
+
+```bash
+# Install build dependencies (Ubuntu/Debian)
+sudo apt install libwayland-dev libxkbcommon-dev libssl-dev pkg-config
+
+# Clone and build
+git clone https://github.com/namikofficial/author-clipboard
+cd author-clipboard
+cargo build --release
+
+# Install
+just install  # Installs binaries, .desktop file, icon, systemd service
+just enable   # Enable and start the daemon
+```
+
+### Enable Wayland Clipboard Access
+
+On COSMIC desktop, set this in your session environment:
+
+```bash
+echo 'COSMIC_DATA_CONTROL_ENABLED=1' | sudo tee -a /etc/environment
+```
+
+Log out and back in for the change to take effect.
+
+> **Note:** This variable enables the `zwlr_data_control_manager_v1` Wayland protocol.
+> On Sway, Hyprland, and other wlroots compositors, this is not needed.
 
 ---
 
@@ -67,19 +117,7 @@
 ### Prerequisites
 
 - Linux with a Wayland compositor supporting `wlr-data-control` ([details](#wayland-requirements))
-- Rust toolchain (1.75+)
 - For COSMIC desktop: `COSMIC_DATA_CONTROL_ENABLED=1` ([how to enable](#enabling-on-cosmic-desktop))
-
-### Build & Install
-
-```bash
-git clone https://github.com/namikofficial/author-clipboard
-cd author-clipboard
-just setup         # Install dev tools
-just build         # Build all components
-just install       # Install binaries, .desktop file, icon, systemd service
-just enable        # Enable and start the daemon service
-```
 
 ### CLI Tool
 

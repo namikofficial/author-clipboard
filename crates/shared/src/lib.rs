@@ -3,6 +3,8 @@
 //! Provides common types, database operations, configuration management,
 //! IPC communication, and utility modules used by both the daemon and applet.
 
+/// Compositor and display server detection utilities.
+pub mod compositor;
 /// Configuration management with JSON file persistence.
 pub mod config;
 /// SQLite database operations for clipboard history.

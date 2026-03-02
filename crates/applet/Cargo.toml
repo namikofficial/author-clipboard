@@ -2,6 +2,7 @@
 name = "author-clipboard-applet"
 version.workspace = true
 edition.workspace = true
+description.workspace = true
 
 [[bin]]
 name = "author-clipboard"
@@ -18,3 +19,29 @@ tracing-subscriber.workspace = true
 anyhow.workspace = true
 chrono.workspace = true
 libcosmic.workspace = true
+
+[package.metadata.deb]
+name = "author-clipboard"
+maintainer = "Namik <author-clipboard@namik.dev>"
+copyright = "2024 Namik"
+license-file = ["../../LICENSE", "4"]
+extended-description = """\
+Author Clipboard is a native clipboard manager for the COSMIC desktop.
+It monitors your clipboard history, provides instant full-text search,
+and keeps sensitive data safe with automatic detection and optional encryption.
+Requires Wayland with wlr-data-control protocol (COSMIC, Sway, Hyprland)."""
+depends = "$auto, libwayland-client0 (>= 1.20), libxkbcommon0 (>= 1.0)"
+section = "utils"
+priority = "optional"
+maintainer-scripts = "../../data/debian/"
+assets = [
+    { source = "target/release/author-clipboard", dest = "usr/bin/", mode = "755" },
+    { source = "target/release/author-clipboard-daemon", dest = "usr/bin/", mode = "755" },
+    { source = "target/release/author-clipboard-ctl", dest = "usr/bin/", mode = "755" },
+    { source = "../../data/author-clipboard-daemon.service", dest = "usr/lib/systemd/user/", mode = "644" },
+    { source = "../../data/com.namikofficial.author-clipboard.desktop", dest = "usr/share/applications/", mode = "644" },
+    { source = "../../data/com.namikofficial.author-clipboard.metainfo.xml", dest = "usr/share/metainfo/", mode = "644" },
+    { source = "../../resources/icons/com.namikofficial.author-clipboard.svg", dest = "usr/share/icons/hicolor/scalable/apps/", mode = "644" },
+    { source = "../../README.md", dest = "usr/share/doc/author-clipboard/README.md", mode = "644" },
+    { source = "../../CHANGELOG.md", dest = "usr/share/doc/author-clipboard/CHANGELOG.md", mode = "644" },
+]

@@ -2,6 +2,49 @@
 
 Instructions for packaging author-clipboard for various Linux distributions.
 
+## Building a .deb Package
+
+Author Clipboard uses [cargo-deb](https://github.com/kornelski/cargo-deb) for Debian packaging.
+
+### Prerequisites
+
+```bash
+cargo install cargo-deb
+```
+
+### Build
+
+```bash
+# Full build (compiles + packages)
+just deb
+
+# Or manually:
+cargo build --release --workspace
+cargo deb -p author-clipboard-applet --no-build
+```
+
+The `.deb` will be at `target/debian/author-clipboard_x.x.x-1_amd64.deb`.
+
+### Test installation locally
+
+```bash
+just deb-install  # builds + sudo dpkg -i
+```
+
+### Package Contents
+
+| File | Destination |
+|------|-------------|
+| `author-clipboard` | `/usr/bin/author-clipboard` |
+| `author-clipboard-daemon` | `/usr/bin/author-clipboard-daemon` |
+| `author-clipboard-ctl` | `/usr/bin/author-clipboard-ctl` |
+| Systemd service | `/usr/lib/systemd/user/author-clipboard-daemon.service` |
+| Desktop file | `/usr/share/applications/` |
+| AppStream metainfo | `/usr/share/metainfo/` |
+| Icon | `/usr/share/icons/hicolor/scalable/apps/` |
+
+---
+
 ## Building from Source
 
 ### Prerequisites
@@ -62,7 +105,8 @@ systemctl --user enable --now author-clipboard-daemon
 
 ### Debian/Ubuntu (.deb)
 
-A `cargo-deb` configuration is planned. For now, build from source.
+A `.deb` package is available via [GitHub Releases](https://github.com/namikofficial/author-clipboard/releases/latest).
+See [Building a .deb Package](#building-a-deb-package) above for build instructions.
 
 ### Arch Linux (PKGBUILD)
 

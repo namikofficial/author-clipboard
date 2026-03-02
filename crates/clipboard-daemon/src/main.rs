@@ -264,6 +264,10 @@ impl Dispatch<ZwlrDataControlDeviceV1, ()> for AppState {
 
                                 if state.last_content.as_deref() == Some(&html_content) {
                                     debug!("Ignoring duplicate HTML clipboard content");
+                                } else if state.config.is_mime_denied("text/html")
+                                    || state.config.is_content_denied(&html_content)
+                                {
+                                    debug!("Content blocked by denylist rules, skipping");
                                 } else {
                                     let preview = if plain_text.len() > 80 {
                                         format!("{}...", &plain_text[..80])
@@ -301,6 +305,10 @@ impl Dispatch<ZwlrDataControlDeviceV1, ()> for AppState {
                                     debug!("Ignoring empty file list");
                                 } else if state.last_content.as_deref() == Some(&file_list) {
                                     debug!("Ignoring duplicate file list clipboard");
+                                } else if state.config.is_mime_denied("text/uri-list")
+                                    || state.config.is_content_denied(&file_list)
+                                {
+                                    debug!("Content blocked by denylist rules, skipping");
                                 } else {
                                     let file_count = file_list
                                         .lines()
@@ -337,6 +345,10 @@ impl Dispatch<ZwlrDataControlDeviceV1, ()> for AppState {
                                     );
                                 } else if state.last_content.as_deref() == Some(&content) {
                                     debug!("Ignoring duplicate clipboard content");
+                                } else if state.config.is_mime_denied("text/plain")
+                                    || state.config.is_content_denied(&content)
+                                {
+                                    debug!("Content blocked by denylist rules, skipping");
                                 } else {
                                     let preview = if content.len() > 80 {
                                         format!("{}...", &content[..80])
@@ -643,6 +655,22 @@ fn main() {
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
         .init();
+
+    // Check display server compatibility before doing anything else.
+    {
+        use author_clipboard_shared::compositor::{
+            detect_display_server, get_compositor_help, DisplayServer,
+        };
+        let server = detect_display_server();
+        if let Some(help) = get_compositor_help(&server) {
+            if server == DisplayServer::X11 || server == DisplayServer::Unknown {
+                eprintln!("Error: Unsupported display server configuration\n\n{help}");
+                std::process::exit(1);
+            }
+            // For WaylandNoDataControl, warn but try anyway (protocol check happens at connection time).
+            eprintln!("Warning: {help}");
+        }
+    }
 
     info!("author-clipboard-daemon starting...");
 
