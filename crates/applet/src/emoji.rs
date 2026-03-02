@@ -3,6 +3,7 @@
 /// An emoji category with its items
 pub struct EmojiCategory {
     pub name: &'static str,
+    #[allow(dead_code)]
     pub icon: &'static str,
     pub emojis: &'static [&'static str],
 }

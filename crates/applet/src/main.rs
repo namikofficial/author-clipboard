@@ -15,6 +15,7 @@ use author_clipboard_shared::types::{AuditEventKind, ClipboardItem, Snippet};
 use author_clipboard_shared::Database;
 use cosmic::app::{Core, Settings, Task};
 use cosmic::iced::alignment::Horizontal;
+use cosmic::iced::event;
 use cosmic::iced::keyboard::Key;
 use cosmic::iced::{Length, Size, Subscription};
 use cosmic::widget::{self, column, container, icon, row, scrollable, text, text_input};
@@ -28,10 +29,60 @@ fn clipboard_scroll_id() -> widget::Id {
     widget::Id::new("clipboard-scroll")
 }
 
+fn emoji_scroll_id() -> widget::Id {
+    widget::Id::new("emoji-scroll")
+}
+
+fn symbol_scroll_id() -> widget::Id {
+    widget::Id::new("symbol-scroll")
+}
+
+fn kaomoji_scroll_id() -> widget::Id {
+    widget::Id::new("kaomoji-scroll")
+}
+
 /// Approximate height of each clipboard item row in pixels (for scroll offset calculation).
 const ITEM_ROW_HEIGHT: f32 = 68.0;
 /// Approximate visible height of the scrollable area.
 const VISIBLE_SCROLL_HEIGHT: f32 = 460.0;
+/// Picker grid columns and row heights used for keyboard navigation + scrolling.
+const EMOJI_COLS: usize = 8;
+const SYMBOL_COLS: usize = 5;
+const KAOMOJI_COLS: usize = 2;
+const PICKER_ROW_HEIGHT: f32 = 44.0;
+
+fn map_key_to_message(key: &Key, modifiers: iced::keyboard::Modifiers) -> Option<Message> {
+    match key.as_ref() {
+        Key::Named(iced::keyboard::key::Named::ArrowDown) => Some(Message::MoveDown),
+        Key::Named(iced::keyboard::key::Named::ArrowUp) => Some(Message::MoveUp),
+        Key::Named(iced::keyboard::key::Named::ArrowLeft) => Some(Message::MoveLeft),
+        Key::Named(iced::keyboard::key::Named::ArrowRight) => Some(Message::MoveRight),
+        Key::Named(iced::keyboard::key::Named::Enter) => Some(Message::CopySelected),
+        Key::Named(iced::keyboard::key::Named::Home) => Some(Message::SelectFirst),
+        Key::Named(iced::keyboard::key::Named::End) => Some(Message::SelectLast),
+        Key::Named(iced::keyboard::key::Named::PageDown) => Some(Message::PageDown),
+        Key::Named(iced::keyboard::key::Named::PageUp) => Some(Message::PageUp),
+        Key::Named(iced::keyboard::key::Named::Delete) => Some(Message::DeleteSelected),
+        Key::Named(iced::keyboard::key::Named::Tab) if modifiers.control() => {
+            if modifiers.shift() {
+                Some(Message::PreviousTab)
+            } else {
+                Some(Message::NextTab)
+            }
+        }
+        Key::Character("1") if modifiers.control() => Some(Message::QuickSelect(0)),
+        Key::Character("2") if modifiers.control() => Some(Message::QuickSelect(1)),
+        Key::Character("3") if modifiers.control() => Some(Message::QuickSelect(2)),
+        Key::Character("4") if modifiers.control() => Some(Message::QuickSelect(3)),
+        Key::Character("5") if modifiers.control() => Some(Message::QuickSelect(4)),
+        Key::Character("6") if modifiers.control() => Some(Message::QuickSelect(5)),
+        Key::Character("7") if modifiers.control() => Some(Message::QuickSelect(6)),
+        Key::Character("8") if modifiers.control() => Some(Message::QuickSelect(7)),
+        Key::Character("9") if modifiers.control() => Some(Message::QuickSelect(8)),
+        Key::Character("d") if modifiers.control() => Some(Message::DeleteSelected),
+        _ => None,
+    }
+}
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
@@ -78,6 +129,9 @@ struct App {
     emoji_category_idx: usize,
     symbol_category_idx: usize,
     kaomoji_category_idx: usize,
+    emoji_selected_idx: Option<usize>,
+    symbol_selected_idx: Option<usize>,
+    kaomoji_selected_idx: Option<usize>,
     incognito: bool,
     quick_paste_enabled: bool,
     paste_backend: Option<PasteBackend>,
@@ -87,6 +141,8 @@ struct App {
     snippet_name_input: String,
     snippet_content_input: String,
     scroll_offset_y: f32,
+    denylist_input: String,
+    content_denylist_input: String,
 }
 
 // ── Messages ──────────────────────────────────────────────────────────
@@ -101,8 +157,10 @@ enum Message {
     TogglePin(i64),
     DeleteItem(i64),
     ClearAll,
-    SelectNext,
-    SelectPrevious,
+    MoveDown,
+    MoveUp,
+    MoveLeft,
+    MoveRight,
     CopySelected,
     EmojiCategory(usize),
     SymbolCategory(usize),
@@ -130,6 +188,19 @@ enum Message {
     SnippetNameInput(String),
     SnippetContentInput(String),
     ScrollOffsetChanged(f32),
+    SettingMaxItems(usize),
+    SettingMaxAgeDays(u64),
+    SettingDedupWindow(u64),
+    SettingToggleClearOnLock,
+    SettingDenylistAdd(String),
+    SettingDenylistRemove(usize),
+    SettingDenylistInput(String),
+    SettingContentDenylistAdd(String),
+    SettingContentDenylistRemove(usize),
+    SettingContentDenylistInput(String),
+    SettingToggleEncryptSensitive,
+    SettingMaxItemSize(usize),
+    SettingCleanupInterval(u64),
 }
 
 // ── Application trait ─────────────────────────────────────────────────
@@ -149,7 +220,7 @@ impl cosmic::Application for App {
     }
 
     fn init(core: Core, _flags: Self::Flags) -> (Self, Task<Self::Message>) {
-        let config = Config::default();
+        let config = Config::load();
 
         let db = match std::fs::create_dir_all(&config.data_dir) {
             Ok(()) => match Database::open(&config.db_path()) {
@@ -202,6 +273,9 @@ impl cosmic::Application for App {
             emoji_category_idx: 0,
             symbol_category_idx: 0,
             kaomoji_category_idx: 0,
+            emoji_selected_idx: None,
+            symbol_selected_idx: None,
+            kaomoji_selected_idx: None,
             incognito,
             quick_paste_enabled: false,
             paste_backend: quick_paste::detect_backend(),
@@ -211,6 +285,8 @@ impl cosmic::Application for App {
             snippet_name_input: String::new(),
             snippet_content_input: String::new(),
             scroll_offset_y: 0.0,
+            denylist_input: String::new(),
+            content_denylist_input: String::new(),
         };
 
         let command = Task::batch([
@@ -230,6 +306,9 @@ impl cosmic::Application for App {
             self.refresh_items();
         }
         self.selected_index = None;
+        self.emoji_selected_idx = None;
+        self.symbol_selected_idx = None;
+        self.kaomoji_selected_idx = None;
         Task::none()
     }
 
@@ -238,32 +317,10 @@ impl cosmic::Application for App {
     }
 
     fn subscription(&self) -> Subscription<Self::Message> {
-        let keyboard = cosmic::iced::keyboard::on_key_press(|key, modifiers| match key.as_ref() {
-            Key::Named(iced::keyboard::key::Named::ArrowDown) => Some(Message::SelectNext),
-            Key::Named(iced::keyboard::key::Named::ArrowUp) => Some(Message::SelectPrevious),
-            Key::Named(iced::keyboard::key::Named::Enter) => Some(Message::CopySelected),
-            Key::Named(iced::keyboard::key::Named::Home) => Some(Message::SelectFirst),
-            Key::Named(iced::keyboard::key::Named::End) => Some(Message::SelectLast),
-            Key::Named(iced::keyboard::key::Named::PageDown) => Some(Message::PageDown),
-            Key::Named(iced::keyboard::key::Named::PageUp) => Some(Message::PageUp),
-            Key::Named(iced::keyboard::key::Named::Delete) => Some(Message::DeleteSelected),
-            Key::Named(iced::keyboard::key::Named::Tab) if modifiers.control() => {
-                if modifiers.shift() {
-                    Some(Message::PreviousTab)
-                } else {
-                    Some(Message::NextTab)
-                }
+        let keyboard = event::listen_with(|event, _, _| match event {
+            iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers, .. }) => {
+                map_key_to_message(&key, modifiers)
             }
-            Key::Character("1") if modifiers.control() => Some(Message::QuickSelect(0)),
-            Key::Character("2") if modifiers.control() => Some(Message::QuickSelect(1)),
-            Key::Character("3") if modifiers.control() => Some(Message::QuickSelect(2)),
-            Key::Character("4") if modifiers.control() => Some(Message::QuickSelect(3)),
-            Key::Character("5") if modifiers.control() => Some(Message::QuickSelect(4)),
-            Key::Character("6") if modifiers.control() => Some(Message::QuickSelect(5)),
-            Key::Character("7") if modifiers.control() => Some(Message::QuickSelect(6)),
-            Key::Character("8") if modifiers.control() => Some(Message::QuickSelect(7)),
-            Key::Character("9") if modifiers.control() => Some(Message::QuickSelect(8)),
-            Key::Character("d") if modifiers.control() => Some(Message::DeleteSelected),
             _ => None,
         });
 
@@ -289,6 +346,9 @@ impl cosmic::Application for App {
                     self.search_query.clear();
                     self.selected_index = None;
                     self.scroll_offset_y = 0.0;
+                    self.emoji_selected_idx = None;
+                    self.symbol_selected_idx = None;
+                    self.kaomoji_selected_idx = None;
                 }
             }
 
@@ -299,6 +359,9 @@ impl cosmic::Application for App {
                 }
                 self.selected_index = None;
                 self.scroll_offset_y = 0.0;
+                self.emoji_selected_idx = None;
+                self.symbol_selected_idx = None;
+                self.kaomoji_selected_idx = None;
             }
 
             Message::CopyItem(id) => {
@@ -381,32 +444,194 @@ impl cosmic::Application for App {
                 }
             }
 
-            Message::SelectNext => {
-                let len = self.visible_item_count();
-                if len > 0 {
-                    self.selected_index = Some(match self.selected_index {
-                        Some(i) if i + 1 < len => i + 1,
-                        _ => 0,
-                    });
-                }
-                return self.scroll_to_selected();
+            Message::MoveDown => {
+                return match self.active_tab {
+                    AppTab::Emoji => {
+                        let len = self.filtered_emojis().len();
+                        if len > 0 {
+                            let next = match self.emoji_selected_idx {
+                                Some(i) => i + EMOJI_COLS,
+                                None => 0,
+                            };
+                            self.emoji_selected_idx = Some(next.min(len - 1));
+                        }
+                        self.scroll_emoji_to_selected()
+                    }
+                    AppTab::Symbols => {
+                        let len = self.filtered_symbols().len();
+                        if len > 0 {
+                            let next = match self.symbol_selected_idx {
+                                Some(i) => i + SYMBOL_COLS,
+                                None => 0,
+                            };
+                            self.symbol_selected_idx = Some(next.min(len - 1));
+                        }
+                        self.scroll_symbol_to_selected()
+                    }
+                    AppTab::Kaomoji => {
+                        let len = self.filtered_kaomoji().len();
+                        if len > 0 {
+                            let next = match self.kaomoji_selected_idx {
+                                Some(i) => i + KAOMOJI_COLS,
+                                None => 0,
+                            };
+                            self.kaomoji_selected_idx = Some(next.min(len - 1));
+                        }
+                        self.scroll_kaomoji_to_selected()
+                    }
+                    _ => {
+                        let len = self.visible_item_count();
+                        if len > 0 {
+                            self.selected_index = Some(match self.selected_index {
+                                Some(i) if i + 1 < len => i + 1,
+                                _ => 0,
+                            });
+                        }
+                        self.scroll_to_selected()
+                    }
+                };
             }
 
-            Message::SelectPrevious => {
-                let len = self.visible_item_count();
-                if len > 0 {
-                    self.selected_index = Some(match self.selected_index {
-                        Some(0) | None => len.saturating_sub(1),
-                        Some(i) => i - 1,
-                    });
-                }
-                return self.scroll_to_selected();
+            Message::MoveUp => {
+                return match self.active_tab {
+                    AppTab::Emoji => {
+                        let len = self.filtered_emojis().len();
+                        if len > 0 {
+                            self.emoji_selected_idx = Some(
+                                self.emoji_selected_idx
+                                    .unwrap_or(0)
+                                    .saturating_sub(EMOJI_COLS),
+                            );
+                        }
+                        self.scroll_emoji_to_selected()
+                    }
+                    AppTab::Symbols => {
+                        let len = self.filtered_symbols().len();
+                        if len > 0 {
+                            self.symbol_selected_idx = Some(
+                                self.symbol_selected_idx
+                                    .unwrap_or(0)
+                                    .saturating_sub(SYMBOL_COLS),
+                            );
+                        }
+                        self.scroll_symbol_to_selected()
+                    }
+                    AppTab::Kaomoji => {
+                        let len = self.filtered_kaomoji().len();
+                        if len > 0 {
+                            self.kaomoji_selected_idx = Some(
+                                self.kaomoji_selected_idx
+                                    .unwrap_or(0)
+                                    .saturating_sub(KAOMOJI_COLS),
+                            );
+                        }
+                        self.scroll_kaomoji_to_selected()
+                    }
+                    _ => {
+                        let len = self.visible_item_count();
+                        if len > 0 {
+                            self.selected_index = Some(match self.selected_index {
+                                Some(0) | None => len.saturating_sub(1),
+                                Some(i) => i - 1,
+                            });
+                        }
+                        self.scroll_to_selected()
+                    }
+                };
+            }
+
+            Message::MoveLeft => {
+                return match self.active_tab {
+                    AppTab::Emoji => {
+                        if !self.filtered_emojis().is_empty() {
+                            self.emoji_selected_idx =
+                                Some(self.emoji_selected_idx.unwrap_or(0).saturating_sub(1));
+                        }
+                        self.scroll_emoji_to_selected()
+                    }
+                    AppTab::Symbols => {
+                        if !self.filtered_symbols().is_empty() {
+                            self.symbol_selected_idx =
+                                Some(self.symbol_selected_idx.unwrap_or(0).saturating_sub(1));
+                        }
+                        self.scroll_symbol_to_selected()
+                    }
+                    AppTab::Kaomoji => {
+                        if !self.filtered_kaomoji().is_empty() {
+                            self.kaomoji_selected_idx =
+                                Some(self.kaomoji_selected_idx.unwrap_or(0).saturating_sub(1));
+                        }
+                        self.scroll_kaomoji_to_selected()
+                    }
+                    _ => Task::none(),
+                };
+            }
+
+            Message::MoveRight => {
+                return match self.active_tab {
+                    AppTab::Emoji => {
+                        let len = self.filtered_emojis().len();
+                        if len > 0 {
+                            let next = match self.emoji_selected_idx {
+                                Some(i) => i + 1,
+                                None => 0,
+                            };
+                            self.emoji_selected_idx = Some(next.min(len - 1));
+                        }
+                        self.scroll_emoji_to_selected()
+                    }
+                    AppTab::Symbols => {
+                        let len = self.filtered_symbols().len();
+                        if len > 0 {
+                            let next = match self.symbol_selected_idx {
+                                Some(i) => i + 1,
+                                None => 0,
+                            };
+                            self.symbol_selected_idx = Some(next.min(len - 1));
+                        }
+                        self.scroll_symbol_to_selected()
+                    }
+                    AppTab::Kaomoji => {
+                        let len = self.filtered_kaomoji().len();
+                        if len > 0 {
+                            let next = match self.kaomoji_selected_idx {
+                                Some(i) => i + 1,
+                                None => 0,
+                            };
+                            self.kaomoji_selected_idx = Some(next.min(len - 1));
+                        }
+                        self.scroll_kaomoji_to_selected()
+                    }
+                    _ => Task::none(),
+                };
             }
 
             Message::CopySelected => {
                 // Auto-select first item if nothing selected
-                if self.selected_index.is_none() && self.visible_item_count() > 0 {
-                    self.selected_index = Some(0);
+                match self.active_tab {
+                    AppTab::Emoji => {
+                        if self.emoji_selected_idx.is_none() && !self.filtered_emojis().is_empty() {
+                            self.emoji_selected_idx = Some(0);
+                        }
+                    }
+                    AppTab::Symbols => {
+                        if self.symbol_selected_idx.is_none() && !self.filtered_symbols().is_empty()
+                        {
+                            self.symbol_selected_idx = Some(0);
+                        }
+                    }
+                    AppTab::Kaomoji => {
+                        if self.kaomoji_selected_idx.is_none()
+                            && !self.filtered_kaomoji().is_empty()
+                        {
+                            self.kaomoji_selected_idx = Some(0);
+                        }
+                    }
+                    _ => {
+                        if self.selected_index.is_none() && self.visible_item_count() > 0 {
+                            self.selected_index = Some(0);
+                        }
+                    }
                 }
                 return self.copy_selected_item();
             }
@@ -414,16 +639,19 @@ impl cosmic::Application for App {
             Message::EmojiCategory(idx) => {
                 self.emoji_category_idx = idx;
                 self.selected_index = None;
+                self.emoji_selected_idx = None;
             }
 
             Message::SymbolCategory(idx) => {
                 self.symbol_category_idx = idx;
                 self.selected_index = None;
+                self.symbol_selected_idx = None;
             }
 
             Message::KaomojiCategory(idx) => {
                 self.kaomoji_category_idx = idx;
                 self.selected_index = None;
+                self.kaomoji_selected_idx = None;
             }
 
             Message::ToggleIncognito => {
@@ -581,39 +809,145 @@ impl cosmic::Application for App {
             }
 
             Message::SelectFirst => {
-                let len = self.visible_item_count();
-                if len > 0 {
-                    self.selected_index = Some(0);
-                }
-                return self.scroll_to_selected();
+                return match self.active_tab {
+                    AppTab::Emoji => {
+                        if !self.filtered_emojis().is_empty() {
+                            self.emoji_selected_idx = Some(0);
+                        }
+                        self.scroll_emoji_to_selected()
+                    }
+                    AppTab::Symbols => {
+                        if !self.filtered_symbols().is_empty() {
+                            self.symbol_selected_idx = Some(0);
+                        }
+                        self.scroll_symbol_to_selected()
+                    }
+                    AppTab::Kaomoji => {
+                        if !self.filtered_kaomoji().is_empty() {
+                            self.kaomoji_selected_idx = Some(0);
+                        }
+                        self.scroll_kaomoji_to_selected()
+                    }
+                    _ => {
+                        let len = self.visible_item_count();
+                        if len > 0 {
+                            self.selected_index = Some(0);
+                        }
+                        self.scroll_to_selected()
+                    }
+                };
             }
 
             Message::SelectLast => {
-                let len = self.visible_item_count();
-                if len > 0 {
-                    self.selected_index = Some(len - 1);
-                }
-                return self.scroll_to_selected();
+                return match self.active_tab {
+                    AppTab::Emoji => {
+                        let len = self.filtered_emojis().len();
+                        if len > 0 {
+                            self.emoji_selected_idx = Some(len - 1);
+                        }
+                        self.scroll_emoji_to_selected()
+                    }
+                    AppTab::Symbols => {
+                        let len = self.filtered_symbols().len();
+                        if len > 0 {
+                            self.symbol_selected_idx = Some(len - 1);
+                        }
+                        self.scroll_symbol_to_selected()
+                    }
+                    AppTab::Kaomoji => {
+                        let len = self.filtered_kaomoji().len();
+                        if len > 0 {
+                            self.kaomoji_selected_idx = Some(len - 1);
+                        }
+                        self.scroll_kaomoji_to_selected()
+                    }
+                    _ => {
+                        let len = self.visible_item_count();
+                        if len > 0 {
+                            self.selected_index = Some(len - 1);
+                        }
+                        self.scroll_to_selected()
+                    }
+                };
             }
 
             Message::PageDown => {
-                let len = self.visible_item_count();
-                if len > 0 {
-                    let page_size = 10;
-                    let current = self.selected_index.unwrap_or(0);
-                    self.selected_index = Some((current + page_size).min(len - 1));
-                }
-                return self.scroll_to_selected();
+                return match self.active_tab {
+                    AppTab::Emoji => {
+                        let len = self.filtered_emojis().len();
+                        if len > 0 {
+                            let page_size = EMOJI_COLS * 5;
+                            let current = self.emoji_selected_idx.unwrap_or(0);
+                            self.emoji_selected_idx = Some((current + page_size).min(len - 1));
+                        }
+                        self.scroll_emoji_to_selected()
+                    }
+                    AppTab::Symbols => {
+                        let len = self.filtered_symbols().len();
+                        if len > 0 {
+                            let page_size = SYMBOL_COLS * 5;
+                            let current = self.symbol_selected_idx.unwrap_or(0);
+                            self.symbol_selected_idx = Some((current + page_size).min(len - 1));
+                        }
+                        self.scroll_symbol_to_selected()
+                    }
+                    AppTab::Kaomoji => {
+                        let len = self.filtered_kaomoji().len();
+                        if len > 0 {
+                            let page_size = KAOMOJI_COLS * 6;
+                            let current = self.kaomoji_selected_idx.unwrap_or(0);
+                            self.kaomoji_selected_idx = Some((current + page_size).min(len - 1));
+                        }
+                        self.scroll_kaomoji_to_selected()
+                    }
+                    _ => {
+                        let len = self.visible_item_count();
+                        if len > 0 {
+                            let page_size = 10;
+                            let current = self.selected_index.unwrap_or(0);
+                            self.selected_index = Some((current + page_size).min(len - 1));
+                        }
+                        self.scroll_to_selected()
+                    }
+                };
             }
 
             Message::PageUp => {
-                let len = self.visible_item_count();
-                if len > 0 {
-                    let page_size = 10;
-                    let current = self.selected_index.unwrap_or(0);
-                    self.selected_index = Some(current.saturating_sub(page_size));
-                }
-                return self.scroll_to_selected();
+                return match self.active_tab {
+                    AppTab::Emoji => {
+                        if !self.filtered_emojis().is_empty() {
+                            let page_size = EMOJI_COLS * 5;
+                            let current = self.emoji_selected_idx.unwrap_or(0);
+                            self.emoji_selected_idx = Some(current.saturating_sub(page_size));
+                        }
+                        self.scroll_emoji_to_selected()
+                    }
+                    AppTab::Symbols => {
+                        if !self.filtered_symbols().is_empty() {
+                            let page_size = SYMBOL_COLS * 5;
+                            let current = self.symbol_selected_idx.unwrap_or(0);
+                            self.symbol_selected_idx = Some(current.saturating_sub(page_size));
+                        }
+                        self.scroll_symbol_to_selected()
+                    }
+                    AppTab::Kaomoji => {
+                        if !self.filtered_kaomoji().is_empty() {
+                            let page_size = KAOMOJI_COLS * 6;
+                            let current = self.kaomoji_selected_idx.unwrap_or(0);
+                            self.kaomoji_selected_idx = Some(current.saturating_sub(page_size));
+                        }
+                        self.scroll_kaomoji_to_selected()
+                    }
+                    _ => {
+                        let len = self.visible_item_count();
+                        if len > 0 {
+                            let page_size = 10;
+                            let current = self.selected_index.unwrap_or(0);
+                            self.selected_index = Some(current.saturating_sub(page_size));
+                        }
+                        self.scroll_to_selected()
+                    }
+                };
             }
 
             Message::SnippetSearchChanged(q) => {
@@ -676,6 +1010,80 @@ impl cosmic::Application for App {
                 self.scroll_offset_y = y;
                 return Task::none();
             }
+
+            Message::SettingMaxItems(val) => {
+                self.config.max_items = val;
+                let _ = self.config.save();
+            }
+
+            Message::SettingMaxAgeDays(val) => {
+                self.config.ttl_seconds = val * 86400;
+                let _ = self.config.save();
+            }
+
+            Message::SettingDedupWindow(val) => {
+                self.config.dedup_window_seconds = val;
+                let _ = self.config.save();
+            }
+
+            Message::SettingToggleClearOnLock => {
+                self.config.clear_on_lock = !self.config.clear_on_lock;
+                let _ = self.config.save();
+            }
+
+            Message::SettingDenylistAdd(rule) => {
+                if !rule.trim().is_empty() {
+                    self.config.mime_denylist.push(rule.trim().to_string());
+                    let _ = self.config.save();
+                    self.denylist_input.clear();
+                }
+            }
+
+            Message::SettingDenylistRemove(idx) => {
+                if idx < self.config.mime_denylist.len() {
+                    self.config.mime_denylist.remove(idx);
+                    let _ = self.config.save();
+                }
+            }
+
+            Message::SettingDenylistInput(s) => {
+                self.denylist_input = s;
+            }
+
+            Message::SettingContentDenylistAdd(rule) => {
+                let trimmed = rule.trim();
+                if !trimmed.is_empty() {
+                    self.config.content_regex_denylist.push(trimmed.to_string());
+                    let _ = self.config.save();
+                    self.content_denylist_input.clear();
+                }
+            }
+
+            Message::SettingContentDenylistRemove(idx) => {
+                if idx < self.config.content_regex_denylist.len() {
+                    self.config.content_regex_denylist.remove(idx);
+                    let _ = self.config.save();
+                }
+            }
+
+            Message::SettingContentDenylistInput(s) => {
+                self.content_denylist_input = s;
+            }
+
+            Message::SettingToggleEncryptSensitive => {
+                self.config.encrypt_sensitive = !self.config.encrypt_sensitive;
+                let _ = self.config.save();
+            }
+
+            Message::SettingMaxItemSize(val) => {
+                self.config.max_item_size = val;
+                let _ = self.config.save();
+            }
+
+            Message::SettingCleanupInterval(val) => {
+                self.config.cleanup_interval_seconds = val;
+                let _ = self.config.save();
+            }
         }
 
         Task::none()
@@ -710,9 +1118,9 @@ impl cosmic::Application for App {
 
         let incognito_btn = {
             let icon_name = if self.incognito {
-                "system-lock-screen-symbolic"
+                "object-locked-symbolic"
             } else {
-                "view-reveal-symbolic"
+                "object-unlocked-symbolic"
             };
             widget::button::icon(icon::from_name(icon_name).size(18))
                 .on_press(Message::ToggleIncognito)
@@ -791,7 +1199,15 @@ impl cosmic::Application for App {
         }
         let full_status = status_parts.join(" · ");
 
-        let hints = "↑↓ Nav · PgUp/Dn · Home/End · Enter Paste · Del Remove · Esc Close";
+        let hints = match self.active_tab {
+            AppTab::Clipboard => {
+                "↑↓ Nav · PgUp/Dn · Home/End · Enter Paste · Del Remove · Esc Close"
+            }
+            AppTab::Emoji | AppTab::Symbols | AppTab::Kaomoji => {
+                "↑↓←→ Nav · PgUp/Dn · Home/End · Enter Copy · Ctrl+Tab Switch · Esc Close"
+            }
+            _ => "Esc Close",
+        };
 
         let status_bar = container(
             row()
@@ -1108,29 +1524,6 @@ impl App {
     fn view_emoji(&self) -> Element<'_, Message> {
         let mut content = column().spacing(8);
 
-        // Category buttons (only when not searching)
-        if self.search_query.is_empty() {
-            let mut cat_row = row().spacing(4);
-            for (idx, cat) in emoji::CATEGORIES.iter().enumerate() {
-                let btn = if idx == self.emoji_category_idx {
-                    widget::button::suggested(cat.icon)
-                        .on_press(Message::EmojiCategory(idx))
-                        .padding([4, 8])
-                } else {
-                    widget::button::text(cat.icon)
-                        .on_press(Message::EmojiCategory(idx))
-                        .padding([4, 8])
-                };
-                cat_row = cat_row.push(btn);
-            }
-            content = content.push(widget::scrollable::horizontal(cat_row));
-
-            // Category label
-            let cat = &emoji::CATEGORIES[self.emoji_category_idx];
-            content = content.push(text(cat.name).size(13.0));
-        }
-
-        // Emoji grid
         let emojis: Vec<&str> = if self.search_query.is_empty() {
             let cat = &emoji::CATEGORIES[self.emoji_category_idx];
             cat.emojis.to_vec()
@@ -1138,25 +1531,96 @@ impl App {
             emoji::search(&self.search_query)
         };
 
+        if let Some(db) = &self.db {
+            if let Ok(recent) = db.get_recently_used("emoji", 12) {
+                if !recent.is_empty() {
+                    let mut recent_row = row().spacing(4).align_y(iced::Alignment::Center);
+                    recent_row = recent_row.push(text("Recent:").size(12.0));
+                    for e in recent {
+                        let label = e;
+                        recent_row = recent_row.push(
+                            widget::button::text(label.clone())
+                                .on_press(Message::CopyText(label))
+                                .padding([4, 8]),
+                        );
+                    }
+                    content = content.push(widget::scrollable::horizontal(recent_row));
+                }
+            }
+        }
+
+        if self.search_query.is_empty() {
+            let mut cat_row = row().spacing(6);
+            for (idx, cat) in emoji::CATEGORIES.iter().enumerate() {
+                let label = format!("{} {}", cat.icon, cat.name);
+                let btn = if idx == self.emoji_category_idx {
+                    widget::button::suggested(label)
+                        .on_press(Message::EmojiCategory(idx))
+                        .padding([5, 12])
+                } else {
+                    widget::button::text(label)
+                        .on_press(Message::EmojiCategory(idx))
+                        .padding([5, 12])
+                };
+                cat_row = cat_row.push(btn);
+            }
+            content = content.push(widget::scrollable::horizontal(cat_row));
+            content = content.push(text(format!("{} emoji", emojis.len())).size(11.0));
+        } else {
+            content = content.push(text(format!("{} results", emojis.len())).size(11.0));
+        }
+
+        if emojis.is_empty() {
+            return container(
+                column()
+                    .spacing(8)
+                    .align_x(Horizontal::Center)
+                    .push(icon::from_name("face-smile-symbolic").size(40).icon())
+                    .push(
+                        text("No emoji found")
+                            .size(13.0)
+                            .align_x(Horizontal::Center),
+                    ),
+            )
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .align_x(Horizontal::Center)
+            .align_y(iced::alignment::Vertical::Center)
+            .into();
+        }
+
         let mut grid = column().spacing(2);
-        let cols = 7;
-        for chunk in emojis.chunks(cols) {
+        let mut flat_idx = 0usize;
+        for chunk in emojis.chunks(EMOJI_COLS) {
             let mut grid_row = row().spacing(2);
             for &emoji_char in chunk {
-                let btn = widget::button::text(emoji_char)
-                    .on_press(Message::CopyText(emoji_char.to_string()))
-                    .width(Length::Fill)
-                    .padding([8, 4]);
+                let is_selected = self.emoji_selected_idx == Some(flat_idx);
+                let btn = if is_selected {
+                    widget::button::suggested(emoji_char)
+                        .on_press(Message::CopyText(emoji_char.to_string()))
+                        .width(Length::Fill)
+                        .padding([10, 6])
+                } else {
+                    widget::button::text(emoji_char)
+                        .on_press(Message::CopyText(emoji_char.to_string()))
+                        .width(Length::Fill)
+                        .padding([10, 6])
+                };
                 grid_row = grid_row.push(btn);
+                flat_idx += 1;
             }
-            // Pad incomplete rows with empty space
-            for _ in chunk.len()..cols {
+            for _ in chunk.len()..EMOJI_COLS {
                 grid_row = grid_row.push(cosmic::iced::widget::horizontal_space());
             }
             grid = grid.push(grid_row);
         }
 
-        content = content.push(scrollable(grid).width(Length::Fill).height(Length::Fill));
+        content = content.push(
+            scrollable(grid)
+                .id(emoji_scroll_id())
+                .width(Length::Fill)
+                .height(Length::Fill),
+        );
 
         content.into()
     }
@@ -1166,58 +1630,108 @@ impl App {
     fn view_symbols(&self) -> Element<'_, Message> {
         let mut content = column().spacing(8);
 
-        // Category buttons (only when not searching)
-        if self.search_query.is_empty() {
-            let mut cat_row = row().spacing(4);
-            for (idx, cat) in symbols::CATEGORIES.iter().enumerate() {
-                let btn = if idx == self.symbol_category_idx {
-                    widget::button::suggested(cat.icon)
-                        .on_press(Message::SymbolCategory(idx))
-                        .padding([4, 8])
-                } else {
-                    widget::button::text(cat.icon)
-                        .on_press(Message::SymbolCategory(idx))
-                        .padding([4, 8])
-                };
-                cat_row = cat_row.push(btn);
-            }
-            content = content.push(widget::scrollable::horizontal(cat_row));
-
-            // Category label
-            let cat = &symbols::CATEGORIES[self.symbol_category_idx];
-            content = content.push(text(cat.name).size(13.0));
-        }
-
-        // Symbol grid with descriptions
-        let syms = if self.search_query.is_empty() {
+        let syms: Vec<(&str, &str)> = if self.search_query.is_empty() {
             let cat = &symbols::CATEGORIES[self.symbol_category_idx];
             cat.symbols.to_vec()
         } else {
             symbols::search(&self.search_query)
         };
 
+        if let Some(db) = &self.db {
+            if let Ok(recent) = db.get_recently_used("symbol", 12) {
+                if !recent.is_empty() {
+                    let mut recent_row = row().spacing(4).align_y(iced::Alignment::Center);
+                    recent_row = recent_row.push(text("Recent:").size(12.0));
+                    for s in recent {
+                        let label = s;
+                        recent_row = recent_row.push(
+                            widget::button::text(label.clone())
+                                .on_press(Message::CopyText(label))
+                                .padding([4, 8]),
+                        );
+                    }
+                    content = content.push(widget::scrollable::horizontal(recent_row));
+                }
+            }
+        }
+
+        if self.search_query.is_empty() {
+            let mut cat_row = row().spacing(6);
+            for (idx, cat) in symbols::CATEGORIES.iter().enumerate() {
+                let label = format!("{} {}", cat.icon, cat.name);
+                let btn = if idx == self.symbol_category_idx {
+                    widget::button::suggested(label)
+                        .on_press(Message::SymbolCategory(idx))
+                        .padding([5, 12])
+                } else {
+                    widget::button::text(label)
+                        .on_press(Message::SymbolCategory(idx))
+                        .padding([5, 12])
+                };
+                cat_row = cat_row.push(btn);
+            }
+            content = content.push(widget::scrollable::horizontal(cat_row));
+            content = content.push(text(format!("{} symbols", syms.len())).size(11.0));
+        } else {
+            content = content.push(text(format!("{} results", syms.len())).size(11.0));
+        }
+
+        if syms.is_empty() {
+            return container(
+                column()
+                    .spacing(8)
+                    .align_x(Horizontal::Center)
+                    .push(icon::from_name("insert-text-symbolic").size(40).icon())
+                    .push(
+                        text("No symbols found")
+                            .size(13.0)
+                            .align_x(Horizontal::Center),
+                    ),
+            )
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .align_x(Horizontal::Center)
+            .align_y(iced::alignment::Vertical::Center)
+            .into();
+        }
+
         let mut list = column().spacing(2);
-        let cols = 5;
-        for chunk in syms.chunks(cols) {
+        let mut flat_idx = 0usize;
+        for chunk in syms.chunks(SYMBOL_COLS) {
             let mut grid_row = row().spacing(2);
             for &(sym, desc) in chunk {
-                let btn = widget::tooltip(
+                let is_selected = self.symbol_selected_idx == Some(flat_idx);
+                let sym_btn = if is_selected {
+                    widget::button::suggested(sym)
+                        .on_press(Message::CopyText(sym.to_string()))
+                        .width(Length::Fill)
+                        .padding([10, 8])
+                } else {
                     widget::button::text(sym)
                         .on_press(Message::CopyText(sym.to_string()))
                         .width(Length::Fill)
-                        .padding([8, 8]),
+                        .padding([10, 8])
+                };
+                let btn = widget::tooltip(
+                    sym_btn,
                     text(desc).size(12.0),
                     widget::tooltip::Position::Bottom,
                 );
                 grid_row = grid_row.push(btn);
+                flat_idx += 1;
             }
-            for _ in chunk.len()..cols {
+            for _ in chunk.len()..SYMBOL_COLS {
                 grid_row = grid_row.push(cosmic::iced::widget::horizontal_space());
             }
             list = list.push(grid_row);
         }
 
-        content = content.push(scrollable(list).width(Length::Fill).height(Length::Fill));
+        content = content.push(
+            scrollable(list)
+                .id(symbol_scroll_id())
+                .width(Length::Fill)
+                .height(Length::Fill),
+        );
 
         content.into()
     }
@@ -1227,62 +1741,92 @@ impl App {
     fn view_kaomoji(&self) -> Element<'_, Message> {
         let mut content = column().spacing(8).width(Length::Fill);
 
-        // Category selector (horizontal scrolling row, compact labels)
+        let items = self.filtered_kaomoji();
+
+        if let Some(db) = &self.db {
+            if let Ok(recent) = db.get_recently_used("kaomoji", 10) {
+                if !recent.is_empty() {
+                    let mut recent_row = row().spacing(4).align_y(iced::Alignment::Center);
+                    recent_row = recent_row.push(text("Recent:").size(12.0));
+                    for k in recent {
+                        let label = k;
+                        recent_row = recent_row.push(
+                            widget::button::text(label.clone())
+                                .on_press(Message::CopyText(label))
+                                .padding([4, 8]),
+                        );
+                    }
+                    content = content.push(widget::scrollable::horizontal(recent_row));
+                }
+            }
+        }
+
         if self.search_query.is_empty() {
-            let mut cat_row = row().spacing(2);
+            let mut cat_row = row().spacing(6);
             for (idx, cat) in kaomoji::CATEGORIES.iter().enumerate() {
+                let label = format!("{} {}", cat.icon, cat.name);
                 let btn = if idx == self.kaomoji_category_idx {
-                    widget::button::suggested(cat.icon)
+                    widget::button::suggested(label)
                         .on_press(Message::KaomojiCategory(idx))
-                        .padding([4, 6])
+                        .padding([5, 12])
                 } else {
-                    widget::button::text(cat.icon)
+                    widget::button::text(label)
                         .on_press(Message::KaomojiCategory(idx))
-                        .padding([4, 6])
+                        .padding([5, 12])
                 };
-                cat_row = cat_row.push(widget::tooltip(
-                    btn,
-                    text(cat.name).size(11.0),
-                    widget::tooltip::Position::Bottom,
-                ));
+                cat_row = cat_row.push(btn);
             }
             content = content.push(widget::scrollable::horizontal(cat_row));
-
-            let cat = &kaomoji::CATEGORIES[self.kaomoji_category_idx];
-            content = content.push(text(cat.name).size(13.0));
+            content = content.push(text(format!("{} kaomoji", items.len())).size(11.0));
+        } else {
+            content = content.push(text(format!("{} results", items.len())).size(11.0));
         }
 
-        // Kaomoji list in 2-column grid
-        let items = self.filtered_kaomoji();
-        let mut list = column().spacing(3).width(Length::Fill);
-        for chunk in items.chunks(2) {
-            let mut grid_row = row().spacing(4);
-            for (sub_idx, &kaomoji_str) in chunk.iter().enumerate() {
-                let global_idx = items
-                    .iter()
-                    .position(|&k| k == kaomoji_str)
-                    .unwrap_or(sub_idx);
-                let is_selected = self.selected_index == Some(global_idx);
-                let btn = if is_selected {
-                    widget::button::suggested(kaomoji_str)
-                        .on_press(Message::CopyText(kaomoji_str.to_string()))
-                        .width(Length::Fill)
-                        .padding([6, 8])
-                } else {
-                    widget::button::text(kaomoji_str)
-                        .on_press(Message::CopyText(kaomoji_str.to_string()))
-                        .width(Length::Fill)
-                        .padding([6, 8])
-                };
-                grid_row = grid_row.push(btn);
+        if items.is_empty() {
+            content = content.push(
+                container(
+                    text("No results found")
+                        .size(13.0)
+                        .align_x(Horizontal::Center),
+                )
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_x(Horizontal::Center)
+                .align_y(iced::alignment::Vertical::Center),
+            );
+        } else {
+            let mut list = column().spacing(3).width(Length::Fill);
+            let mut flat_idx = 0usize;
+            for chunk in items.chunks(KAOMOJI_COLS) {
+                let mut grid_row = row().spacing(4);
+                for &kaomoji_str in chunk {
+                    let is_selected = self.kaomoji_selected_idx == Some(flat_idx);
+                    let btn = if is_selected {
+                        widget::button::suggested(kaomoji_str)
+                            .on_press(Message::CopyText(kaomoji_str.to_string()))
+                            .width(Length::Fill)
+                            .padding([8, 12])
+                    } else {
+                        widget::button::text(kaomoji_str)
+                            .on_press(Message::CopyText(kaomoji_str.to_string()))
+                            .width(Length::Fill)
+                            .padding([8, 12])
+                    };
+                    grid_row = grid_row.push(btn);
+                    flat_idx += 1;
+                }
+                if chunk.len() == 1 {
+                    grid_row = grid_row.push(cosmic::iced::widget::horizontal_space());
+                }
+                list = list.push(grid_row);
             }
-            if chunk.len() == 1 {
-                grid_row = grid_row.push(cosmic::iced::widget::horizontal_space());
-            }
-            list = list.push(grid_row);
+            content = content.push(
+                scrollable(list)
+                    .id(kaomoji_scroll_id())
+                    .width(Length::Fill)
+                    .height(Length::Fill),
+            );
         }
-
-        content = content.push(scrollable(list).width(Length::Fill).height(Length::Fill));
 
         content.into()
     }
@@ -1396,10 +1940,11 @@ impl App {
 
     #[allow(clippy::too_many_lines)]
     fn view_settings(&self) -> Element<'_, Message> {
+        let version = env!("CARGO_PKG_VERSION");
         let mut content = column().spacing(12).width(Length::Fill);
 
-        // Daemon status
-        content = content.push(text("Status").size(16.0));
+        // ── Status ───────────────────────────────────────────────────
+        content = content.push(text("📡 Status").size(15));
         let daemon_status = if self.daemon_running {
             "● Daemon is running — clipboard changes are being captured"
         } else {
@@ -1416,7 +1961,8 @@ impl App {
         };
         content = content.push(daemon_btn);
 
-        // Incognito toggle
+        // ── Privacy ──────────────────────────────────────────────────
+        content = content.push(text("🕶️ Privacy").size(15));
         let incognito_label = if self.incognito {
             "Incognito Mode: ON — clipboard history is paused"
         } else {
@@ -1433,11 +1979,269 @@ impl App {
                 .width(Length::Fill)
                 .padding([10, 16])
         };
-        content = content.push(text("Privacy").size(16.0));
         content = content.push(incognito_btn);
 
-        // Clear all button
-        content = content.push(text("Data").size(16.0));
+        let lock_label = if self.config.clear_on_lock {
+            "Clear history on screen lock: ON"
+        } else {
+            "Clear history on screen lock: OFF"
+        };
+        let lock_btn = if self.config.clear_on_lock {
+            widget::button::suggested(lock_label)
+                .on_press(Message::SettingToggleClearOnLock)
+                .width(Length::Fill)
+                .padding([10, 16])
+        } else {
+            widget::button::text(lock_label)
+                .on_press(Message::SettingToggleClearOnLock)
+                .width(Length::Fill)
+                .padding([10, 16])
+        };
+        content = content.push(lock_btn);
+
+        let encrypt_label = if self.config.encrypt_sensitive {
+            "Encrypt sensitive items at rest: ON"
+        } else {
+            "Encrypt sensitive items at rest: OFF"
+        };
+        let encrypt_btn = if self.config.encrypt_sensitive {
+            widget::button::suggested(encrypt_label)
+                .on_press(Message::SettingToggleEncryptSensitive)
+                .width(Length::Fill)
+                .padding([10, 16])
+        } else {
+            widget::button::text(encrypt_label)
+                .on_press(Message::SettingToggleEncryptSensitive)
+                .width(Length::Fill)
+                .padding([10, 16])
+        };
+        content = content.push(encrypt_btn);
+
+        // ── History ──────────────────────────────────────────────────
+        content = content.push(text("📋 History").size(15));
+
+        // Max items buttons
+        let max_items_options: &[(usize, &str)] = &[
+            (50, "50"),
+            (100, "100"),
+            (200, "200"),
+            (500, "500"),
+            (1000, "1000"),
+        ];
+        let mut max_row = row().spacing(6).align_y(iced::Alignment::Center);
+        max_row = max_row.push(text("Max items:").size(13));
+        for &(val, label) in max_items_options {
+            let btn = if self.config.max_items == val {
+                widget::button::suggested(label)
+                    .on_press(Message::SettingMaxItems(val))
+                    .padding([4, 8])
+            } else {
+                widget::button::text(label)
+                    .on_press(Message::SettingMaxItems(val))
+                    .padding([4, 8])
+            };
+            max_row = max_row.push(btn);
+        }
+        content = content.push(max_row);
+
+        // Keep history (TTL) buttons — stored internally as seconds
+        let age_options: &[(u64, &str)] = &[
+            (7, "7d"),
+            (30, "30d"),
+            (90, "90d"),
+            (365, "1yr"),
+            (0, "Never"),
+        ];
+        let current_days = if self.config.ttl_seconds == 0 {
+            0u64
+        } else {
+            self.config.ttl_seconds / 86400
+        };
+        let mut age_row = row().spacing(6).align_y(iced::Alignment::Center);
+        age_row = age_row.push(text("Keep history:").size(13));
+        for &(val_days, label) in age_options {
+            let btn = if current_days == val_days {
+                widget::button::suggested(label)
+                    .on_press(Message::SettingMaxAgeDays(val_days))
+                    .padding([4, 8])
+            } else {
+                widget::button::text(label)
+                    .on_press(Message::SettingMaxAgeDays(val_days))
+                    .padding([4, 8])
+            };
+            age_row = age_row.push(btn);
+        }
+        content = content.push(age_row);
+
+        // Dedup window buttons
+        let dedup_options: &[(u64, &str)] =
+            &[(0, "Off"), (2, "2s"), (5, "5s"), (10, "10s"), (30, "30s")];
+        let mut dedup_row = row().spacing(6).align_y(iced::Alignment::Center);
+        dedup_row = dedup_row.push(text("Dedup window:").size(13));
+        for &(val, label) in dedup_options {
+            let btn = if self.config.dedup_window_seconds == val {
+                widget::button::suggested(label)
+                    .on_press(Message::SettingDedupWindow(val))
+                    .padding([4, 8])
+            } else {
+                widget::button::text(label)
+                    .on_press(Message::SettingDedupWindow(val))
+                    .padding([4, 8])
+            };
+            dedup_row = dedup_row.push(btn);
+        }
+        content = content.push(dedup_row);
+
+        let max_size_options: &[(usize, &str)] = &[
+            (64 * 1024, "64KB"),
+            (256 * 1024, "256KB"),
+            (1024 * 1024, "1MB"),
+            (2 * 1024 * 1024, "2MB"),
+            (5 * 1024 * 1024, "5MB"),
+        ];
+        let mut size_row = row().spacing(6).align_y(iced::Alignment::Center);
+        size_row = size_row.push(text("Max item size:").size(13));
+        for &(val, label) in max_size_options {
+            let btn = if self.config.max_item_size == val {
+                widget::button::suggested(label)
+                    .on_press(Message::SettingMaxItemSize(val))
+                    .padding([4, 8])
+            } else {
+                widget::button::text(label)
+                    .on_press(Message::SettingMaxItemSize(val))
+                    .padding([4, 8])
+            };
+            size_row = size_row.push(btn);
+        }
+        content = content.push(size_row);
+
+        let cleanup_options: &[(u64, &str)] = &[
+            (60, "1m"),
+            (300, "5m"),
+            (900, "15m"),
+            (1800, "30m"),
+            (3600, "1h"),
+        ];
+        let mut cleanup_row = row().spacing(6).align_y(iced::Alignment::Center);
+        cleanup_row = cleanup_row.push(text("Cleanup every:").size(13));
+        for &(val, label) in cleanup_options {
+            let btn = if self.config.cleanup_interval_seconds == val {
+                widget::button::suggested(label)
+                    .on_press(Message::SettingCleanupInterval(val))
+                    .padding([4, 8])
+            } else {
+                widget::button::text(label)
+                    .on_press(Message::SettingCleanupInterval(val))
+                    .padding([4, 8])
+            };
+            cleanup_row = cleanup_row.push(btn);
+        }
+        content = content.push(cleanup_row);
+
+        // ── Quick Paste ──────────────────────────────────────────────
+        content = content.push(text("⚡ Quick Paste").size(15));
+        let paste_status = match &self.paste_backend {
+            Some(backend) => format!("Backend: {backend}"),
+            None => "No backend found (install wtype or ydotool)".to_string(),
+        };
+        content = content.push(text(paste_status).size(13));
+        let qp_label = if self.quick_paste_enabled {
+            "Quick Paste: ON — items will be typed directly"
+        } else {
+            "Quick Paste: OFF — items copied to clipboard"
+        };
+        let qp_btn = if self.quick_paste_enabled {
+            widget::button::suggested(qp_label)
+                .on_press(Message::ToggleQuickPaste)
+                .width(Length::Fill)
+                .padding([10, 16])
+        } else {
+            widget::button::text(qp_label)
+                .on_press(Message::ToggleQuickPaste)
+                .width(Length::Fill)
+                .padding([10, 16])
+        };
+        content = content.push(qp_btn);
+
+        // ── Never Store (MIME Denylist) ───────────────────────────────
+        content = content.push(text("🚫 Never Store (MIME Denylist)").size(15));
+        content = content
+            .push(text("MIME types to ignore (e.g. application/x-kde-cutselection):").size(12));
+
+        let can_add_rule = !self.denylist_input.trim().is_empty();
+        let add_rule_btn = if can_add_rule {
+            widget::button::suggested("Add")
+                .on_press(Message::SettingDenylistAdd(self.denylist_input.clone()))
+                .padding([6, 14])
+        } else {
+            widget::button::suggested("Add").padding([6, 14])
+        };
+        let rule_row = row()
+            .spacing(8)
+            .push(
+                text_input("Add MIME type...", &self.denylist_input)
+                    .on_input(Message::SettingDenylistInput)
+                    .on_submit(Message::SettingDenylistAdd)
+                    .padding([6, 10])
+                    .width(Length::Fill),
+            )
+            .push(add_rule_btn);
+        content = content.push(rule_row);
+
+        for (i, rule) in self.config.mime_denylist.iter().enumerate() {
+            let entry_row = row()
+                .spacing(8)
+                .align_y(iced::Alignment::Center)
+                .push(text(rule.clone()).size(12).width(Length::Fill))
+                .push(
+                    widget::button::destructive("✕")
+                        .on_press(Message::SettingDenylistRemove(i))
+                        .padding([4, 8]),
+                );
+            content = content.push(entry_row);
+        }
+
+        content = content.push(text("🚫 Never Store (Content Pattern Denylist)").size(15));
+        content = content.push(
+            text("Patterns support prefix (^otp), suffix (token$), or substring matching.")
+                .size(12),
+        );
+        let can_add_content_rule = !self.content_denylist_input.trim().is_empty();
+        let add_content_rule_btn = if can_add_content_rule {
+            widget::button::suggested("Add")
+                .on_press(Message::SettingContentDenylistAdd(
+                    self.content_denylist_input.clone(),
+                ))
+                .padding([6, 14])
+        } else {
+            widget::button::suggested("Add").padding([6, 14])
+        };
+        let content_rule_row = row()
+            .spacing(8)
+            .push(
+                text_input("Add content pattern...", &self.content_denylist_input)
+                    .on_input(Message::SettingContentDenylistInput)
+                    .on_submit(Message::SettingContentDenylistAdd)
+                    .padding([6, 10])
+                    .width(Length::Fill),
+            )
+            .push(add_content_rule_btn);
+        content = content.push(content_rule_row);
+        for (i, rule) in self.config.content_regex_denylist.iter().enumerate() {
+            let entry_row = row()
+                .spacing(8)
+                .align_y(iced::Alignment::Center)
+                .push(text(rule.clone()).size(12).width(Length::Fill))
+                .push(
+                    widget::button::destructive("✕")
+                        .on_press(Message::SettingContentDenylistRemove(i))
+                        .padding([4, 8]),
+                );
+            content = content.push(entry_row);
+        }
+
+        // ── Data ─────────────────────────────────────────────────────
+        content = content.push(text("💾 Data").size(15));
         content = content.push(
             widget::button::destructive("Clear All Clipboard History")
                 .on_press(Message::ClearAll)
@@ -1461,81 +2265,31 @@ impl App {
                 "Export/import path: {}",
                 self.config.data_dir.join("clipboard_export.json").display()
             ))
-            .size(11.0),
+            .size(11),
         );
 
-        // Stats
+        // ── Statistics ───────────────────────────────────────────────
         if let Some(db) = &self.db {
             if let Ok(stats) = db.get_stats() {
-                content = content.push(text("Statistics").size(16.0));
+                content = content.push(text("📊 Statistics").size(15));
                 #[allow(clippy::cast_precision_loss)]
                 let size_kb = stats.total_size_bytes as f64 / 1024.0;
-                let stats_text = format!(
-                    "{} items total · {} pinned · {size_kb:.1} KB stored",
-                    stats.total_items, stats.pinned_items,
+                content = content.push(
+                    text(format!(
+                        "{} items total · {} pinned · {size_kb:.1} KB stored",
+                        stats.total_items, stats.pinned_items,
+                    ))
+                    .size(13),
                 );
-                content = content.push(text(stats_text).size(13.0));
             }
         }
 
-        // Keyboard shortcut
-        content = content.push(text("Keyboard").size(16.0));
-        content =
-            content.push(text(format!("Shortcut: {}", self.config.keyboard_shortcut)).size(13.0));
-        content = content
-            .push(text("Press the shortcut to quickly open the clipboard picker").size(12.0));
-
-        // Quick paste
-        content = content.push(text("Quick Paste").size(16.0));
-        let paste_status = match &self.paste_backend {
-            Some(backend) => format!("Backend: {backend}"),
-            None => "No backend found (install wtype or ydotool)".to_string(),
-        };
-        content = content.push(text(paste_status).size(13.0));
-
-        let qp_label = if self.quick_paste_enabled {
-            "Quick Paste: ON — items will be typed directly"
-        } else {
-            "Quick Paste: OFF — items copied to clipboard"
-        };
-        let qp_btn = if self.quick_paste_enabled {
-            widget::button::suggested(qp_label)
-                .on_press(Message::ToggleQuickPaste)
-                .width(Length::Fill)
-                .padding([10, 16])
-        } else {
-            widget::button::text(qp_label)
-                .on_press(Message::ToggleQuickPaste)
-                .width(Length::Fill)
-                .padding([10, 16])
-        };
-        content = content.push(qp_btn);
-        if self.quick_paste_enabled {
-            content = content.push(
-                text("Quick paste will type content directly into the focused application. Sensitive items require explicit confirmation.").size(11.0)
-            );
-        }
-
-        // Configuration
-        content = content.push(text("Configuration").size(16.0));
-        content =
-            content.push(text(format!("Max history: {} items", self.config.max_items)).size(13.0));
-        #[allow(clippy::cast_precision_loss)]
-        let ttl_days = self.config.ttl_seconds as f64 / 86400.0;
-        content = content
-            .push(text(format!("Auto-expire: {ttl_days:.0} days (unpinned items)")).size(13.0));
-        #[allow(clippy::cast_precision_loss)]
-        let max_kb = self.config.max_item_size as f64 / 1024.0;
-        content = content.push(text(format!("Max item size: {max_kb:.0} KB")).size(13.0));
-        content = content
-            .push(text(format!("Config file: {}", Config::config_path().display())).size(11.0));
-
-        // Security audit log
-        content = content.push(text("Security Log").size(16.0));
+        // ── Security Log ─────────────────────────────────────────────
+        content = content.push(text("🔒 Security Log").size(15));
         if let Some(db) = &self.db {
             if let Ok(events) = db.get_audit_log(10) {
                 if events.is_empty() {
-                    content = content.push(text("No security events recorded").size(12.0));
+                    content = content.push(text("No security events recorded").size(12));
                 } else {
                     for event in &events {
                         let time = crate::format_time_ago(event.timestamp);
@@ -1545,22 +2299,47 @@ impl App {
                         } else {
                             format!("• {} — {detail} ({time})", event.event_kind)
                         };
-                        content = content.push(text(line).size(12.0));
+                        content = content.push(text(line).size(12));
                     }
                 }
             }
         }
 
-        // Info
-        content = content.push(text("About").size(16.0));
-        content = content.push(text("Author Clipboard v0.3.0").size(13.0));
-        content = content
-            .push(text("COSMIC clipboard manager with emoji, symbol & kaomoji pickers").size(12.0));
+        // ── Keyboard Shortcuts ───────────────────────────────────────
+        content = content.push(text("⌨️ Keyboard Shortcuts").size(15));
+        content = content.push(
+            text(format!(
+                "Global shortcut: {}",
+                self.config.keyboard_shortcut
+            ))
+            .size(13),
+        );
+        let shortcuts = [
+            ("↑ / ↓ / ← / →", "Navigate pickers"),
+            ("Home / End", "Jump to first / last"),
+            ("PgUp / PgDn", "Fast page jump"),
+            ("Enter", "Copy to clipboard"),
+            ("Del / Ctrl+D", "Delete selected"),
+            ("Ctrl+1..9", "Quick copy #1-9"),
+            ("Ctrl+Tab", "Next tab"),
+            ("Esc", "Close applet"),
+        ];
+        for (key, desc) in &shortcuts {
+            let shortcut_row = row()
+                .spacing(12)
+                .push(text(*key).size(12).width(Length::Fixed(100.0)))
+                .push(text(*desc).size(12));
+            content = content.push(shortcut_row);
+        }
+
+        // ── About ────────────────────────────────────────────────────
+        content = content.push(text(format!("ℹ️ About — v{version}")).size(15));
+        content = content.push(text("Author Clipboard — Native COSMIC clipboard manager").size(12));
+        content = content.push(text(format!("Data: {}", self.config.data_dir.display())).size(12));
         content =
-            content.push(text(format!("Data: {}", self.config.data_dir.display())).size(12.0));
-        content = content.push(text("License: GPL-3.0").size(12.0));
-        content =
-            content.push(text("https://github.com/namikofficial/author-clipboard").size(11.0));
+            content.push(text(format!("Config: {}", Config::config_path().display())).size(11));
+        content = content.push(text("License: GPL-3.0").size(11));
+        content = content.push(text("https://github.com/namikofficial/author-clipboard").size(11));
 
         scrollable(content)
             .width(Length::Fill)
@@ -1613,6 +2392,63 @@ impl App {
         }
     }
 
+    /// Scroll the emoji grid to keep the selected item visible.
+    fn scroll_emoji_to_selected(&self) -> Task<Message> {
+        if let Some(idx) = self.emoji_selected_idx {
+            let row_idx = idx / EMOJI_COLS;
+            #[allow(clippy::cast_precision_loss)]
+            let target_y =
+                (row_idx as f32 * PICKER_ROW_HEIGHT - VISIBLE_SCROLL_HEIGHT / 2.0).max(0.0);
+            cosmic::iced_widget::scrollable::scroll_to(
+                emoji_scroll_id(),
+                cosmic::iced_widget::scrollable::AbsoluteOffset {
+                    x: 0.0,
+                    y: target_y,
+                },
+            )
+        } else {
+            Task::none()
+        }
+    }
+
+    /// Scroll the symbol grid to keep the selected item visible.
+    fn scroll_symbol_to_selected(&self) -> Task<Message> {
+        if let Some(idx) = self.symbol_selected_idx {
+            let row_idx = idx / SYMBOL_COLS;
+            #[allow(clippy::cast_precision_loss)]
+            let target_y =
+                (row_idx as f32 * PICKER_ROW_HEIGHT - VISIBLE_SCROLL_HEIGHT / 2.0).max(0.0);
+            cosmic::iced_widget::scrollable::scroll_to(
+                symbol_scroll_id(),
+                cosmic::iced_widget::scrollable::AbsoluteOffset {
+                    x: 0.0,
+                    y: target_y,
+                },
+            )
+        } else {
+            Task::none()
+        }
+    }
+
+    /// Scroll the kaomoji list to keep the selected item visible.
+    fn scroll_kaomoji_to_selected(&self) -> Task<Message> {
+        if let Some(idx) = self.kaomoji_selected_idx {
+            let row_idx = idx / KAOMOJI_COLS;
+            #[allow(clippy::cast_precision_loss)]
+            let target_y =
+                (row_idx as f32 * PICKER_ROW_HEIGHT - VISIBLE_SCROLL_HEIGHT / 2.0).max(0.0);
+            cosmic::iced_widget::scrollable::scroll_to(
+                kaomoji_scroll_id(),
+                cosmic::iced_widget::scrollable::AbsoluteOffset {
+                    x: 0.0,
+                    y: target_y,
+                },
+            )
+        } else {
+            Task::none()
+        }
+    }
+
     /// Cycle through tabs forward or backward.
     fn cycle_tab(&mut self, forward: bool) {
         const TAB_ORDER: [AppTab; 6] = [
@@ -1644,13 +2480,16 @@ impl App {
         self.active_tab = next_tab;
         self.search_query.clear();
         self.selected_index = None;
+        self.emoji_selected_idx = None;
+        self.symbol_selected_idx = None;
+        self.kaomoji_selected_idx = None;
     }
 
     /// Copy the currently selected item and exit.
     fn copy_selected_item(&mut self) -> Task<Message> {
-        if let Some(index) = self.selected_index {
-            match self.active_tab {
-                AppTab::Clipboard => {
+        match self.active_tab {
+            AppTab::Clipboard => {
+                if let Some(index) = self.selected_index {
                     if let Some(item) = self.items.get(index) {
                         let result = if item.is_image() {
                             set_clipboard_image(
@@ -1670,39 +2509,47 @@ impl App {
                         }
                     }
                 }
-                AppTab::Emoji => {
+            }
+            AppTab::Emoji => {
+                if let Some(idx) = self.emoji_selected_idx {
                     let emojis = self.filtered_emojis();
-                    if let Some(&e) = emojis.get(index) {
+                    if let Some(&e) = emojis.get(idx) {
                         if set_clipboard_text(e).is_ok() {
                             std::process::exit(0);
                         }
                     }
                 }
-                AppTab::Symbols => {
+            }
+            AppTab::Symbols => {
+                if let Some(idx) = self.symbol_selected_idx {
                     let syms = self.filtered_symbols();
-                    if let Some(&(s, _)) = syms.get(index) {
+                    if let Some(&(s, _)) = syms.get(idx) {
                         if set_clipboard_text(s).is_ok() {
                             std::process::exit(0);
                         }
                     }
                 }
-                AppTab::Kaomoji => {
+            }
+            AppTab::Kaomoji => {
+                if let Some(idx) = self.kaomoji_selected_idx {
                     let items = self.filtered_kaomoji();
-                    if let Some(&k) = items.get(index) {
+                    if let Some(&k) = items.get(idx) {
                         if set_clipboard_text(k).is_ok() {
                             std::process::exit(0);
                         }
                     }
                 }
-                AppTab::Snippets => {
+            }
+            AppTab::Snippets => {
+                if let Some(index) = self.selected_index {
                     if let Some(s) = self.snippets.get(index) {
                         if set_clipboard_text(&s.content).is_ok() {
                             std::process::exit(0);
                         }
                     }
                 }
-                AppTab::Settings => {}
             }
+            AppTab::Settings => {}
         }
         Task::none()
     }
