@@ -269,6 +269,10 @@ just dev           # Watch mode for development
 | **Phase 8** | CLI tool + config + graceful shutdown | Done |
 | **Phase 9** | COSMIC native icons + status indicators | Done |
 | **Phase 10** | Advanced keyboard navigation | Done |
+| **Phase 11** | Bug fixes, security hardening, docs | Done |
+| **Phase 12** | FTS5 search, TTL controls, CI | Planned |
+| **Phase 13** | Packaging (.deb, Arch, Nix, Flatpak) | Planned |
+| **Phase 14** | Security & encryption hardening | Planned |
 
 See [PROJECT_PLAN.md](PROJECT_PLAN.md) for the detailed roadmap.
 

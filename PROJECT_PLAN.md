@@ -4,7 +4,7 @@
 
 **Document Version:** 1.0  
 **Last Updated:** March 1, 2026  
-**Project Status:** Phase 10 Complete — v0.3.0
+**Project Status:** Phase 11 Complete — v0.3.1
 
 ---
 
@@ -330,6 +330,75 @@ enum SecurityLevel {
 - Full clipboard workflow possible without mouse
 - Navigation feels responsive and predictable
 - All keyboard shortcuts documented in status bar hints
+
+---
+
+### Phase 11: Bug Fixes & Security Hardening ✅ **COMPLETE**
+**Goal:** Fix visual bugs, improve security, and add user documentation
+
+#### Deliverables
+- [x] Fix scroll position jumping on auto-refresh (smart diff refresh)
+- [x] Fix scroll-to-selected calculation for icon-enhanced rows
+- [x] Fix emoji grid layout (7 columns, fill-width buttons)
+- [x] Fix symbols grid layout (5 columns, fill-width)
+- [x] Improve kaomoji layout (compact icon categories, 2-column grid)
+- [x] Fix URI credential detection (`://user:pass@host` pattern)
+- [x] Harden IPC socket path (remove `/tmp` fallback, use private cache dir)
+- [x] Add GPL-3.0 LICENSE file
+- [x] Fix README config example (`ttl_seconds` not `max_age_days`)
+- [x] Add COSMIC_DATA_CONTROL_ENABLED setup documentation
+- [x] Add compositor compatibility matrix
+- [x] Add known limitations section
+- [x] Add configuration display to Settings tab
+
+#### Success Criteria
+- Scroll position stable during auto-refresh
+- All grids render cleanly at 520px width
+- URI-format credentials detected as sensitive
+- IPC socket never created in world-writable directories
+- README accurately reflects actual config fields and behavior
+
+---
+
+### Phase 12: Advanced Features (PLANNED)
+**Goal:** Implement remaining high-value features from security audit
+
+#### Planned Deliverables
+- [ ] Full-text search index (SQLite FTS5) for instant search at scale
+- [ ] Per-item TTL controls (OTP: 2 min, tokens: 1 hour, normal: 7 days)
+- [ ] "Never store" rules: MIME type denylist and regex exclusion rules
+- [ ] Clipboard ignore rules by source application (where Wayland allows)
+- [ ] Encrypted export/import (password-protected JSON backup)
+- [ ] Dedup policy controls (within N seconds, exact only, etc.)
+- [ ] Crash-safe SQLite (WAL mode, journaling)
+- [ ] GitHub Actions CI (fmt, clippy, test, build)
+
+---
+
+### Phase 13: Packaging & Distribution (PLANNED)
+**Goal:** Make installation easy for end users
+
+#### Planned Deliverables
+- [ ] `.deb` package (Pop!_OS, Ubuntu)
+- [ ] Arch Linux PKGBUILD
+- [ ] Nix flake
+- [ ] Flatpak (if feasible with Wayland protocols)
+- [ ] Systemd user service auto-install and enable/disable commands
+- [ ] COSMIC app store submission
+- [ ] Pre-built binary releases via GitHub Actions
+
+---
+
+### Phase 14: Security & Encryption (PLANNED)
+**Goal:** Production-grade security features
+
+#### Planned Deliverables
+- [ ] Proper encryption key management (OS keyring, passphrase, or file key)
+- [ ] Verified at-rest encryption for sensitive items (ciphertext + nonce stored)
+- [ ] Screen lock detection for multiple lockers (loginctl, swaylock, etc.)
+- [ ] Threat model documentation (SECURITY.md)
+- [ ] Permissions model for quick paste backends
+- [ ] CODEOWNERS file for contribution areas
 ---
 
 ## 🏗️ Technical Architecture
@@ -398,7 +467,7 @@ CREATE INDEX idx_pinned ON clipboard_items(pinned);
 
 ## 📊 Implementation Status
 
-### Current Progress (Phase 10 — Complete)
+### Current Progress (Phase 11 — Complete)
 
 | Task | Status | Notes |
 |------|--------|-------|
@@ -413,12 +482,15 @@ CREATE INDEX idx_pinned ON clipboard_items(pinned);
 | Configuration | ✅ Complete | Max items, max size, TTL, cleanup interval, db_path |
 | COSMIC Applet UI | ✅ Complete | Search bar, list view, pin/delete/clear, copy-to-clipboard |
 | Keyboard navigation | ✅ Complete | Full keyboard workflow: arrows, Home/End, PgUp/Dn, Ctrl+D, Ctrl+1-9 |
-| Auto-refresh | ✅ Complete | Applet polls DB every 2s for new items |
+| Auto-refresh | ✅ Complete | Smart diff refresh preserves scroll position |
 | Image support | ✅ Complete | Capture, store, thumbnail, display, copy images |
 | Desktop integration | ✅ Complete | .desktop file, systemd service, app icon, install/uninstall |
 | COSMIC native icons | ✅ Complete | Symbolic icons for all buttons, content types, status indicators |
 | Daemon status | ✅ Complete | Real-time daemon running indicator in settings and status bar |
 | CLI control tool | ✅ Complete | Toggle, show, hide, ping, history, status, clear, export, config |
+| Sensitive detection | ✅ Complete | OTP, JWT, API keys, private keys, URI credentials, passwords |
+| IPC security | ✅ Complete | Private socket path, no /tmp fallback |
+| LICENSE | ✅ Complete | GPL-3.0 license file added |
 
 ### Upcoming Milestones
 
