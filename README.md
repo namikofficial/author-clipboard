@@ -9,7 +9,10 @@
 
 **author-clipboard** is a privacy-focused clipboard manager for COSMIC and wlroots Wayland compositors. It stores clipboard history in a local SQLite database with FTS5 search, detects sensitive content, supports optional encryption for sensitive items, and provides a libcosmic popup UI with emoji, symbol, and kaomoji pickers.
 
-The default GUI is COSMIC-native through `libcosmic`. Hyprland users can use the native external picker mode with `wofi`, `fuzzel`, or `rofi`.
+The default GUI is COSMIC-native through `libcosmic`. Hyprland and wlroots users have two picker options:
+
+- **External menu picker** (`author-clipboard-ctl picker`) — opens an external dmenu-style menu through `wofi`, `fuzzel`, or `rofi`
+- **First-party native picker** (`author-clipboard-hypr-picker`) — a standalone keyboard-first GTK4 layer-shell popup designed for Hyprland
 
 ---
 
@@ -47,10 +50,11 @@ The default GUI is COSMIC-native through `libcosmic`. Hyprland users can use the
 - CLI tool: `author-clipboard-ctl`
 - Systemd user service
 - Quick paste with `wtype` or `ydotool`; `wl-copy` is a copy-only fallback
-- Hyprland-native external picker mode through `wofi`, `rofi`, or `fuzzel`
+- External menu picker mode through `wofi`, `rofi`, or `fuzzel`
+- First-party Hyprland/wlroots native picker (`author-clipboard-hypr-picker`)
 
 ### Planned
-- Hyprland-native UX options such as Waybar module and layer-shell popup mode
+- Waybar/Wayle status module
 - AUR package and Nix flake
 - Flatpak/AppImage packaging, subject to clipboard sandbox limitations
 - X11 fallback monitoring
@@ -122,7 +126,9 @@ author-clipboard-ctl export out.json # Export history
 author-clipboard-ctl config          # Show current config
 author-clipboard-ctl doctor          # Probe display/protocol support
 author-clipboard-ctl copy 42         # Restore item id 42
-author-clipboard-ctl picker          # Open wofi/fuzzel/rofi picker
+author-clipboard-ctl picker          # Open external menu picker (wofi/fuzzel/rofi)
+author-clipboard-ctl hyprland-config # Print recommended Hyprland keybinds
+author-clipboard-hypr-picker        # Open first-party native picker
 ```
 
 ### COSMIC Shortcut
@@ -140,6 +146,8 @@ Install runtime packages:
 sudo pacman -S wayland wl-clipboard sqlite xkbcommon
 sudo pacman -S wtype        # optional, preferred for quick paste
 sudo pacman -S ydotool      # optional, requires daemon/permissions
+sudo pacman -S wofi fuzzel  # pick one for external menu picker
+sudo pacman -S gtk4 gtk4-layer-shell  # for first-party native picker
 ```
 
 Build and install:
@@ -159,34 +167,26 @@ systemctl --user enable --now author-clipboard-daemon
 systemctl --user status author-clipboard-daemon
 ```
 
-Add a Hyprland bind:
+Add Hyprland keybinds:
 
 ```ini
-bind = SUPER, V, exec, author-clipboard-ctl toggle
+# External menu picker (wofi/fuzzel/rofi)
+bind = SUPER, V, exec, author-clipboard-ctl picker --menu auto
+
+# First-party native picker (standalone GTK4 popup)
+bind = SUPER SHIFT, V, exec, author-clipboard-hypr-picker
+
+# COSMIC applet toggle
+bind = SUPER ALT, V, exec, author-clipboard-ctl toggle
 ```
 
-For a Hyprland-native menu instead of the libcosmic app UI, bind the external picker:
-
-```ini
-bind = SUPER, V, exec, author-clipboard-ctl picker --menu wofi
-```
-
-`author-clipboard-ctl picker` auto-detects `wofi`, `fuzzel`, then `rofi` if `--menu` is omitted. The picker restores text, HTML, images, and file URI lists using the same clipboard restore path as the applet.
-
-Optional window rules depend on the actual app class. Inspect it first:
+Print recommended config:
 
 ```bash
-hyprctl clients
+author-clipboard-ctl hyprland-config
 ```
 
-If the class is `author-clipboard`, these rules may be useful:
-
-```ini
-windowrulev2 = float,class:^(author-clipboard)$
-windowrulev2 = center,class:^(author-clipboard)$
-```
-
-Hyprland does not need `COSMIC_DATA_CONTROL_ENABLED`. Clipboard capture depends on Hyprland exposing wlroots `wlr-data-control`. The UI is still libcosmic-based and may not visually match Hyprland themes.
+For more details, see [docs/HYPRLAND.md](docs/HYPRLAND.md).
 
 Quick paste on Hyprland:
 
@@ -221,6 +221,7 @@ Incognito mode flag: `<data_dir>/.incognito`; when present, daemon capture is sk
 | `dedup_window_seconds` | `2` | Skip identical content copied within this window |
 | `mime_denylist` | `["application/x-kde-cutselection"]` | MIME prefixes or exact MIME types to skip |
 | `content_regex_denylist` | `[]` | Legacy name for simple local patterns, not full regex |
+| `picker` | See below | Picker UI configuration |
 
 Default example:
 
@@ -238,7 +239,17 @@ Default example:
   "mime_denylist": [
     "application/x-kde-cutselection"
   ],
-  "content_regex_denylist": []
+  "content_regex_denylist": [],
+  "picker": {
+    "default_source": "history",
+    "max_results": 50,
+    "show_sensitive_previews": false,
+    "confirm_sensitive_copy": true,
+    "close_after_copy": true,
+    "prefer_quick_paste": false,
+    "width": 720,
+    "height": 520
+  }
 }
 ```
 
@@ -362,6 +373,7 @@ See [PROJECT_PLAN.md](PROJECT_PLAN.md) for the roadmap.
 
 - [FEATURES.md](FEATURES.md) - Feature overview
 - [PROJECT_PLAN.md](PROJECT_PLAN.md) - Development roadmap
+- [docs/HYPRLAND.md](docs/HYPRLAND.md) - Hyprland integration guide
 - [docs/PACKAGING.md](docs/PACKAGING.md) - Packaging notes
 - [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) - Contribution guide
 - [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) - Development tooling

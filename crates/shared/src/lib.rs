@@ -11,6 +11,8 @@ pub mod compositor;
 pub mod config;
 /// SQLite database operations for clipboard history.
 pub mod db;
+/// Emoji data organized by category for picker UIs.
+pub mod emoji;
 /// AES-256-GCM encryption for sensitive clipboard items.
 pub mod encryption;
 /// File URI parsing and metadata extraction.
@@ -19,6 +21,10 @@ pub mod file_handler;
 pub mod image_store;
 /// Unix domain socket IPC between daemon and clients.
 pub mod ipc;
+/// Kaomoji (Japanese emoticons) data and search.
+pub mod kaomoji;
+/// Shared picker types and logic for external menus and native pickers.
+pub mod picker;
 /// Quick paste via wtype/ydotool with wl-copy copy fallback.
 pub mod quick_paste;
 /// Screen lock detection for clearing sensitive clipboard items.
@@ -27,6 +33,8 @@ pub mod screen_lock;
 pub mod sensitive;
 /// Keyboard shortcut parsing and conflict detection.
 pub mod shortcut;
+/// Symbol data organized by category for picker UIs.
+pub mod symbols;
 /// Core data types for clipboard items and events.
 pub mod types;
 

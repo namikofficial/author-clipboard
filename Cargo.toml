@@ -5,6 +5,7 @@ members = [
     "crates/applet",
     "crates/shared",
     "crates/ctl",
+    "crates/hypr-picker",
 ]
 
 [workspace.package]

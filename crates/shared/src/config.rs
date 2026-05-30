@@ -44,6 +44,44 @@ fn default_content_regex_denylist() -> Vec<String> {
     vec![]
 }
 
+/// Configuration for picker UIs (external menu and native picker).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct PickerConfig {
+    /// Default picker source (history, snippets, emoji, symbols, kaomoji, all).
+    pub default_source: String,
+    /// Maximum number of results to display.
+    pub max_results: usize,
+    /// Whether to show sensitive item previews (masked by default).
+    pub show_sensitive_previews: bool,
+    /// Whether to require confirmation before copying sensitive items.
+    pub confirm_sensitive_copy: bool,
+    /// Whether to close the picker after a successful copy.
+    pub close_after_copy: bool,
+    /// Whether to prefer quick-paste over copy when possible.
+    pub prefer_quick_paste: bool,
+    /// Default picker window width (native picker only).
+    pub width: u32,
+    /// Default picker window height (native picker only).
+    pub height: u32,
+}
+
+impl Default for PickerConfig {
+    fn default() -> Self {
+        Self {
+            default_source: "history".to_string(),
+            max_results: 50,
+            show_sensitive_previews: false,
+            confirm_sensitive_copy: true,
+            close_after_copy: true,
+            prefer_quick_paste: false,
+            width: 720,
+            height: 520,
+        }
+    }
+}
+
 /// Application configuration for author-clipboard.
 ///
 /// Settings are persisted to `~/.config/author-clipboard/config.json`.
@@ -87,6 +125,9 @@ pub struct Config {
     /// Supported forms are `^prefix`, `suffix$`, and plain substring matching.
     #[serde(default = "default_content_regex_denylist")]
     pub content_regex_denylist: Vec<String>,
+    /// Configuration for picker UIs.
+    #[serde(default)]
+    pub picker: PickerConfig,
 }
 
 impl Default for Config {
@@ -103,6 +144,7 @@ impl Default for Config {
             dedup_window_seconds: default_dedup_window_seconds(),
             mime_denylist: default_mime_denylist(),
             content_regex_denylist: default_content_regex_denylist(),
+            picker: PickerConfig::default(),
         }
     }
 }
@@ -243,6 +285,7 @@ mod tests {
             dedup_window_seconds: 5,
             mime_denylist: vec!["application/x-secret".to_string()],
             content_regex_denylist: vec!["^OTP:".to_string()],
+            picker: PickerConfig::default(),
         };
         let json = serde_json::to_string_pretty(&original).unwrap();
         let loaded: Config = serde_json::from_str(&json).unwrap();
@@ -271,6 +314,36 @@ mod tests {
         };
         assert!(config.is_mime_denied("application/x-secret"));
         assert!(!config.is_mime_denied("text/plain"));
+    }
+
+    #[test]
+    fn test_picker_config_defaults() {
+        let picker = PickerConfig::default();
+        assert_eq!(picker.default_source, "history");
+        assert_eq!(picker.max_results, 50);
+        assert!(!picker.show_sensitive_previews);
+        assert!(picker.confirm_sensitive_copy);
+        assert!(picker.close_after_copy);
+        assert!(!picker.prefer_quick_paste);
+        assert_eq!(picker.width, 720);
+        assert_eq!(picker.height, 520);
+    }
+
+    #[test]
+    fn test_picker_config_roundtrip() {
+        let picker = PickerConfig {
+            default_source: "emoji".to_string(),
+            max_results: 100,
+            show_sensitive_previews: true,
+            confirm_sensitive_copy: false,
+            close_after_copy: false,
+            prefer_quick_paste: true,
+            width: 800,
+            height: 600,
+        };
+        let json = serde_json::to_string_pretty(&picker).unwrap();
+        let loaded: PickerConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(picker, loaded);
     }
 
     #[test]

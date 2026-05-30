@@ -3,9 +3,13 @@
 //! A graphical interface for browsing and selecting from clipboard history,
 //! with emoji and symbol pickers.
 
-mod emoji;
-mod kaomoji;
-mod symbols;
+use author_clipboard_shared as shared;
+
+use shared::emoji;
+
+use shared::kaomoji;
+
+use shared::symbols;
 
 use author_clipboard_shared::clipboard;
 use author_clipboard_shared::config::Config;

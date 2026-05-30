@@ -51,10 +51,13 @@ author-clipboard is free and open source under GPL-3.0. COSMIC is the primary UI
 
 ### Tools & CLI
 
-- **CLI control tool** - `toggle`, `show`, `hide`, `ping`, `history`, `status`, `clear`, `export`, `config`.
+- **CLI control tool** - `toggle`, `show`, `hide`, `ping`, `history`, `status`, `clear`, `export`, `config`, `picker`, `hyprland-config`.
 - **Global shortcut command** - `author-clipboard-ctl toggle` for compositor-managed keybindings.
 - **Quick paste** - `wtype` preferred, `ydotool` optional, `wl-copy` copy-only fallback.
-- **Hyprland-native picker** - `author-clipboard-ctl picker` integrates with `wofi`, `rofi`, or `fuzzel`.
+- **External menu picker** - `author-clipboard-ctl picker` integrates with `wofi`, `rofi`, or `fuzzel`.
+- **First-party native picker** - `author-clipboard-hypr-picker` provides a standalone GTK4 layer-shell popup for Hyprland/wlroots.
+- **Shared picker module** - Reusable picker logic in `shared::picker` for history, snippets, emoji, symbols, and kaomoji.
+- **Hyprland config helper** - `author-clipboard-ctl hyprland-config` prints recommended keybinds and window rules.
 - **Data export/import** - JSON format.
 - **File manager integration** - `xdg-open` for file paths.
 
@@ -78,8 +81,10 @@ author-clipboard is free and open source under GPL-3.0. COSMIC is the primary UI
 
 ### Planned Features
 
-- [x] Hyprland-native external picker via wofi/rofi/fuzzel.
-- [ ] Hyprland-native UX: optional `hyprctl` integration, verified window rules, Waybar/Wayle status, layer-shell popup if feasible.
+- [x] External menu picker via wofi/rofi/fuzzel.
+- [x] First-party Hyprland/wlroots native picker (`author-clipboard-hypr-picker`).
+- [ ] Waybar/Wayle status module.
+- [ ] Verified `windowrulev2` examples for the native picker.
 - [ ] AUR package.
 - [ ] Nix flake.
 - [ ] Flatpak/AppImage packaging with sandbox caveats.
