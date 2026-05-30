@@ -67,7 +67,12 @@ Make dependencies:
 - `pkg-config`
 - `wayland-protocols`
 
-An Arch template lives at [`packaging/arch/PKGBUILD`](../packaging/arch/PKGBUILD). AUR publication is planned.
+Arch/AUR templates live in:
+
+- [`packaging/arch/PKGBUILD`](../packaging/arch/PKGBUILD)
+- [`packaging/arch/.SRCINFO`](../packaging/arch/.SRCINFO)
+
+The GitHub release workflow uploads these files as release assets alongside the `.deb`. AUR publication is still a manual follow-up unless an AUR deploy key/secret is configured.
 
 ## Building from Source
 

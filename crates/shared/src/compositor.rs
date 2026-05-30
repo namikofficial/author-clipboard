@@ -1,5 +1,8 @@
 //! Compositor and display server detection utilities.
 
+use wayland_client::protocol::wl_registry;
+use wayland_client::{Connection, Dispatch, EventQueue, QueueHandle};
+
 /// Identifies the current display server / compositor environment.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DisplayServer {
@@ -15,12 +18,87 @@ pub enum DisplayServer {
     Unknown,
 }
 
+/// Wayland protocol support detected from the compositor registry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProtocolSupport {
+    /// Whether the Wayland display connection succeeded.
+    pub wayland: bool,
+    /// Whether `zwlr_data_control_manager_v1` is advertised.
+    pub wlr_data_control: bool,
+    /// Whether a Wayland seat is advertised.
+    pub seat: bool,
+    /// Connection or roundtrip error, if detection failed.
+    pub error: Option<String>,
+}
+
 /// Detect the current display server environment.
 ///
 /// Returns an enum indicating what level of support is available.
 /// Does NOT connect to Wayland — just checks environment variables.
 pub fn detect_display_server() -> DisplayServer {
     detect_display_server_from(|key| std::env::var(key).ok())
+}
+
+/// Probe the live Wayland registry for clipboard-manager protocol support.
+pub fn probe_wayland_protocols() -> ProtocolSupport {
+    let conn = match Connection::connect_to_env() {
+        Ok(conn) => conn,
+        Err(e) => {
+            return ProtocolSupport {
+                wayland: false,
+                wlr_data_control: false,
+                seat: false,
+                error: Some(e.to_string()),
+            };
+        }
+    };
+
+    let display = conn.display();
+    let mut event_queue: EventQueue<ProtocolProbeState> = conn.new_event_queue();
+    let qh = event_queue.handle();
+    let mut state = ProtocolProbeState::default();
+
+    display.get_registry(&qh, ());
+    if let Err(e) = event_queue.roundtrip(&mut state) {
+        return ProtocolSupport {
+            wayland: true,
+            wlr_data_control: state.wlr_data_control,
+            seat: state.seat,
+            error: Some(e.to_string()),
+        };
+    }
+
+    ProtocolSupport {
+        wayland: true,
+        wlr_data_control: state.wlr_data_control,
+        seat: state.seat,
+        error: None,
+    }
+}
+
+#[derive(Default)]
+struct ProtocolProbeState {
+    wlr_data_control: bool,
+    seat: bool,
+}
+
+impl Dispatch<wl_registry::WlRegistry, ()> for ProtocolProbeState {
+    fn event(
+        state: &mut Self,
+        _proxy: &wl_registry::WlRegistry,
+        event: wl_registry::Event,
+        _data: &(),
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+    ) {
+        if let wl_registry::Event::Global { interface, .. } = event {
+            match interface.as_str() {
+                "zwlr_data_control_manager_v1" => state.wlr_data_control = true,
+                "wl_seat" => state.seat = true,
+                _ => {}
+            }
+        }
+    }
 }
 
 fn detect_display_server_from(get_env: impl Fn(&str) -> Option<String>) -> DisplayServer {

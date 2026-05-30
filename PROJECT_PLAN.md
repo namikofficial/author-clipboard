@@ -704,6 +704,7 @@ Planned Deliverables
 - [x] `.deb` packaging support via `cargo-deb`
 - [ ] Published `.deb` release artifacts for Pop!_OS/Ubuntu/Debian
 - [ ] AUR package
+- [x] Arch PKGBUILD and `.SRCINFO` template in `packaging/arch`
 - [ ] Arch PKGBUILD validation in CI
 - [ ] Flatpak/AppImage builds (Wayland-friendly sandboxing guidance)
 - [ ] Nix flake
@@ -716,10 +717,10 @@ Planned Deliverables
 
 Planned Deliverables
 - [x] Native Hyprland setup documentation
+- [x] Hyprland-native external picker mode via wofi/rofi/fuzzel
 - [ ] Optional `hyprctl` integration
 - [ ] Verified `windowrulev2` examples
 - [ ] Waybar/Wayle module or status indicator
-- [ ] Rofi/wofi picker mode for users who do not want the libcosmic UI
 - [ ] Layer-shell popup mode if technically feasible
 - [ ] AUR package
 - [ ] Nix flake

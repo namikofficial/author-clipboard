@@ -8,6 +8,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
 
 jobs:
   release:
@@ -62,6 +63,13 @@ jobs:
       - name: Build .deb package
         run: cargo deb -p author-clipboard-applet --no-build
 
+      - name: Package Arch/AUR files
+        run: |
+          mkdir -p target/arch
+          cp packaging/arch/PKGBUILD target/arch/PKGBUILD
+          cp packaging/arch/.SRCINFO target/arch/.SRCINFO
+          tar -C packaging/arch -czf target/arch/author-clipboard-aur-files.tar.gz PKGBUILD .SRCINFO
+
       # Generate changelog for this tag using git-cliff
       - name: Generate changelog
         id: changelog
@@ -83,5 +91,8 @@ jobs:
           prerelease: ${{ contains(github.ref_name, '-') }}
           files: |
             target/debian/author-clipboard_*.deb
+            target/arch/author-clipboard-aur-files.tar.gz
+            target/arch/PKGBUILD
+            target/arch/.SRCINFO
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

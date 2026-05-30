@@ -7,6 +7,7 @@ mod emoji;
 mod kaomoji;
 mod symbols;
 
+use author_clipboard_shared::clipboard;
 use author_clipboard_shared::config::Config;
 use author_clipboard_shared::file_handler;
 use author_clipboard_shared::image_store;
@@ -394,19 +395,9 @@ impl cosmic::Application for App {
 
             Message::CopyItem(id) => {
                 if let Some(item) = self.items.iter().find(|i| i.id == id) {
-                    let result = if item.is_image() {
-                        set_clipboard_image(
-                            &image_store::image_path(&self.config.data_dir, &item.content),
-                            &item.mime_type,
-                        )
-                    } else if item.is_html() {
-                        set_clipboard_html(&item.content, item.plain_text.as_deref().unwrap_or(""))
-                    } else {
-                        set_clipboard_text(&item.content)
-                    };
-                    match result {
-                        Ok(()) => {
-                            info!("Copied item {} to clipboard", id);
+                    match clipboard::set_clipboard_item(item, &self.config.data_dir) {
+                        Ok(result) => {
+                            info!("Copied item {} to clipboard as {}", id, result.mime_type);
                             std::process::exit(0);
                         }
                         Err(e) => warn!("Failed to set clipboard: {e}"),
@@ -415,8 +406,8 @@ impl cosmic::Application for App {
             }
 
             Message::CopyText(content) => {
-                match set_clipboard_text(&content) {
-                    Ok(()) => {
+                match clipboard::set_clipboard_text(&content) {
+                    Ok(_) => {
                         info!("Copied to clipboard: {}", truncate_content(&content, 20));
                         // Track recently used for pickers
                         if let Some(db) = &self.db {
@@ -1031,8 +1022,8 @@ impl cosmic::Application for App {
 
             Message::SnippetCopy(id) => {
                 if let Some(s) = self.snippets.iter().find(|s| s.id == id) {
-                    match set_clipboard_text(&s.content) {
-                        Ok(()) => std::process::exit(0),
+                    match clipboard::set_clipboard_text(&s.content) {
+                        Ok(_) => std::process::exit(0),
                         Err(e) => warn!("Failed to copy snippet: {e}"),
                     }
                 }
@@ -2824,19 +2815,7 @@ impl App {
             AppTab::Clipboard => {
                 if let Some(index) = self.selected_index {
                     if let Some(item) = self.items.get(index) {
-                        let result = if item.is_image() {
-                            set_clipboard_image(
-                                &image_store::image_path(&self.config.data_dir, &item.content),
-                                &item.mime_type,
-                            )
-                        } else if item.is_html() {
-                            set_clipboard_html(
-                                &item.content,
-                                item.plain_text.as_deref().unwrap_or(""),
-                            )
-                        } else {
-                            set_clipboard_text(&item.content)
-                        };
+                        let result = clipboard::set_clipboard_item(item, &self.config.data_dir);
                         if result.is_ok() {
                             std::process::exit(0);
                         }
@@ -2847,7 +2826,7 @@ impl App {
                 if let Some(idx) = self.emoji_selected_idx {
                     let emojis = self.filtered_emojis();
                     if let Some(&e) = emojis.get(idx) {
-                        if set_clipboard_text(e).is_ok() {
+                        if clipboard::set_clipboard_text(e).is_ok() {
                             std::process::exit(0);
                         }
                     }
@@ -2857,7 +2836,7 @@ impl App {
                 if let Some(idx) = self.symbol_selected_idx {
                     let syms = self.filtered_symbols();
                     if let Some(&(s, _)) = syms.get(idx) {
-                        if set_clipboard_text(s).is_ok() {
+                        if clipboard::set_clipboard_text(s).is_ok() {
                             std::process::exit(0);
                         }
                     }
@@ -2867,7 +2846,7 @@ impl App {
                 if let Some(idx) = self.kaomoji_selected_idx {
                     let items = self.filtered_kaomoji();
                     if let Some(&k) = items.get(idx) {
-                        if set_clipboard_text(k).is_ok() {
+                        if clipboard::set_clipboard_text(k).is_ok() {
                             std::process::exit(0);
                         }
                     }
@@ -2876,7 +2855,7 @@ impl App {
             AppTab::Snippets => {
                 if let Some(index) = self.selected_index {
                     if let Some(s) = self.snippets.get(index) {
-                        if set_clipboard_text(&s.content).is_ok() {
+                        if clipboard::set_clipboard_text(&s.content).is_ok() {
                             std::process::exit(0);
                         }
                     }
@@ -2923,64 +2902,4 @@ fn format_time_ago(timestamp: chrono::DateTime<chrono::Utc>) -> String {
         let d = duration.num_days();
         format!("{d}d ago")
     }
-}
-
-fn set_clipboard_text(content: &str) -> Result<(), Box<dyn std::error::Error>> {
-    use std::io::Write;
-    use std::process::{Command, Stdio};
-
-    let mut child = Command::new("wl-copy").stdin(Stdio::piped()).spawn()?;
-
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin.write_all(content.as_bytes())?;
-    }
-
-    child.wait()?;
-    Ok(())
-}
-
-fn set_clipboard_image(
-    path: &std::path::Path,
-    mime_type: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    use std::io::Write;
-    use std::process::{Command, Stdio};
-
-    let data = std::fs::read(path).map_err(|e| format!("Failed to read image: {e}"))?;
-
-    let mut child = Command::new("wl-copy")
-        .args(["--type", mime_type])
-        .stdin(Stdio::piped())
-        .spawn()?;
-
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin.write_all(&data)?;
-    }
-
-    child.wait()?;
-    Ok(())
-}
-
-fn set_clipboard_html(html: &str, plain_text: &str) -> Result<(), Box<dyn std::error::Error>> {
-    use std::io::Write;
-    use std::process::{Command, Stdio};
-
-    // Set HTML content as the primary type
-    let mut child = Command::new("wl-copy")
-        .args(["--type", "text/html"])
-        .stdin(Stdio::piped())
-        .spawn()?;
-
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin.write_all(html.as_bytes())?;
-    }
-
-    child.wait()?;
-
-    // Also set plain text as fallback (best effort)
-    if !plain_text.is_empty() {
-        let _ = set_clipboard_text(plain_text);
-    }
-
-    Ok(())
 }

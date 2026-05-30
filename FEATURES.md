@@ -23,9 +23,9 @@ author-clipboard is free and open source under GPL-3.0. COSMIC is the primary UI
 | Content type | Current support |
 |--------------|-----------------|
 | Text | Capture, search, display, and restore as `text/plain` |
-| HTML | Capture and search indexing; restore is best effort and may fall back to plain text |
+| HTML | Capture and search indexing; restore as `text/html` |
 | Images | Capture, thumbnail display, and restore with image MIME type |
-| File URI lists | Capture and display metadata; restore currently uses text fallback |
+| File URI lists | Capture, display metadata, and restore as `text/uri-list` |
 
 ### User Interface
 
@@ -54,6 +54,7 @@ author-clipboard is free and open source under GPL-3.0. COSMIC is the primary UI
 - **CLI control tool** - `toggle`, `show`, `hide`, `ping`, `history`, `status`, `clear`, `export`, `config`.
 - **Global shortcut command** - `author-clipboard-ctl toggle` for compositor-managed keybindings.
 - **Quick paste** - `wtype` preferred, `ydotool` optional, `wl-copy` copy-only fallback.
+- **Hyprland-native picker** - `author-clipboard-ctl picker` integrates with `wofi`, `rofi`, or `fuzzel`.
 - **Data export/import** - JSON format.
 - **File manager integration** - `xdg-open` for file paths.
 
@@ -72,11 +73,13 @@ author-clipboard is free and open source under GPL-3.0. COSMIC is the primary UI
 - **Crash-safe database** - SQLite WAL mode.
 - **Database migrations** - Automatic schema versioning.
 - **Debian packaging support** - `cargo-deb` metadata and `just deb`.
-- **Arch packaging template** - `packaging/arch/PKGBUILD`.
+- **Arch packaging template** - `packaging/arch/PKGBUILD` and `.SRCINFO`.
+- **GitHub release assets** - Release workflow uploads `.deb` plus Arch/AUR packaging files.
 
 ### Planned Features
 
-- [ ] Hyprland-native UX: optional `hyprctl` integration, verified window rules, Waybar/Wayle status, rofi/wofi picker, layer-shell popup if feasible.
+- [x] Hyprland-native external picker via wofi/rofi/fuzzel.
+- [ ] Hyprland-native UX: optional `hyprctl` integration, verified window rules, Waybar/Wayle status, layer-shell popup if feasible.
 - [ ] AUR package.
 - [ ] Nix flake.
 - [ ] Flatpak/AppImage packaging with sandbox caveats.

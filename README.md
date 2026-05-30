@@ -9,7 +9,7 @@
 
 **author-clipboard** is a privacy-focused clipboard manager for COSMIC and wlroots Wayland compositors. It stores clipboard history in a local SQLite database with FTS5 search, detects sensitive content, supports optional encryption for sensitive items, and provides a libcosmic popup UI with emoji, symbol, and kaomoji pickers.
 
-The UI is COSMIC-native through `libcosmic`. Hyprland and Sway are supported runtime targets through `wlr-data-control`, but the UI is not Hyprland-native yet.
+The default GUI is COSMIC-native through `libcosmic`. Hyprland users can use the native external picker mode with `wofi`, `fuzzel`, or `rofi`.
 
 ---
 
@@ -28,9 +28,9 @@ The UI is COSMIC-native through `libcosmic`. Hyprland and Sway are supported run
 | Content type | Capture | Display | Restore / copy behavior |
 |--------------|---------|---------|--------------------------|
 | Text | Yes | Yes | Restored as plain text with `wl-copy` |
-| HTML / rich text | Yes | Plain-text search/display fallback | Best effort; current restore may fall back to plain text |
+| HTML / rich text | Yes | Plain-text search/display fallback | Restored as `text/html` with `wl-copy --type text/html` |
 | Images | Yes for supported image MIME types | Thumbnail/file metadata | Restored with `wl-copy --type <mime>` |
-| File URI lists | Yes for `text/uri-list` | File names/metadata | Currently copied back as text fallback |
+| File URI lists | Yes for `text/uri-list` | File names/metadata | Restored as `text/uri-list` |
 
 ### Security & Privacy
 - Sensitive content detection for passwords, API keys, tokens, SSH keys, URI credentials, and high-entropy secrets
@@ -47,9 +47,10 @@ The UI is COSMIC-native through `libcosmic`. Hyprland and Sway are supported run
 - CLI tool: `author-clipboard-ctl`
 - Systemd user service
 - Quick paste with `wtype` or `ydotool`; `wl-copy` is a copy-only fallback
+- Hyprland-native external picker mode through `wofi`, `rofi`, or `fuzzel`
 
 ### Planned
-- Hyprland-native UX options such as rofi/wofi picker mode, Waybar module, and layer-shell popup mode
+- Hyprland-native UX options such as Waybar module and layer-shell popup mode
 - AUR package and Nix flake
 - Flatpak/AppImage packaging, subject to clipboard sandbox limitations
 - X11 fallback monitoring
@@ -119,6 +120,9 @@ author-clipboard-ctl status          # Show database stats
 author-clipboard-ctl clear           # Clear unpinned items
 author-clipboard-ctl export out.json # Export history
 author-clipboard-ctl config          # Show current config
+author-clipboard-ctl doctor          # Probe display/protocol support
+author-clipboard-ctl copy 42         # Restore item id 42
+author-clipboard-ctl picker          # Open wofi/fuzzel/rofi picker
 ```
 
 ### COSMIC Shortcut
@@ -160,6 +164,14 @@ Add a Hyprland bind:
 ```ini
 bind = SUPER, V, exec, author-clipboard-ctl toggle
 ```
+
+For a Hyprland-native menu instead of the libcosmic app UI, bind the external picker:
+
+```ini
+bind = SUPER, V, exec, author-clipboard-ctl picker --menu wofi
+```
+
+`author-clipboard-ctl picker` auto-detects `wofi`, `fuzzel`, then `rofi` if `--menu` is omitted. The picker restores text, HTML, images, and file URI lists using the same clipboard restore path as the applet.
 
 Optional window rules depend on the actual app class. Inspect it first:
 
@@ -245,12 +257,14 @@ Denylist matching is local-only and best-effort.
 | Environment | Clipboard capture | UI integration | Status |
 |-------------|-------------------|----------------|--------|
 | COSMIC Wayland | Yes, with `COSMIC_DATA_CONTROL_ENABLED=1` | Native libcosmic | Primary target |
-| Hyprland | Yes, via wlroots/wlr-data-control | libcosmic app UI, not Hyprland-native | Supported |
+| Hyprland | Yes, via wlroots/wlr-data-control | Hyprland-native external picker or libcosmic app UI | Supported |
 | Sway | Yes, via wlroots/wlr-data-control | libcosmic app UI | Supported |
 | Other wlroots compositors | Maybe | libcosmic app UI | Best effort |
 | GNOME/Mutter | No unless protocol is available | No native support | Unsupported |
 | KDE/KWin | No unless protocol is available | No native support | Unsupported |
 | X11 | No fallback implemented | No native support | Unsupported/planned |
+
+Use `author-clipboard-ctl doctor` to verify actual live Wayland registry support. If GNOME or KDE ever exposes `zwlr_data_control_manager_v1` and `wl_seat`, the daemon can attempt capture through the same registry-verified path instead of relying on desktop-name assumptions.
 
 ### Enabling on COSMIC Desktop
 
@@ -308,6 +322,7 @@ Hyprland:
 ```bash
 hyprctl version
 hyprctl clients
+author-clipboard-ctl doctor
 ```
 
 ### Shortcut Does Nothing

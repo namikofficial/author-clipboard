@@ -139,9 +139,11 @@ install: build-release
     @echo "📦 Installing author-clipboard..."
     install -Dm755 target/release/author-clipboard-daemon ~/.local/bin/author-clipboard-daemon
     install -Dm755 target/release/author-clipboard ~/.local/bin/author-clipboard
+    install -Dm755 target/release/author-clipboard-ctl ~/.local/bin/author-clipboard-ctl
     # Keep ~/.cargo/bin in sync if it exists and appears before ~/.local/bin in PATH.
     if [ -d "$HOME/.cargo/bin" ]; then install -Dm755 target/release/author-clipboard-daemon ~/.cargo/bin/author-clipboard-daemon; fi
     if [ -d "$HOME/.cargo/bin" ]; then install -Dm755 target/release/author-clipboard ~/.cargo/bin/author-clipboard; fi
+    if [ -d "$HOME/.cargo/bin" ]; then install -Dm755 target/release/author-clipboard-ctl ~/.cargo/bin/author-clipboard-ctl; fi
     install -Dm644 data/com.namikofficial.author-clipboard.desktop ~/.local/share/applications/com.namikofficial.author-clipboard.desktop
     install -Dm644 resources/icons/com.namikofficial.author-clipboard.svg ~/.local/share/icons/hicolor/scalable/apps/com.namikofficial.author-clipboard.svg
     install -Dm644 data/author-clipboard-daemon.service ~/.config/systemd/user/author-clipboard-daemon.service
@@ -170,8 +172,10 @@ logs:
 uninstall: disable
     rm -f ~/.local/bin/author-clipboard-daemon
     rm -f ~/.local/bin/author-clipboard
+    rm -f ~/.local/bin/author-clipboard-ctl
     rm -f ~/.cargo/bin/author-clipboard-daemon
     rm -f ~/.cargo/bin/author-clipboard
+    rm -f ~/.cargo/bin/author-clipboard-ctl
     rm -f ~/.local/share/applications/com.namikofficial.author-clipboard.desktop
     rm -f ~/.local/share/icons/hicolor/scalable/apps/com.namikofficial.author-clipboard.svg
     rm -f ~/.config/systemd/user/author-clipboard-daemon.service
