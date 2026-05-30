@@ -762,7 +762,17 @@ impl cosmic::Application for App {
                             match quick_paste::quick_paste(&item.content, backend) {
                                 Ok(result) => {
                                     if result.success {
-                                        info!("⌨️ Quick pasted via {:?}", result.backend_used);
+                                        match result.backend_used {
+                                            PasteBackend::WlCopy => {
+                                                info!("Copied via wl-copy fallback");
+                                            }
+                                            _ => {
+                                                info!(
+                                                    "⌨️ Quick pasted via {:?}",
+                                                    result.backend_used
+                                                );
+                                            }
+                                        }
                                     } else {
                                         warn!(
                                             "Quick paste failed: {}",
@@ -2474,7 +2484,9 @@ impl App {
             None => "No backend found (install wtype or ydotool)".to_string(),
         };
         content = content.push(text(paste_status).size(13));
-        let qp_label = if self.quick_paste_enabled {
+        let qp_label = if matches!(self.paste_backend, Some(PasteBackend::WlCopy)) {
+            "Quick Paste: copy fallback only — install wtype to type into apps"
+        } else if self.quick_paste_enabled {
             "Quick Paste: ON — items will be typed directly"
         } else {
             "Quick Paste: OFF — items copied to clipboard"

@@ -26,10 +26,11 @@ maintainer = "Namik <author-clipboard@namik.dev>"
 copyright = "2024 Namik"
 license-file = ["../../LICENSE", "4"]
 extended-description = """\
-Author Clipboard is a native clipboard manager for the COSMIC desktop.
-It monitors your clipboard history, provides instant full-text search,
-and keeps sensitive data safe with automatic detection and optional encryption.
-Requires Wayland with wlr-data-control protocol (COSMIC, Sway, Hyprland)."""
+Author Clipboard is a native COSMIC clipboard manager with wlroots compositor
+support, including Hyprland and Sway. It monitors your clipboard history,
+provides instant full-text search, and keeps sensitive data safe with automatic
+detection and optional encryption. Requires Wayland with wlr-data-control
+protocol support."""
 depends = "$auto, libwayland-client0 (>= 1.20), libxkbcommon0 (>= 1.0)"
 section = "utils"
 priority = "optional"

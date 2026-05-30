@@ -9,7 +9,6 @@ Type=simple
 ExecStart=%h/.local/bin/author-clipboard-daemon
 Restart=on-failure
 RestartSec=5
-Environment=COSMIC_DATA_CONTROL_ENABLED=1
 Environment=RUST_LOG=info
 
 [Install]

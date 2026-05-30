@@ -13,7 +13,7 @@ edition = "2021"
 license = "GPL-3.0"
 authors = ["Namik"]
 repository = "https://github.com/namikofficial/author-clipboard"
-description = "Native COSMIC clipboard manager with history, search, and security"
+description = "Native COSMIC clipboard manager with wlroots compositor support"
 homepage = "https://github.com/namikofficial/author-clipboard"
 
 # Clippy lint configuration (equivalent to ESLint in Node.js)

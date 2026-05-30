@@ -71,7 +71,7 @@ fn main() -> Result<()> {
             return Ok(());
         }
         Command::Status => {
-            let config = Config::default();
+            let config = Config::load();
             let db = Database::open(&config.db_path()).context("Failed to open database")?;
             let stats = db.get_stats().context("Failed to get stats")?;
             println!("Items: {}", stats.total_items);
@@ -87,7 +87,7 @@ fn main() -> Result<()> {
             }
         }
         Command::History { count } => {
-            let config = Config::default();
+            let config = Config::load();
             let db = Database::open(&config.db_path()).context("Failed to open database")?;
             let items = db.get_recent(count).context("Failed to get items")?;
             if items.is_empty() {
@@ -112,13 +112,13 @@ fn main() -> Result<()> {
             }
         }
         Command::Clear => {
-            let config = Config::default();
+            let config = Config::load();
             let db = Database::open(&config.db_path()).context("Failed to open database")?;
             let count = db.clear_unpinned().context("Failed to clear items")?;
             println!("Cleared {count} unpinned items.");
         }
         Command::Export { output } => {
-            let config = Config::default();
+            let config = Config::load();
             let db = Database::open(&config.db_path()).context("Failed to open database")?;
             let json = db.export_items().context("Failed to export")?;
             if let Some(path) = output {
@@ -130,7 +130,7 @@ fn main() -> Result<()> {
             }
         }
         Command::Config => {
-            let config = Config::default();
+            let config = Config::load();
             println!("max_items: {}", config.max_items);
             println!("max_item_size: {}", config.max_item_size);
             println!("ttl_seconds: {}", config.ttl_seconds);
@@ -138,6 +138,12 @@ fn main() -> Result<()> {
             println!("keyboard_shortcut: {}", config.keyboard_shortcut);
             println!("encrypt_sensitive: {}", config.encrypt_sensitive);
             println!("clear_on_lock: {}", config.clear_on_lock);
+            println!("dedup_window_seconds: {}", config.dedup_window_seconds);
+            println!("mime_denylist: {:?}", config.mime_denylist);
+            println!(
+                "content_regex_denylist: {:?}",
+                config.content_regex_denylist
+            );
             println!("data_dir: {}", config.data_dir.display());
             println!("db_path: {}", config.db_path().display());
         }

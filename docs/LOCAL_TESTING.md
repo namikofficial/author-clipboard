@@ -197,7 +197,7 @@ Add this to your `.env` file or `~/.profile` for persistence.
 wayland-info | grep -i data.control
 ```
 
-If the protocol isn't listed, ensure `COSMIC_DATA_CONTROL_ENABLED=1` is set and your COSMIC session was restarted.
+If the protocol is not listed on COSMIC, ensure `COSMIC_DATA_CONTROL_ENABLED=1` is set and your COSMIC session was restarted. Hyprland and Sway do not need this COSMIC-specific variable; verify their compositor support with daemon logs and compositor tools such as `hyprctl version`.
 
 ## 5. Install for Daily Use
 
@@ -223,7 +223,7 @@ just uninstall
 | Symptom | Cause | Fix |
 |---------|-------|-----|
 | "Failed to connect to Wayland display" | Not running on Wayland | Run from a Wayland session, not X11 or SSH |
-| "Compositor does not support wlr-data-control" | Protocol not enabled | Set `COSMIC_DATA_CONTROL_ENABLED=1` |
+| "Compositor does not support wlr-data-control" | Protocol not enabled or unavailable | On COSMIC set `COSMIC_DATA_CONTROL_ENABLED=1`; on Hyprland/Sway check compositor support and daemon logs |
 | "No seat found" | Unusual Wayland setup | Check `wayland-info` for `wl_seat` |
 | No clipboard events | Using X11 apps under XWayland | XWayland clipboard should still be bridged, but some compositors don't bridge to `wlr-data-control` |
 | Database errors | Permissions issue | Check `~/.local/share/author-clipboard/` permissions |

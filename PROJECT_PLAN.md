@@ -1,10 +1,10 @@
 # Project Plan: author-clipboard
 
-> Development roadmap and technical specifications for the COSMIC-native clipboard manager
+> Development roadmap and technical specifications for the COSMIC-native clipboard manager with wlroots compositor support
 
 **Document Version:** 1.1
-**Last Updated:** March 3, 2026
-**Project Status:** Phase 14 Complete — v0.3.1
+**Last Updated:** May 31, 2026
+**Project Status:** Phase 14 Complete — v0.5.0
 
 ---
 
@@ -23,15 +23,16 @@
 ## 🎯 Project Overview
 
 ### Mission Statement
-Build a native, high-performance clipboard manager for COSMIC desktop that delivers a comprehensive modern clipboard experience with enhanced privacy and Wayland-native integration.
+Build a native, high-performance clipboard manager for COSMIC desktop that delivers a comprehensive modern clipboard experience with enhanced privacy and Wayland-native integration, while supporting wlroots compositors such as Hyprland and Sway.
 
 ### Core Objectives
 1. **Never lose clipboard data** - Persistent history survives app closures
 2. **Instant access** - Global shortcut opens picker anywhere
 3. **Rich content support** - Text, images, files, HTML
 4. **Expression tools** - Emoji, GIF, symbol, kaomoji pickers
-5. **COSMIC integration** - Native theming, shortcuts, design language
+5. **COSMIC integration** - Native libcosmic UI, theming, shortcuts, design language
 6. **Privacy-first** - Local storage, security controls, sensitive detection
+7. **wlroots support** - First-class runtime docs and support for Hyprland and Sway without claiming Hyprland-native UI
 
 ### Success Metrics
 - Launch to working clipboard history: **< 200ms**
@@ -534,7 +535,8 @@ CREATE INDEX idx_pinned ON clipboard_items(pinned);
 - **Phase 15**: Automation rules, snippets, OCR
 - **Phase 16**: Image enhancements, X11 fallback
 - **Phase 17**: Self-hosted E2EE sync
-- **Phase 18**: Distribution packages (.deb, Flatpak, Nix)
+- **Phase 18**: Distribution packages and release artifacts
+- **Phase 19**: Hyprland-native UX and wlroots polish
 
 ### Risk Mitigation
 
@@ -654,7 +656,8 @@ CREATE INDEX idx_pinned ON clipboard_items(pinned);
 | Phase 16 | TBD | Image & X11 support | 📋 Planned |
 | Phase 17 | TBD | Sync & collaboration | 📋 Planned |
 | Phase 18 | TBD | Distribution packaging | 📋 Planned |
-| Phase 19 | TBD | Community & growth | 📋 Planned |
+| Phase 19 | TBD | Hyprland-native UX | 📋 Planned |
+| Phase 20 | TBD | Community & growth | 📋 Planned |
 
 ---
 
@@ -666,7 +669,8 @@ The project is committed to remaining open-source and free. The following planne
 **Goal:** Power-user features for automation and richer content handling.
 
 Planned Deliverables
-- [ ] "Never store" rules: MIME type denylist and regex exclusion rules
+- [x] "Never store" rules: MIME type denylist and simple content pattern exclusion rules
+- [ ] Full regex denylist support, if needed beyond the current simple prefix/suffix/substring matching
 - [ ] Clipboard ignore rules by source application (where Wayland allows)
 - [ ] Encrypted export/import (password-protected JSON backup)
 - [ ] Snippets & templates with token replacement and preview
@@ -697,14 +701,31 @@ Planned Deliverables
 **Goal:** Make installation simple across distributions and ensure reproducible, signed releases.
 
 Planned Deliverables
-- [ ] `.deb` package (Pop!_OS, Ubuntu)
+- [x] `.deb` packaging support via `cargo-deb`
+- [ ] Published `.deb` release artifacts for Pop!_OS/Ubuntu/Debian
+- [ ] AUR package
+- [ ] Arch PKGBUILD validation in CI
 - [ ] Flatpak/AppImage builds (Wayland-friendly sandboxing guidance)
 - [ ] Nix flake
 - [ ] GitHub Actions release workflow with binary artifacts
 - [ ] Reproducible build notes and binary signing instructions (GPG) for releases
 - [ ] COSMIC app store submission
 
-### Phase 19: Community, Docs & Growth (PLANNED)
+### Phase 19: Hyprland-native UX & wlroots Polish (PLANNED)
+**Goal:** Make Hyprland and wlroots usage feel first-class while keeping the product positioning honest.
+
+Planned Deliverables
+- [x] Native Hyprland setup documentation
+- [ ] Optional `hyprctl` integration
+- [ ] Verified `windowrulev2` examples
+- [ ] Waybar/Wayle module or status indicator
+- [ ] Rofi/wofi picker mode for users who do not want the libcosmic UI
+- [ ] Layer-shell popup mode if technically feasible
+- [ ] AUR package
+- [ ] Nix flake
+- [ ] Demo GIF for Hyprland
+
+### Phase 20: Community, Docs & Growth (PLANNED)
 **Goal:** Increase adoption via docs, demos, and a welcoming community — all free and open.
 
 Planned Deliverables
@@ -715,5 +736,5 @@ Planned Deliverables
 - [ ] Accessibility automation tests (a11y CI checks)
 
 **Document Status:** Living document, updated as project evolves
-**Last Review:** Phase 14 complete (March 3, 2026)
+**Last Review:** Phase 14 complete, v0.5.0 documentation alignment (May 31, 2026)
 **Maintained by:** Project team

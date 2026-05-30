@@ -3,10 +3,12 @@
 /// Identifies the current display server / compositor environment.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DisplayServer {
-    /// Wayland with wlr-data-control support (full functionality)
-    WaylandWithDataControl,
-    /// Wayland without wlr-data-control (limited/no clipboard history)
-    WaylandNoDataControl,
+    /// Generic Wayland session. Protocol support is checked at runtime.
+    Wayland,
+    /// Wayland session that is likely wlroots-based.
+    WaylandLikelyWlroots,
+    /// COSMIC Wayland session missing the data-control enablement env var.
+    CosmicWaylandNeedsDataControlEnv,
     /// X11/Xorg display server (not supported)
     X11,
     /// Unknown display server
@@ -18,45 +20,69 @@ pub enum DisplayServer {
 /// Returns an enum indicating what level of support is available.
 /// Does NOT connect to Wayland — just checks environment variables.
 pub fn detect_display_server() -> DisplayServer {
-    let wayland_display = std::env::var("WAYLAND_DISPLAY").is_ok();
-    let display = std::env::var("DISPLAY").is_ok();
-    let cosmic_data_control = std::env::var("COSMIC_DATA_CONTROL_ENABLED")
-        .map(|v| v == "1" || v.to_lowercase() == "true")
-        .unwrap_or(false);
+    detect_display_server_from(|key| std::env::var(key).ok())
+}
 
-    match (wayland_display, display, cosmic_data_control) {
-        (true, _, true) => DisplayServer::WaylandWithDataControl,
-        (true, _, false) => DisplayServer::WaylandNoDataControl,
-        (false, true, _) => DisplayServer::X11,
-        _ => DisplayServer::Unknown,
+fn detect_display_server_from(get_env: impl Fn(&str) -> Option<String>) -> DisplayServer {
+    let wayland_display = get_env("WAYLAND_DISPLAY").is_some();
+    let display = get_env("DISPLAY").is_some();
+    let cosmic_data_control = get_env("COSMIC_DATA_CONTROL_ENABLED")
+        .is_some_and(|v| v == "1" || v.eq_ignore_ascii_case("true"));
+
+    let desktop_tokens = [
+        get_env("XDG_CURRENT_DESKTOP"),
+        get_env("XDG_SESSION_DESKTOP"),
+        get_env("DESKTOP_SESSION"),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>()
+    .join(":")
+    .to_lowercase();
+
+    let is_hyprland =
+        get_env("HYPRLAND_INSTANCE_SIGNATURE").is_some() || desktop_tokens.contains("hyprland");
+    let is_sway_or_wlroots = desktop_tokens.contains("sway") || desktop_tokens.contains("wlroots");
+    let is_cosmic = desktop_tokens.contains("cosmic");
+
+    if wayland_display {
+        if is_hyprland || is_sway_or_wlroots {
+            DisplayServer::WaylandLikelyWlroots
+        } else if is_cosmic && !cosmic_data_control {
+            DisplayServer::CosmicWaylandNeedsDataControlEnv
+        } else {
+            DisplayServer::Wayland
+        }
+    } else if display {
+        DisplayServer::X11
+    } else {
+        DisplayServer::Unknown
     }
 }
 
 /// Return a user-facing error message describing what's wrong and how to fix it.
 pub fn get_compositor_help(server: &DisplayServer) -> Option<&'static str> {
     match server {
-        DisplayServer::WaylandWithDataControl => None,
-        DisplayServer::WaylandNoDataControl => Some(
-            "author-clipboard requires COSMIC_DATA_CONTROL_ENABLED=1 to be set.\n\
+        DisplayServer::Wayland | DisplayServer::WaylandLikelyWlroots => None,
+        DisplayServer::CosmicWaylandNeedsDataControlEnv => Some(
+            "COSMIC Wayland sessions need COSMIC_DATA_CONTROL_ENABLED=1 for clipboard history.\n\
              \n\
              On COSMIC desktop:\n\
              - This is usually set automatically. Check your session settings.\n\
              - You can set it in /etc/environment or ~/.profile:\n\
                export COSMIC_DATA_CONTROL_ENABLED=1\n\
              \n\
-             On other Wayland compositors (Sway, Hyprland, etc.):\n\
-             - The wlr-data-control protocol must be supported by your compositor.\n\
-             - Check: compositor_name --list-protocols | grep data-control\n\
-             - COSMIC_DATA_CONTROL_ENABLED is not needed on other wlroots compositors.",
+             Hyprland and Sway do not use this COSMIC-specific variable; \
+             their support is verified by attempting to bind wlr-data-control at startup.",
         ),
         DisplayServer::X11 => Some(
             "author-clipboard requires a Wayland compositor with wlr-data-control support.\n\
              X11/Xorg is not supported.\n\
              \n\
              To use author-clipboard:\n\
-             - Switch to a Wayland session (COSMIC, Sway, Hyprland, KDE Wayland, etc.)\n\
+             - Switch to a Wayland session (COSMIC, Sway, Hyprland, etc.)\n\
              - On COSMIC: log out and select 'COSMIC' session (not 'COSMIC (X11)')\n\
-             - Ensure COSMIC_DATA_CONTROL_ENABLED=1 is set for COSMIC desktop",
+             - On Hyprland/Sway: ensure the compositor exposes wlr-data-control",
         ),
         DisplayServer::Unknown => Some(
             "Could not detect display server. Ensure WAYLAND_DISPLAY is set.\n\
@@ -68,6 +94,12 @@ pub fn get_compositor_help(server: &DisplayServer) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
+
+    fn detect(vars: &[(&str, &str)]) -> DisplayServer {
+        let env = vars.iter().copied().collect::<HashMap<_, _>>();
+        detect_display_server_from(|key| env.get(key).map(|value| (*value).to_string()))
+    }
 
     #[test]
     fn test_x11_help_is_actionable() {
@@ -79,13 +111,69 @@ mod tests {
     }
 
     #[test]
-    fn test_wayland_with_control_no_help() {
-        assert!(get_compositor_help(&DisplayServer::WaylandWithDataControl).is_none());
+    fn test_wayland_no_help() {
+        assert!(get_compositor_help(&DisplayServer::Wayland).is_none());
+        assert!(get_compositor_help(&DisplayServer::WaylandLikelyWlroots).is_none());
     }
 
     #[test]
-    fn test_no_data_control_help_mentions_env_var() {
-        let help = get_compositor_help(&DisplayServer::WaylandNoDataControl);
+    fn test_cosmic_help_mentions_env_var() {
+        let help = get_compositor_help(&DisplayServer::CosmicWaylandNeedsDataControlEnv);
         assert!(help.unwrap().contains("COSMIC_DATA_CONTROL_ENABLED"));
+    }
+
+    #[test]
+    fn test_detect_hyprland_wayland() {
+        assert_eq!(
+            detect(&[
+                ("WAYLAND_DISPLAY", "wayland-1"),
+                ("HYPRLAND_INSTANCE_SIGNATURE", "abc")
+            ]),
+            DisplayServer::WaylandLikelyWlroots
+        );
+    }
+
+    #[test]
+    fn test_detect_sway_wayland() {
+        assert_eq!(
+            detect(&[
+                ("WAYLAND_DISPLAY", "wayland-1"),
+                ("XDG_CURRENT_DESKTOP", "sway")
+            ]),
+            DisplayServer::WaylandLikelyWlroots
+        );
+    }
+
+    #[test]
+    fn test_detect_cosmic_with_env_var() {
+        assert_eq!(
+            detect(&[
+                ("WAYLAND_DISPLAY", "wayland-1"),
+                ("XDG_CURRENT_DESKTOP", "COSMIC"),
+                ("COSMIC_DATA_CONTROL_ENABLED", "1")
+            ]),
+            DisplayServer::Wayland
+        );
+    }
+
+    #[test]
+    fn test_detect_cosmic_missing_env_var() {
+        assert_eq!(
+            detect(&[
+                ("WAYLAND_DISPLAY", "wayland-1"),
+                ("XDG_CURRENT_DESKTOP", "COSMIC")
+            ]),
+            DisplayServer::CosmicWaylandNeedsDataControlEnv
+        );
+    }
+
+    #[test]
+    fn test_detect_x11_only_session() {
+        assert_eq!(detect(&[("DISPLAY", ":0")]), DisplayServer::X11);
+    }
+
+    #[test]
+    fn test_detect_unknown_session() {
+        assert_eq!(detect(&[]), DisplayServer::Unknown);
     }
 }

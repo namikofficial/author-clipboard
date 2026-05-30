@@ -17,7 +17,7 @@ pub mod file_handler;
 pub mod image_store;
 /// Unix domain socket IPC between daemon and clients.
 pub mod ipc;
-/// Quick paste via wtype or ydotool backends.
+/// Quick paste via wtype/ydotool with wl-copy copy fallback.
 pub mod quick_paste;
 /// Screen lock detection for clearing sensitive clipboard items.
 pub mod screen_lock;

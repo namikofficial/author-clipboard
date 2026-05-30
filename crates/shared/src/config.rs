@@ -81,8 +81,10 @@ pub struct Config {
     /// MIME types that should never be stored in clipboard history.
     #[serde(default = "default_mime_denylist")]
     pub mime_denylist: Vec<String>,
-    /// Regex patterns (applied to content) that should never be stored.
-    /// Example: use `"^otp:"` or `"^TOTP:"` to block OTP codes.
+    /// Simple content patterns that should never be stored.
+    ///
+    /// Despite the legacy field name, these are not full regular expressions.
+    /// Supported forms are `^prefix`, `suffix$`, and plain substring matching.
     #[serde(default = "default_content_regex_denylist")]
     pub content_regex_denylist: Vec<String>,
 }
@@ -194,7 +196,8 @@ impl Config {
             .any(|denied| denied == mime_type || mime_type.starts_with(denied.as_str()))
     }
 
-    /// Check if content matches any pattern in the denylist.
+    /// Check if content matches any simple pattern in the denylist.
+    ///
     /// Supports `^prefix` (starts-with), `suffix$` (ends-with), and plain substring matching.
     #[must_use]
     pub fn is_content_denied(&self, content: &str) -> bool {
@@ -273,11 +276,16 @@ mod tests {
     #[test]
     fn test_content_denylist() {
         let config = Config {
-            content_regex_denylist: vec!["^OTP:".to_string(), "SECRET".to_string()],
+            content_regex_denylist: vec![
+                "^OTP:".to_string(),
+                "SECRET".to_string(),
+                ".token$".to_string(),
+            ],
             ..Default::default()
         };
         assert!(config.is_content_denied("OTP: 123456"));
         assert!(config.is_content_denied("my SECRET code"));
+        assert!(config.is_content_denied("session.token"));
         assert!(!config.is_content_denied("normal text"));
     }
 }
