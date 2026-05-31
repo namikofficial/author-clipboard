@@ -21,6 +21,9 @@ pub enum PickerError {
     /// Clipboard restore error.
     #[error("clipboard error: {0}")]
     Clipboard(#[from] clipboard::ClipboardSetError),
+    /// Sensitive entry needs explicit user confirmation before restore.
+    #[error("sensitive confirmation required")]
+    SensitiveConfirmationRequired,
 }
 
 // ── Types ─────────────────────────────────────────────────────────
@@ -174,11 +177,12 @@ pub fn load_history_entries(
     config: &Config,
     options: &PickerOptions,
 ) -> Result<Vec<PickerEntry>, PickerError> {
+    let reveal_sensitive = options.include_sensitive || config.picker.show_sensitive_previews;
     let items = db.get_recent(options.limit)?;
     let entries = items
         .into_iter()
         .filter(|item| options.include_sensitive || !item.sensitive)
-        .map(|item| entry_preview(&item, config))
+        .map(|item| entry_preview(&item, reveal_sensitive, config))
         .collect();
     Ok(entries)
 }
@@ -206,7 +210,7 @@ pub fn load_snippet_entries(
 
 /// Convert a database [`ClipboardItem`] into a [`PickerEntry`] with masked
 /// sensitive previews and human-readable metadata.
-pub fn entry_preview(item: &ClipboardItem, config: &Config) -> PickerEntry {
+pub fn entry_preview(item: &ClipboardItem, reveal_sensitive: bool, config: &Config) -> PickerEntry {
     let (title, display_content) = match item.content_type {
         ContentType::Image => {
             let path = item.image_path(&config.data_dir);
@@ -249,7 +253,7 @@ pub fn entry_preview(item: &ClipboardItem, config: &Config) -> PickerEntry {
         timestamp: Some(item.timestamp),
     };
 
-    if item.sensitive {
+    if item.sensitive && !(reveal_sensitive || config.picker.show_sensitive_previews) {
         mask_sensitive_preview(&mut entry);
     }
 
@@ -441,7 +445,12 @@ pub fn restore_entry(
     entry: &PickerEntry,
     config: &Config,
     action: PickerAction,
-) -> Result<clipboard::ClipboardSetResult, clipboard::ClipboardSetError> {
+    confirmed_sensitive: bool,
+) -> Result<clipboard::ClipboardSetResult, PickerError> {
+    if entry.sensitive && config.picker.confirm_sensitive_copy && !confirmed_sensitive {
+        return Err(PickerError::SensitiveConfirmationRequired);
+    }
+
     match action {
         PickerAction::Copy => {
             if let Some(id) = entry.id {
@@ -450,10 +459,11 @@ pub fn restore_entry(
                     .and_then(|db| db.get_by_id(id).ok())
                     .flatten()
                 {
-                    return clipboard::set_clipboard_item(&item, &config.data_dir);
+                    return clipboard::set_clipboard_item(&item, &config.data_dir)
+                        .map_err(PickerError::from);
                 }
             }
-            clipboard::set_clipboard_text(&entry.content)
+            clipboard::set_clipboard_text(&entry.content).map_err(PickerError::from)
         }
         PickerAction::QuickPaste => {
             if entry
@@ -480,16 +490,27 @@ pub fn restore_entry(
                         entry.content.clone()
                     };
                     let _result = quick_paste::quick_paste(&text, &backend)
-                        .map_err(clipboard::ClipboardSetError::Io)?;
+                        .map_err(clipboard::ClipboardSetError::Io)
+                        .map_err(PickerError::from)?;
                     Ok(clipboard::ClipboardSetResult {
                         mime_type: "text/plain".to_string(),
                         behavior: "quick-paste",
                     })
                 } else {
-                    clipboard::set_clipboard_text(&entry.content)
+                    clipboard::set_clipboard_text(&entry.content).map_err(PickerError::from)
                 }
             } else {
-                clipboard::set_clipboard_text(&entry.content)
+                if let Some(id) = entry.id {
+                    if let Some(item) = Database::open(&config.db_path())
+                        .ok()
+                        .and_then(|db| db.get_by_id(id).ok())
+                        .flatten()
+                    {
+                        return clipboard::set_clipboard_item(&item, &config.data_dir)
+                            .map_err(PickerError::from);
+                    }
+                }
+                clipboard::set_clipboard_text(&entry.content).map_err(PickerError::from)
             }
         }
     }
@@ -527,6 +548,49 @@ pub fn parse_external_selection(selected: &str) -> Option<i64> {
     selected
         .split_once('\t')
         .and_then(|(id_str, _)| id_str.parse::<i64>().ok())
+}
+
+/// A rendered row for external menu pickers.
+#[derive(Debug, Clone)]
+pub struct ExternalPickerRow {
+    pub key: usize,
+    pub label: String,
+}
+
+/// Build stable-key external rows so UI labels can stay human-readable.
+pub fn build_external_rows(
+    entries: &[PickerEntry],
+    include_key_prefix: bool,
+) -> Vec<ExternalPickerRow> {
+    entries
+        .iter()
+        .enumerate()
+        .map(|(index, entry)| {
+            let mut label = format_external_label(entry, false);
+            if include_key_prefix {
+                label = format!("{index}\t{label}");
+            }
+            ExternalPickerRow { key: index, label }
+        })
+        .collect()
+}
+
+/// Parse a selected menu row and resolve back to the original entry index.
+pub fn parse_external_row_selection(
+    selected: &str,
+    rows: &[ExternalPickerRow],
+    include_key_prefix: bool,
+) -> Option<usize> {
+    if include_key_prefix {
+        return selected
+            .split_once('\t')
+            .and_then(|(prefix, _)| prefix.parse::<usize>().ok())
+            .filter(|idx| *idx < rows.len());
+    }
+
+    rows.iter()
+        .find(|row| row.label == selected)
+        .map(|row| row.key)
 }
 
 /// Filter entries by a search query (case-insensitive substring match on title + content).
@@ -568,7 +632,7 @@ mod tests {
     fn test_entry_preview_masks_sensitive() {
         let item = make_item("hunter2-password", true);
         let config = Config::default();
-        let entry = entry_preview(&item, &config);
+        let entry = entry_preview(&item, false, &config);
         assert!(entry.sensitive);
         assert_eq!(entry.title, "Sensitive item");
         assert_eq!(entry.content, "[hidden]");
@@ -578,7 +642,7 @@ mod tests {
     fn test_entry_preview_shows_normal_content() {
         let item = make_item("hello world", false);
         let config = Config::default();
-        let entry = entry_preview(&item, &config);
+        let entry = entry_preview(&item, false, &config);
         assert!(!entry.sensitive);
         assert_eq!(entry.title, "hello world");
         assert_eq!(entry.content, "hello world");
@@ -605,6 +669,16 @@ mod tests {
     }
 
     #[test]
+    fn test_entry_preview_can_show_sensitive_with_config() {
+        let item = make_item("hunter2-password", true);
+        let mut config = Config::default();
+        config.picker.show_sensitive_previews = true;
+        let entry = entry_preview(&item, true, &config);
+        assert_eq!(entry.title, "hunter2-password");
+        assert_eq!(entry.content, "hunter2-password");
+    }
+
+    #[test]
     fn test_parse_external_selection_valid() {
         assert_eq!(parse_external_selection("42\ttext\thello"), Some(42));
         assert_eq!(parse_external_selection("0\timage\tfoo"), Some(0));
@@ -614,6 +688,28 @@ mod tests {
     fn test_parse_external_selection_invalid() {
         assert_eq!(parse_external_selection("not-a-number\thello"), None);
         assert_eq!(parse_external_selection(""), None);
+    }
+
+    #[test]
+    fn test_external_row_mapping_handles_tabs_and_newlines() {
+        let entries = vec![PickerEntry {
+            id: None,
+            source: PickerSource::Emoji,
+            content_type: None,
+            title: "line1\tline2".to_string(),
+            subtitle: Some("meta\nrow".to_string()),
+            content: "line1\tline2\nmeta".to_string(),
+            mime_type: Some("text/plain".to_string()),
+            sensitive: false,
+            pinned: false,
+            timestamp: None,
+        }];
+        let rows = build_external_rows(&entries, true);
+        let selected = rows[0].label.clone();
+        assert_eq!(
+            parse_external_row_selection(&selected, &rows, true),
+            Some(0)
+        );
     }
 
     #[test]

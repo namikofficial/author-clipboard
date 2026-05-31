@@ -15,8 +15,9 @@ use anyhow::Result;
 use author_clipboard_shared::config::Config;
 use author_clipboard_shared::db::Database;
 use author_clipboard_shared::picker::{
-    self, PickerAction, PickerEntry, PickerOptions, PickerSource,
+    self, PickerAction, PickerEntry, PickerError, PickerOptions, PickerSource,
 };
+use clap::Parser;
 use gtk4::glib;
 use gtk4::prelude::*;
 use gtk4::{self as gtk};
@@ -31,70 +32,50 @@ struct PickerState {
     source: PickerSource,
     include_sensitive: bool,
     action: PickerAction,
+    pending_sensitive_key: Option<String>,
+    status_message: Option<String>,
+}
+
+#[derive(Parser, Debug, Clone)]
+#[command(
+    name = "author-clipboard-hypr-picker",
+    version,
+    about = "First-party Hyprland/wlroots clipboard picker"
+)]
+struct Cli {
+    #[arg(
+        short,
+        long,
+        default_value = "history",
+        value_parser = ["history", "snippets", "emoji", "symbols", "kaomoji", "all"]
+    )]
+    source: String,
+    #[arg(short, long, default_value = "50")]
+    count: usize,
+    #[arg(long)]
+    include_sensitive: bool,
+    #[arg(short, long, default_value = "copy", value_parser = ["copy", "quick-paste"])]
+    action: String,
+    #[arg(short, long)]
+    query: Option<String>,
 }
 
 #[allow(clippy::unnecessary_wraps)]
 fn main() -> Result<()> {
+    let cli = Cli::parse();
+    let source = cli.source.parse().unwrap_or(PickerSource::History);
+    let action = cli.action.parse().unwrap_or(PickerAction::Copy);
+    let options = PickerOptions {
+        source,
+        limit: cli.count,
+        query: cli.query,
+        include_sensitive: cli.include_sensitive,
+        action,
+    };
     let app = gtk::Application::builder().application_id(APP_ID).build();
-
-    let args: Vec<String> = std::env::args().collect();
-    let options = parse_args(&args);
-
     app.connect_activate(move |app| build_ui(app, options.clone()));
     app.run();
-
     Ok(())
-}
-
-fn parse_args(args: &[String]) -> PickerOptions {
-    let mut source = PickerSource::History;
-    let mut limit = 50;
-    let mut include_sensitive = false;
-    let mut action = PickerAction::Copy;
-    let mut query = None;
-
-    let mut i = 1;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--source" | "-s" => {
-                i += 1;
-                if let Some(val) = args.get(i) {
-                    source = val.parse().unwrap_or(PickerSource::History);
-                }
-            }
-            "--count" | "-c" => {
-                i += 1;
-                if let Some(val) = args.get(i) {
-                    limit = val.parse().unwrap_or(50);
-                }
-            }
-            "--include-sensitive" => {
-                include_sensitive = true;
-            }
-            "--action" | "-a" => {
-                i += 1;
-                if let Some(val) = args.get(i) {
-                    action = val.parse().unwrap_or(PickerAction::Copy);
-                }
-            }
-            "--query" | "-q" => {
-                i += 1;
-                if let Some(val) = args.get(i) {
-                    query = Some(val.clone());
-                }
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-
-    PickerOptions {
-        source,
-        limit,
-        query,
-        include_sensitive,
-        action,
-    }
 }
 
 #[allow(clippy::too_many_lines, clippy::needless_pass_by_value)]
@@ -111,6 +92,8 @@ fn build_ui(app: &gtk::Application, options: PickerOptions) {
         source: options.source,
         include_sensitive: options.include_sensitive,
         action: options.action,
+        pending_sensitive_key: None,
+        status_message: None,
     }));
 
     let width: i32 = config.picker.width.try_into().unwrap_or(720);
@@ -200,11 +183,20 @@ fn build_ui(app: &gtk::Application, options: PickerOptions) {
             "Return" => {
                 if let Some(entry) = s.filtered.get(s.selected_index) {
                     let entry = entry.clone();
-                    let action = s.action;
+                    let action = if modifiers.contains(gtk::gdk::ModifierType::CONTROL_MASK) {
+                        PickerAction::QuickPaste
+                    } else {
+                        s.action
+                    };
                     drop(s);
-                    let config = Config::load();
-                    let _ = picker::restore_entry(&entry, &config, action);
-                    window_ref.close();
+                    handle_entry_action(
+                        &state_clone,
+                        &entry,
+                        action,
+                        &window_ref,
+                        &status_ref,
+                        Some(&list_box_ref),
+                    );
                 }
                 glib::Propagation::Stop
             }
@@ -214,16 +206,24 @@ fn build_ui(app: &gtk::Application, options: PickerOptions) {
             }
             _ => {
                 if modifiers.contains(gtk::gdk::ModifierType::CONTROL_MASK) {
+                    if key_name.eq_ignore_ascii_case("p") {
+                        handle_toggle_pin(&mut s, &list_box_ref, &state_clone, &status_ref);
+                        return glib::Propagation::Stop;
+                    }
                     if let Some(num) = key_name.chars().next().and_then(|c| c.to_digit(10)) {
                         let idx = (num as usize).saturating_sub(1);
                         if idx < len {
                             if let Some(entry) = s.filtered.get(idx) {
                                 let entry = entry.clone();
-                                let action = s.action;
                                 drop(s);
-                                let config = Config::load();
-                                let _ = picker::restore_entry(&entry, &config, action);
-                                window_ref.close();
+                                handle_entry_action(
+                                    &state_clone,
+                                    &entry,
+                                    PickerAction::Copy,
+                                    &window_ref,
+                                    &status_ref,
+                                    Some(&list_box_ref),
+                                );
                             }
                         }
                         return glib::Propagation::Stop;
@@ -251,6 +251,8 @@ fn build_ui(app: &gtk::Application, options: PickerOptions) {
         } else {
             s.filtered = picker::filter_entries(&s.entries, &query);
         }
+        s.pending_sensitive_key = None;
+        s.status_message = None;
         s.selected_index = 0;
         drop(s);
 
@@ -311,6 +313,8 @@ fn handle_delete(
                     state.selected_index = state
                         .selected_index
                         .min(state.filtered.len().saturating_sub(1));
+                    state.pending_sensitive_key = None;
+                    state.status_message = Some("Item deleted".to_string());
                 }
                 populate_list_box(list_box, &state_ref.borrow());
                 update_status(status, &state_ref.borrow());
@@ -344,13 +348,127 @@ fn populate_list_box(list_box: &gtk::ListBox, state: &PickerState) {
 }
 
 fn update_status(label: &gtk::Label, state: &PickerState) {
+    if let Some(message) = &state.status_message {
+        label.set_text(message);
+        return;
+    }
+
     let total = state.filtered.len();
     let selected = state.selected_index + 1;
     if total == 0 {
         label.set_text("No items found");
     } else {
         label.set_text(&format!(
-            "{selected}/{total}  \u{00b7}  \u{2191}\u{2193} navigate  \u{00b7}  Enter copy  \u{00b7}  Ctrl+1-9 quick  \u{00b7}  Esc close"
+            "{selected}/{total}  \u{00b7}  \u{2191}\u{2193} navigate  \u{00b7}  Enter copy  \u{00b7}  Ctrl+Enter quick-paste  \u{00b7}  Ctrl+P pin  \u{00b7}  Ctrl+1-9 quick  \u{00b7}  Esc close"
         ));
+    }
+}
+
+fn entry_selection_key(entry: &PickerEntry) -> String {
+    match entry.id {
+        Some(id) => format!("id:{id}"),
+        None => format!("content:{}", entry.content),
+    }
+}
+
+fn handle_entry_action(
+    state_ref: &Rc<RefCell<PickerState>>,
+    entry: &PickerEntry,
+    action: PickerAction,
+    window: &gtk::ApplicationWindow,
+    status: &gtk::Label,
+    list_box: Option<&gtk::ListBox>,
+) {
+    let config = Config::load();
+
+    if entry.sensitive && config.picker.confirm_sensitive_copy {
+        let key = entry_selection_key(entry);
+        let needs_confirmation = {
+            let mut state = state_ref.borrow_mut();
+            let already_confirmed = state.pending_sensitive_key.as_deref() == Some(key.as_str());
+            if already_confirmed {
+                false
+            } else {
+                state.pending_sensitive_key = Some(key);
+                state.status_message =
+                    Some("Sensitive item selected. Press Enter again to confirm copy.".to_string());
+                true
+            }
+        };
+
+        if needs_confirmation {
+            update_status(status, &state_ref.borrow());
+            return;
+        }
+    }
+
+    let confirmed_sensitive = entry.sensitive;
+    match picker::restore_entry(entry, &config, action, confirmed_sensitive) {
+        Ok(result) => {
+            {
+                let mut state = state_ref.borrow_mut();
+                state.pending_sensitive_key = None;
+                state.status_message = Some(format!(
+                    "Copied as {} ({})",
+                    result.mime_type, result.behavior
+                ));
+            }
+            update_status(status, &state_ref.borrow());
+            if config.picker.close_after_copy {
+                window.close();
+            } else if let Some(list) = list_box {
+                select_row_at(list, &state_ref.borrow(), status, state_ref);
+            }
+        }
+        Err(PickerError::SensitiveConfirmationRequired) => {
+            let mut state = state_ref.borrow_mut();
+            state.status_message =
+                Some("Sensitive item requires confirmation. Press Enter again.".to_string());
+            update_status(status, &state);
+        }
+        Err(err) => {
+            let mut state = state_ref.borrow_mut();
+            state.status_message = Some(format!("Restore failed: {err}"));
+            update_status(status, &state);
+        }
+    }
+}
+
+fn handle_toggle_pin(
+    state: &mut PickerState,
+    list_box: &gtk::ListBox,
+    state_ref: &Rc<RefCell<PickerState>>,
+    status: &gtk::Label,
+) {
+    if let Some(entry) = state.filtered.get(state.selected_index).cloned() {
+        if let Some(id) = entry.id {
+            let config = Config::load();
+            if let Ok(db) = Database::open(&config.db_path()) {
+                let _ = db.toggle_pin(id);
+                let opts = PickerOptions {
+                    source: state.source,
+                    limit: state.entries.len(),
+                    query: None,
+                    include_sensitive: state.include_sensitive,
+                    action: state.action,
+                };
+                if let Ok(new_entries) = picker::load_entries(&db, &config, &opts) {
+                    state.entries.clone_from(&new_entries);
+                    state.filtered = new_entries;
+                    if let Some(new_index) = state.filtered.iter().position(|e| e.id == Some(id)) {
+                        state.selected_index = new_index;
+                    } else {
+                        state.selected_index = state
+                            .selected_index
+                            .min(state.filtered.len().saturating_sub(1));
+                    }
+                    state.status_message = Some("Pin state updated".to_string());
+                }
+                state.pending_sensitive_key = None;
+                populate_list_box(list_box, &state_ref.borrow());
+                update_status(status, &state_ref.borrow());
+                select_row_at(list_box, &state_ref.borrow(), status, state_ref);
+            }
+        }
     }
 }

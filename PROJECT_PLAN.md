@@ -717,12 +717,12 @@ Planned Deliverables
 
 Planned Deliverables
 - [x] Native Hyprland setup documentation
-- [x] Hyprland-native external picker mode via wofi/rofi/fuzzel
+- [x] External menu picker mode via wofi/rofi/fuzzel
 - [x] First-party Hyprland picker (`author-clipboard-hypr-picker`) with GTK4 layer-shell
 - [x] Shared picker module in `shared::picker` for reuse across picker UIs
 - [x] `author-clipboard-ctl hyprland-config` helper
 - [x] Picker configuration in `config.json` (`picker` section)
-- [ ] Verified `windowrulev2` examples for the native picker
+- [x] Layer-shell popup mode for native picker
 - [ ] Waybar/Wayle module or status indicator
 - [ ] AUR package
 - [ ] Nix flake

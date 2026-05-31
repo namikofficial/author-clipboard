@@ -64,9 +64,9 @@ enum Command {
     },
     /// Open an external menu picker via wofi, rofi, or fuzzel
     Picker {
-        /// Menu backend to use. Auto-detects when omitted.
-        #[arg(short, long, value_enum)]
-        menu: Option<MenuBackend>,
+        /// Menu backend to use (`auto`, `wofi`, `fuzzel`, or `rofi`).
+        #[arg(short, long, value_enum, default_value_t = MenuBackend::Auto)]
+        menu: MenuBackend,
         /// Data source to pick from
         #[arg(short, long, default_value = "history")]
         source: SourceArg,
@@ -89,6 +89,7 @@ enum Command {
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
 enum MenuBackend {
+    Auto,
     Wofi,
     Rofi,
     Fuzzel,
@@ -226,7 +227,12 @@ fn main() -> Result<()> {
                 config.content_regex_denylist
             );
             println!("picker.default_source: {}", config.picker.default_source);
+            println!("picker.default_mode: {}", config.picker.default_mode);
             println!("picker.max_results: {}", config.picker.max_results);
+            println!(
+                "picker.show_sensitive_previews: {}",
+                config.picker.show_sensitive_previews
+            );
             println!(
                 "picker.confirm_sensitive_copy: {}",
                 config.picker.confirm_sensitive_copy
@@ -311,15 +317,14 @@ fn copy_item_by_id(id: i64) -> Result<()> {
 
 #[allow(clippy::too_many_arguments)]
 fn run_external_picker(
-    menu: Option<MenuBackend>,
+    menu: MenuBackend,
     source: SourceArg,
     count: usize,
     prompt: &str,
     include_sensitive: bool,
     action: ActionArg,
 ) -> Result<()> {
-    let backend = menu
-        .or_else(detect_menu_backend)
+    let backend = resolve_menu_backend(menu)
         .context("No picker backend found. Install wofi, rofi, or fuzzel.")?;
 
     let config = Config::load();
@@ -341,35 +346,31 @@ fn run_external_picker(
         return Ok(());
     }
 
-    let labels: Vec<String> = entries
-        .iter()
-        .map(|e| picker::format_external_label(e, true))
-        .collect();
+    let rows = picker::build_external_rows(&entries, true);
+    let labels: Vec<String> = rows.iter().map(|row| row.label.clone()).collect();
 
     let selected = run_menu_backend(backend, prompt, &labels)?;
-
-    // Try to parse as clipboard item id first
-    if let Some(id) = picker::parse_external_selection(&selected) {
-        let item = db
-            .get_by_id(id)
-            .context("Failed to read clipboard item")?
-            .with_context(|| format!("No clipboard item with id {id}"))?;
-        let entry = picker::entry_preview(&item, &config);
-        let result = picker::restore_entry(&entry, &config, action.into())
-            .context("Failed to restore item")?;
-        println!("Copied as {}", result.mime_type);
+    if selected.is_empty() {
         return Ok(());
     }
 
-    // If no id, try to find by content match (for expression entries)
-    if let Some(entry) = entries.iter().find(|e| e.content == selected) {
-        let result = picker::restore_entry(entry, &config, action.into())
-            .context("Failed to restore item")?;
-        println!("Copied as {}", result.mime_type);
-        return Ok(());
+    if let Some(index) = picker::parse_external_row_selection(&selected, &rows, true) {
+        if let Some(entry) = entries.get(index) {
+            let result = picker::restore_entry(entry, &config, action.into(), include_sensitive)
+                .context("Failed to restore item")?;
+            println!("Copied as {} ({})", result.mime_type, result.behavior);
+            return Ok(());
+        }
     }
 
-    Ok(())
+    anyhow::bail!("Could not map menu selection back to an item");
+}
+
+fn resolve_menu_backend(menu: MenuBackend) -> Option<MenuBackend> {
+    match menu {
+        MenuBackend::Auto => detect_menu_backend(),
+        MenuBackend::Wofi | MenuBackend::Rofi | MenuBackend::Fuzzel => Some(menu),
+    }
 }
 
 fn detect_menu_backend() -> Option<MenuBackend> {
@@ -414,27 +415,37 @@ fn run_menu_backend(backend: MenuBackend, prompt: &str, labels: &[String]) -> Re
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
+fn hyprland_config_text() -> String {
+    [
+        "# Author Clipboard - Hyprland configuration",
+        "# Add these to your hyprland.conf",
+        "",
+        "# External menu picker (wofi/fuzzel/rofi)",
+        "bind = SUPER, V, exec, author-clipboard-ctl picker --menu auto",
+        "",
+        "# First-party Hyprland-native picker",
+        "bind = SUPER SHIFT, V, exec, author-clipboard-hypr-picker",
+        "",
+        "# Optional COSMIC applet toggle",
+        "bind = SUPER ALT, V, exec, author-clipboard-ctl toggle",
+        "",
+        "# Verify app class and choose rules (if not using layer-shell):",
+        "# hyprctl clients | grep -i author",
+        "",
+        "# Make sure the daemon is running:",
+        "# systemctl --user enable --now author-clipboard-daemon",
+    ]
+    .join("\n")
+}
+
 fn print_hyprland_config() {
-    println!("# Author Clipboard - Hyprland configuration");
-    println!("# Add these to your hyprland.conf");
-    println!();
-    println!("# External menu picker (wofi/fuzzel/rofi)");
-    println!("bind = SUPER, V, exec, author-clipboard-ctl picker --menu auto");
-    println!();
-    println!("# COSMIC applet toggle");
-    println!("bind = SUPER ALT, V, exec, author-clipboard-ctl toggle");
-    println!();
-    println!("# Window rules for the COSMIC applet (inspect class first with: hyprctl clients)");
-    println!("windowrulev2 = float,class:^(author-clipboard)$");
-    println!("windowrulev2 = center,class:^(author-clipboard)$");
-    println!();
-    println!("# Make sure the daemon is running:");
-    println!("# systemctl --user enable --now author-clipboard-daemon");
+    println!("{}", hyprland_config_text());
 }
 
 impl MenuBackend {
     fn command_name(self) -> &'static str {
         match self {
+            Self::Auto => "auto",
             Self::Wofi => "wofi",
             Self::Rofi => "rofi",
             Self::Fuzzel => "fuzzel",
@@ -443,6 +454,7 @@ impl MenuBackend {
 
     fn args(self, prompt: &str) -> Vec<&str> {
         match self {
+            Self::Auto => vec![],
             Self::Rofi => vec!["-dmenu", "-p", prompt],
             Self::Wofi | Self::Fuzzel => vec!["--dmenu", "--prompt", prompt],
         }
@@ -504,6 +516,7 @@ fn kill_applet() -> Result<()> {
         println!("Applet not running");
         return Ok(());
     }
+
     let pids = String::from_utf8_lossy(&output.stdout);
     for pid in pids.lines() {
         let pid = pid.trim();
@@ -513,4 +526,17 @@ fn kill_applet() -> Result<()> {
     }
     println!("Applet stopped");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::hyprland_config_text;
+
+    #[test]
+    fn hyprland_config_includes_native_and_external_binds() {
+        let output = hyprland_config_text();
+        assert!(output.contains("author-clipboard-ctl picker --menu auto"));
+        assert!(output.contains("author-clipboard-hypr-picker"));
+        assert!(output.contains("author-clipboard-ctl toggle"));
+    }
 }

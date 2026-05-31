@@ -121,7 +121,9 @@ author-clipboard-hypr-picker --source history --count 30
 | Type | Filter/search |
 | ↑ / ↓ | Navigate selection |
 | Enter | Copy selected and close |
+| Ctrl+Enter | Quick-paste selected text |
 | Delete | Delete selected item |
+| Ctrl+P | Pin/unpin selected history item |
 | Ctrl+1..9 | Quick select by position |
 | Esc | Close picker |
 
@@ -190,8 +192,8 @@ author-clipboard-ctl picker --action quick-paste --menu wofi
 
 - Sensitive items (passwords, API keys, tokens) are masked by default
 - The picker shows "Sensitive item" instead of raw content
-- Use `--include-sensitive` to show masked entries
-- Use `--confirm-sensitive-copy` in config to require confirmation
+- Use `--include-sensitive` to allow selecting sensitive entries from CLI
+- Set `picker.confirm_sensitive_copy: true` to require confirmation in the native picker
 
 ---
 
@@ -204,6 +206,7 @@ Picker-specific settings:
 ```json
 {
   "picker": {
+    "default_mode": "external",
     "default_source": "history",
     "max_results": 50,
     "show_sensitive_previews": false,

@@ -44,11 +44,31 @@ fn default_content_regex_denylist() -> Vec<String> {
     vec![]
 }
 
+/// Default picker UI mode.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PickerMode {
+    #[default]
+    External,
+    Native,
+}
+
+impl std::fmt::Display for PickerMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::External => write!(f, "external"),
+            Self::Native => write!(f, "native"),
+        }
+    }
+}
+
 /// Configuration for picker UIs (external menu and native picker).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct PickerConfig {
+    /// Default picker mode (`external` or `native`).
+    pub default_mode: PickerMode,
     /// Default picker source (history, snippets, emoji, symbols, kaomoji, all).
     pub default_source: String,
     /// Maximum number of results to display.
@@ -70,6 +90,7 @@ pub struct PickerConfig {
 impl Default for PickerConfig {
     fn default() -> Self {
         Self {
+            default_mode: PickerMode::External,
             default_source: "history".to_string(),
             max_results: 50,
             show_sensitive_previews: false,
@@ -319,6 +340,7 @@ mod tests {
     #[test]
     fn test_picker_config_defaults() {
         let picker = PickerConfig::default();
+        assert_eq!(picker.default_mode, PickerMode::External);
         assert_eq!(picker.default_source, "history");
         assert_eq!(picker.max_results, 50);
         assert!(!picker.show_sensitive_previews);
@@ -332,6 +354,7 @@ mod tests {
     #[test]
     fn test_picker_config_roundtrip() {
         let picker = PickerConfig {
+            default_mode: PickerMode::Native,
             default_source: "emoji".to_string(),
             max_results: 100,
             show_sensitive_previews: true,
@@ -344,6 +367,13 @@ mod tests {
         let json = serde_json::to_string_pretty(&picker).unwrap();
         let loaded: PickerConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(picker, loaded);
+    }
+
+    #[test]
+    fn test_picker_config_partial_defaults_default_mode() {
+        let json = r#"{ "default_source": "history" }"#;
+        let picker: PickerConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(picker.default_mode, PickerMode::External);
     }
 
     #[test]

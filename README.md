@@ -241,6 +241,7 @@ Default example:
   ],
   "content_regex_denylist": [],
   "picker": {
+    "default_mode": "external",
     "default_source": "history",
     "max_results": 50,
     "show_sensitive_previews": false,
@@ -268,7 +269,7 @@ Denylist matching is local-only and best-effort.
 | Environment | Clipboard capture | UI integration | Status |
 |-------------|-------------------|----------------|--------|
 | COSMIC Wayland | Yes, with `COSMIC_DATA_CONTROL_ENABLED=1` | Native libcosmic | Primary target |
-| Hyprland | Yes, via wlroots/wlr-data-control | Hyprland-native external picker or libcosmic app UI | Supported |
+| Hyprland | Yes, via wlroots/wlr-data-control | External menu picker (`author-clipboard-ctl picker`) or first-party native picker (`author-clipboard-hypr-picker`) | Supported |
 | Sway | Yes, via wlroots/wlr-data-control | libcosmic app UI | Supported |
 | Other wlroots compositors | Maybe | libcosmic app UI | Best effort |
 | GNOME/Mutter | No unless protocol is available | No native support | Unsupported |
