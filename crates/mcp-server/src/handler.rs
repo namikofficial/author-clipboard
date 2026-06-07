@@ -4,9 +4,9 @@ use std::{
     task::{Context, Poll},
 };
 
-use author_clipboard_shared::ipc::{IpcClient, IpcCommand, FilterOptions, CopyMode};
-use mcp_spec::protocol::{JsonRpcRequest, JsonRpcResponse};
+use author_clipboard_shared::ipc::{CopyMode, FilterOptions, IpcClient, IpcCommand};
 use mcp_server::BoxError;
+use mcp_spec::protocol::{JsonRpcRequest, JsonRpcResponse};
 use serde_json::Value;
 use tower::Service;
 
@@ -55,11 +55,7 @@ impl Service<JsonRpcRequest> for ClipboardService {
     }
 }
 
-async fn handle_method(
-    client: &IpcClient,
-    method: &str,
-    params: Option<Value>,
-) -> Value {
+async fn handle_method(client: &IpcClient, method: &str, params: Option<Value>) -> Value {
     match method {
         "initialize" => serde_json::json!({
             "protocolVersion": "2024-11-05",
@@ -190,7 +186,7 @@ async fn handle_method(
                         },
                         "required": ["id", "confirm"]
                     }
-                })
+                }),
             ];
             serde_json::json!({"tools": tools})
         }
@@ -202,12 +198,23 @@ async fn handle_method(
 
             match tool_name {
                 "clipboard.search" => {
-                    let query = arguments.get("query").and_then(|v| v.as_str()).unwrap_or("");
-                    let limit = arguments.get("limit").and_then(|v| v.as_u64()).map(|v| v as usize);
-                    let offset = arguments.get("offset").and_then(|v| v.as_u64()).map(|v| v as usize);
+                    let query = arguments
+                        .get("query")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    let limit = arguments
+                        .get("limit")
+                        .and_then(|v| v.as_u64())
+                        .map(|v| v as usize);
+                    let _offset = arguments
+                        .get("offset")
+                        .and_then(|v| v.as_u64())
+                        .map(|v| v as usize);
                     let content_type = arguments.get("content_type").and_then(|v| {
                         v.as_array().map(|arr| {
-                            arr.iter().filter_map(|s| s.as_str().map(String::from)).collect()
+                            arr.iter()
+                                .filter_map(|s| s.as_str().map(String::from))
+                                .collect()
                         })
                     });
                     let pinned = arguments.get("pinned").and_then(|v| v.as_bool());
@@ -227,24 +234,38 @@ async fn handle_method(
                         limit,
                         filters: Some(filters),
                     }) {
-                        Ok(resp) => serde_json::json!({"content": [{"type": "text", "text": serde_json::to_string(&resp.data).unwrap_or_default()}]}),
-                        Err(e) => serde_json::json!({"isError": true, "content": [{"type": "text", "text": e.to_string()}]})
+                        Ok(resp) => {
+                            serde_json::json!({"content": [{"type": "text", "text": serde_json::to_string(&resp.data).unwrap_or_default()}]})
+                        }
+                        Err(e) => {
+                            serde_json::json!({"isError": true, "content": [{"type": "text", "text": e.to_string()}]})
+                        }
                     }
                 }
 
                 "clipboard.get" => {
                     let id = arguments.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
-                    let include_content = arguments.get("include_content").and_then(|v| v.as_bool()).unwrap_or(false);
+                    let _include_content = arguments
+                        .get("include_content")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
 
                     match client.send_command(&IpcCommand::GetItem { id }) {
-                        Ok(resp) => serde_json::json!({"content": [{"type": "text", "text": serde_json::to_string(&resp.data).unwrap_or_default()}]}),
-                        Err(e) => serde_json::json!({"isError": true, "content": [{"type": "text", "text": e.to_string()}]})
+                        Ok(resp) => {
+                            serde_json::json!({"content": [{"type": "text", "text": serde_json::to_string(&resp.data).unwrap_or_default()}]})
+                        }
+                        Err(e) => {
+                            serde_json::json!({"isError": true, "content": [{"type": "text", "text": e.to_string()}]})
+                        }
                     }
                 }
 
                 "clipboard.copy" => {
                     let id = arguments.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
-                    let mode_str = arguments.get("mode").and_then(|v| v.as_str()).unwrap_or("copy");
+                    let mode_str = arguments
+                        .get("mode")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("copy");
                     let mode = match mode_str {
                         "quick_paste" => CopyMode::QuickPaste,
                         "copy_plain_text" => CopyMode::CopyPlainText,
@@ -253,8 +274,12 @@ async fn handle_method(
                     };
 
                     match client.send_command(&IpcCommand::Copy { id, mode }) {
-                        Ok(resp) => serde_json::json!({"content": [{"type": "text", "text": serde_json::to_string(&resp.data).unwrap_or_default()}]}),
-                        Err(e) => serde_json::json!({"isError": true, "content": [{"type": "text", "text": e.to_string()}]})
+                        Ok(resp) => {
+                            serde_json::json!({"content": [{"type": "text", "text": serde_json::to_string(&resp.data).unwrap_or_default()}]})
+                        }
+                        Err(e) => {
+                            serde_json::json!({"isError": true, "content": [{"type": "text", "text": e.to_string()}]})
+                        }
                     }
                 }
 
@@ -262,8 +287,12 @@ async fn handle_method(
                     let id = arguments.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
 
                     match client.send_command(&IpcCommand::Pin { id }) {
-                        Ok(resp) => serde_json::json!({"content": [{"type": "text", "text": serde_json::to_string(&resp.data).unwrap_or_default()}]}),
-                        Err(e) => serde_json::json!({"isError": true, "content": [{"type": "text", "text": e.to_string()}]})
+                        Ok(resp) => {
+                            serde_json::json!({"content": [{"type": "text", "text": serde_json::to_string(&resp.data).unwrap_or_default()}]})
+                        }
+                        Err(e) => {
+                            serde_json::json!({"isError": true, "content": [{"type": "text", "text": e.to_string()}]})
+                        }
                     }
                 }
 
@@ -271,64 +300,98 @@ async fn handle_method(
                     let id = arguments.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
 
                     match client.send_command(&IpcCommand::Unpin { id }) {
-                        Ok(resp) => serde_json::json!({"content": [{"type": "text", "text": serde_json::to_string(&resp.data).unwrap_or_default()}]}),
-                        Err(e) => serde_json::json!({"isError": true, "content": [{"type": "text", "text": e.to_string()}]})
+                        Ok(resp) => {
+                            serde_json::json!({"content": [{"type": "text", "text": serde_json::to_string(&resp.data).unwrap_or_default()}]})
+                        }
+                        Err(e) => {
+                            serde_json::json!({"isError": true, "content": [{"type": "text", "text": e.to_string()}]})
+                        }
                     }
                 }
 
                 "clipboard.delete" => {
                     let id = arguments.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
-                    let confirm = arguments.get("confirm").and_then(|v| v.as_bool()).unwrap_or(false);
+                    let confirm = arguments
+                        .get("confirm")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
 
                     if !confirm {
                         return serde_json::json!({"isError": true, "content": [{"type": "text", "text": "confirm must be true"}]});
                     }
 
                     match client.send_command(&IpcCommand::Delete { id }) {
-                        Ok(resp) => serde_json::json!({"content": [{"type": "text", "text": serde_json::to_string(&resp.data).unwrap_or_default()}]}),
-                        Err(e) => serde_json::json!({"isError": true, "content": [{"type": "text", "text": e.to_string()}]})
+                        Ok(resp) => {
+                            serde_json::json!({"content": [{"type": "text", "text": serde_json::to_string(&resp.data).unwrap_or_default()}]})
+                        }
+                        Err(e) => {
+                            serde_json::json!({"isError": true, "content": [{"type": "text", "text": e.to_string()}]})
+                        }
                     }
                 }
 
-                "clipboard.stats" => {
-                    match client.send_command(&IpcCommand::GetStats) {
-                        Ok(resp) => serde_json::json!({"content": [{"type": "text", "text": serde_json::to_string(&resp.data).unwrap_or_default()}]}),
-                        Err(e) => serde_json::json!({"isError": true, "content": [{"type": "text", "text": e.to_string()}]})
+                "clipboard.stats" => match client.send_command(&IpcCommand::GetStats) {
+                    Ok(resp) => {
+                        serde_json::json!({"content": [{"type": "text", "text": serde_json::to_string(&resp.data).unwrap_or_default()}]})
                     }
-                }
+                    Err(e) => {
+                        serde_json::json!({"isError": true, "content": [{"type": "text", "text": e.to_string()}]})
+                    }
+                },
 
-                "clipboard.list_snippets" => {
-                    match client.send_command(&IpcCommand::ListSnippets) {
-                        Ok(resp) => serde_json::json!({"content": [{"type": "text", "text": serde_json::to_string(&resp.data).unwrap_or_default()}]}),
-                        Err(e) => serde_json::json!({"isError": true, "content": [{"type": "text", "text": e.to_string()}]})
+                "clipboard.list_snippets" => match client.send_command(&IpcCommand::ListSnippets) {
+                    Ok(resp) => {
+                        serde_json::json!({"content": [{"type": "text", "text": serde_json::to_string(&resp.data).unwrap_or_default()}]})
                     }
-                }
+                    Err(e) => {
+                        serde_json::json!({"isError": true, "content": [{"type": "text", "text": e.to_string()}]})
+                    }
+                },
 
                 "clipboard.upsert_snippet" => {
                     let name = arguments.get("name").and_then(|v| v.as_str()).unwrap_or("");
-                    let content = arguments.get("content").and_then(|v| v.as_str()).unwrap_or("");
+                    let content = arguments
+                        .get("content")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
 
-                    match client.send_command(&IpcCommand::UpsertSnippet { name: name.to_string(), content: content.to_string() }) {
-                        Ok(resp) => serde_json::json!({"content": [{"type": "text", "text": serde_json::to_string(&resp.data).unwrap_or_default()}]}),
-                        Err(e) => serde_json::json!({"isError": true, "content": [{"type": "text", "text": e.to_string()}]})
+                    match client.send_command(&IpcCommand::UpsertSnippet {
+                        name: name.to_string(),
+                        content: content.to_string(),
+                    }) {
+                        Ok(resp) => {
+                            serde_json::json!({"content": [{"type": "text", "text": serde_json::to_string(&resp.data).unwrap_or_default()}]})
+                        }
+                        Err(e) => {
+                            serde_json::json!({"isError": true, "content": [{"type": "text", "text": e.to_string()}]})
+                        }
                     }
                 }
 
                 "clipboard.delete_snippet" => {
                     let id = arguments.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
-                    let confirm = arguments.get("confirm").and_then(|v| v.as_bool()).unwrap_or(false);
+                    let confirm = arguments
+                        .get("confirm")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
 
                     if !confirm {
                         return serde_json::json!({"isError": true, "content": [{"type": "text", "text": "confirm must be true"}]});
                     }
 
                     match client.send_command(&IpcCommand::DeleteSnippet { id }) {
-                        Ok(resp) => serde_json::json!({"content": [{"type": "text", "text": serde_json::to_string(&resp.data).unwrap_or_default()}]}),
-                        Err(e) => serde_json::json!({"isError": true, "content": [{"type": "text", "text": e.to_string()}]})
+                        Ok(resp) => {
+                            serde_json::json!({"content": [{"type": "text", "text": serde_json::to_string(&resp.data).unwrap_or_default()}]})
+                        }
+                        Err(e) => {
+                            serde_json::json!({"isError": true, "content": [{"type": "text", "text": e.to_string()}]})
+                        }
                     }
                 }
 
-                _ => serde_json::json!({"isError": true, "content": [{"type": "text", "text": format!("Unknown tool: {}", tool_name)}]})
+                _ => {
+                    serde_json::json!({"isError": true, "content": [{"type": "text", "text": format!("Unknown tool: {}", tool_name)}]})
+                }
             }
         }
 
@@ -344,14 +407,26 @@ async fn handle_method(
         }
 
         "resources/read" => {
-            let uri = params.as_ref().and_then(|p| p.get("uri")).and_then(|v| v.as_str()).unwrap_or("");
+            let uri = params
+                .as_ref()
+                .and_then(|p| p.get("uri"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             let uri_path = uri.strip_prefix("clipboard://").unwrap_or(uri);
 
             match uri_path {
                 "recent" => {
-                    match client.send_command(&IpcCommand::History { limit: 50, offset: Some(0), filters: None }) {
-                        Ok(resp) => serde_json::json!({"contents": [{"uri": uri, "mimeType": "application/json", "text": serde_json::to_string(&resp.data).unwrap_or_default()}]}),
-                        Err(e) => serde_json::json!({"contents": [{"uri": uri, "mimeType": "application/json", "text": e.to_string()}]})
+                    match client.send_command(&IpcCommand::History {
+                        limit: 50,
+                        offset: Some(0),
+                        filters: None,
+                    }) {
+                        Ok(resp) => {
+                            serde_json::json!({"contents": [{"uri": uri, "mimeType": "application/json", "text": serde_json::to_string(&resp.data).unwrap_or_default()}]})
+                        }
+                        Err(e) => {
+                            serde_json::json!({"contents": [{"uri": uri, "mimeType": "application/json", "text": e.to_string()}]})
+                        }
                     }
                 }
                 "pins" => {
@@ -363,34 +438,52 @@ async fn handle_method(
                         age_min_seconds: None,
                         age_max_seconds: None,
                     };
-                    match client.send_command(&IpcCommand::Search { query: String::new(), limit: Some(100), filters: Some(filters) }) {
-                        Ok(resp) => serde_json::json!({"contents": [{"uri": uri, "mimeType": "application/json", "text": serde_json::to_string(&resp.data).unwrap_or_default()}]}),
-                        Err(e) => serde_json::json!({"contents": [{"uri": uri, "mimeType": "application/json", "text": e.to_string()}]})
+                    match client.send_command(&IpcCommand::Search {
+                        query: String::new(),
+                        limit: Some(100),
+                        filters: Some(filters),
+                    }) {
+                        Ok(resp) => {
+                            serde_json::json!({"contents": [{"uri": uri, "mimeType": "application/json", "text": serde_json::to_string(&resp.data).unwrap_or_default()}]})
+                        }
+                        Err(e) => {
+                            serde_json::json!({"contents": [{"uri": uri, "mimeType": "application/json", "text": e.to_string()}]})
+                        }
                     }
                 }
-                "snippets" => {
-                    match client.send_command(&IpcCommand::ListSnippets) {
-                        Ok(resp) => serde_json::json!({"contents": [{"uri": uri, "mimeType": "application/json", "text": serde_json::to_string(&resp.data).unwrap_or_default()}]}),
-                        Err(e) => serde_json::json!({"contents": [{"uri": uri, "mimeType": "application/json", "text": e.to_string()}]})
+                "snippets" => match client.send_command(&IpcCommand::ListSnippets) {
+                    Ok(resp) => {
+                        serde_json::json!({"contents": [{"uri": uri, "mimeType": "application/json", "text": serde_json::to_string(&resp.data).unwrap_or_default()}]})
                     }
-                }
-                "stats" => {
-                    match client.send_command(&IpcCommand::GetStats) {
-                        Ok(resp) => serde_json::json!({"contents": [{"uri": uri, "mimeType": "application/json", "text": serde_json::to_string(&resp.data).unwrap_or_default()}]}),
-                        Err(e) => serde_json::json!({"contents": [{"uri": uri, "mimeType": "application/json", "text": e.to_string()}]})
+                    Err(e) => {
+                        serde_json::json!({"contents": [{"uri": uri, "mimeType": "application/json", "text": e.to_string()}]})
                     }
-                }
+                },
+                "stats" => match client.send_command(&IpcCommand::GetStats) {
+                    Ok(resp) => {
+                        serde_json::json!({"contents": [{"uri": uri, "mimeType": "application/json", "text": serde_json::to_string(&resp.data).unwrap_or_default()}]})
+                    }
+                    Err(e) => {
+                        serde_json::json!({"contents": [{"uri": uri, "mimeType": "application/json", "text": e.to_string()}]})
+                    }
+                },
                 _ if uri_path.starts_with("item/") => {
                     if let Ok(id) = uri_path.strip_prefix("item/").unwrap_or("").parse::<i64>() {
                         match client.send_command(&IpcCommand::GetItem { id }) {
-                            Ok(resp) => serde_json::json!({"contents": [{"uri": uri, "mimeType": "application/json", "text": serde_json::to_string(&resp.data).unwrap_or_default()}]}),
-                            Err(e) => serde_json::json!({"contents": [{"uri": uri, "mimeType": "application/json", "text": e.to_string()}]})
+                            Ok(resp) => {
+                                serde_json::json!({"contents": [{"uri": uri, "mimeType": "application/json", "text": serde_json::to_string(&resp.data).unwrap_or_default()}]})
+                            }
+                            Err(e) => {
+                                serde_json::json!({"contents": [{"uri": uri, "mimeType": "application/json", "text": e.to_string()}]})
+                            }
                         }
                     } else {
                         serde_json::json!({"contents": [{"uri": uri, "mimeType": "application/json", "text": "Invalid item ID"}]})
                     }
                 }
-                _ => serde_json::json!({"contents": [{"uri": uri, "mimeType": "application/json", "text": "Unknown resource"}]})
+                _ => {
+                    serde_json::json!({"contents": [{"uri": uri, "mimeType": "application/json", "text": "Unknown resource"}]})
+                }
             }
         }
 
@@ -404,15 +497,35 @@ async fn handle_method(
         }
 
         "prompts/get" => {
-            let name = params.as_ref().and_then(|p| p.get("name")).and_then(|v| v.as_str()).unwrap_or("");
-            let arguments = params.as_ref().and_then(|p| p.get("arguments")).cloned().unwrap_or_default();
+            let name = params
+                .as_ref()
+                .and_then(|p| p.get("name"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let arguments = params
+                .as_ref()
+                .and_then(|p| p.get("arguments"))
+                .cloned()
+                .unwrap_or_default();
 
             match name {
                 "clipboard:summarize_recent" => {
-                    let limit = arguments.get("limit").and_then(|v| v.as_u64()).map(|v| v as usize).unwrap_or(10);
-                    match client.send_command(&IpcCommand::History { limit, offset: Some(0), filters: None }) {
+                    let limit = arguments
+                        .get("limit")
+                        .and_then(|v| v.as_u64())
+                        .map(|v| v as usize)
+                        .unwrap_or(10);
+                    match client.send_command(&IpcCommand::History {
+                        limit,
+                        offset: Some(0),
+                        filters: None,
+                    }) {
                         Ok(resp) => {
-                            let items = resp.data.as_ref().map(|d| serde_json::to_string(d).unwrap_or_default()).unwrap_or_default();
+                            let items = resp
+                                .data
+                                .as_ref()
+                                .map(|d| serde_json::to_string(d).unwrap_or_default())
+                                .unwrap_or_default();
                             serde_json::json!({
                                 "description": "Summarize recent clipboard items",
                                 "messages": [{
@@ -424,11 +537,14 @@ async fn handle_method(
                                 }]
                             })
                         }
-                        Err(e) => serde_json::json!({"error": e.to_string()})
+                        Err(e) => serde_json::json!({"error": e.to_string()}),
                     }
                 }
                 "clipboard:find_pattern" => {
-                    let pattern = arguments.get("pattern").and_then(|v| v.as_str()).unwrap_or("");
+                    let pattern = arguments
+                        .get("pattern")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
                     let filters = FilterOptions {
                         content_type: None,
                         pinned: None,
@@ -437,9 +553,17 @@ async fn handle_method(
                         age_min_seconds: None,
                         age_max_seconds: None,
                     };
-                    match client.send_command(&IpcCommand::Search { query: pattern.to_string(), limit: Some(50), filters: Some(filters) }) {
+                    match client.send_command(&IpcCommand::Search {
+                        query: pattern.to_string(),
+                        limit: Some(50),
+                        filters: Some(filters),
+                    }) {
                         Ok(resp) => {
-                            let items = resp.data.as_ref().map(|d| serde_json::to_string(d).unwrap_or_default()).unwrap_or_default();
+                            let items = resp
+                                .data
+                                .as_ref()
+                                .map(|d| serde_json::to_string(d).unwrap_or_default())
+                                .unwrap_or_default();
                             serde_json::json!({
                                 "description": format!("Find items matching: {}", pattern),
                                 "messages": [{
@@ -451,13 +575,13 @@ async fn handle_method(
                                 }]
                             })
                         }
-                        Err(e) => serde_json::json!({"error": e.to_string()})
+                        Err(e) => serde_json::json!({"error": e.to_string()}),
                     }
                 }
-                _ => serde_json::json!({"error": format!("Unknown prompt: {}", name)})
+                _ => serde_json::json!({"error": format!("Unknown prompt: {}", name)}),
             }
         }
 
-        _ => serde_json::json!({"error": format!("Unknown method: {}", method)})
+        _ => serde_json::json!({"error": format!("Unknown method: {}", method)}),
     }
 }
