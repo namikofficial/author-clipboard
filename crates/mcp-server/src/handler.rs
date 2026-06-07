@@ -4,7 +4,7 @@ use std::{
     task::{Context, Poll},
 };
 
-use author_clipboard_shared::ipc::{IpcClient, IpcCommand, SearchFilters};
+use author_clipboard_shared::ipc::{IpcClient, IpcCommand, FilterOptions, CopyMode};
 use mcp_spec::protocol::{JsonRpcRequest, JsonRpcResponse};
 use mcp_server::BoxError;
 use serde_json::Value;
