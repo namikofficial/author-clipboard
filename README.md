@@ -1,212 +1,354 @@
 # author-clipboard
 
-> A fast, native clipboard manager for the COSMIC desktop — built entirely in Rust.
+> Native COSMIC clipboard manager with wlroots compositor support, including Hyprland and Sway.
 
 [![CI](https://github.com/namikofficial/author-clipboard/actions/workflows/ci.yml/badge.svg)](https://github.com/namikofficial/author-clipboard/actions)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/namikofficial/author-clipboard)](https://github.com/namikofficial/author-clipboard/releases)
 [![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org/)
 
-**author-clipboard** is a privacy-focused clipboard manager for [COSMIC DE](https://system76.com/cosmic). It stores clipboard history in a local SQLite database with FTS5 full-text search, detects and encrypts sensitive content, and provides a native COSMIC popup UI with emoji/symbol/kaomoji pickers — all over Wayland.
+**author-clipboard** is a privacy-focused clipboard manager for COSMIC and wlroots Wayland compositors. It stores clipboard history in a local SQLite database with FTS5 search, detects sensitive content, supports optional encryption for sensitive items, and provides a libcosmic popup UI with emoji, symbol, and kaomoji pickers.
 
----
+The default GUI is COSMIC-native through `libcosmic`. Hyprland and wlroots users have two picker options:
 
-## Why author-clipboard?
-
-| | author-clipboard | Electron-based managers | GTK clipboard tools |
-|---|---|---|---|
-| **Desktop integration** | Native COSMIC (libcosmic) | Chromium runtime | GTK theming only |
-| **Language** | Rust — memory-safe, no GC | JavaScript | C / Vala |
-| **Search** | SQLite FTS5 — instant across thousands | In-memory filter | Simple substring |
-| **Security** | Sensitive detection, AES-256-GCM, IPC hardening | Varies | Minimal |
-| **Privacy** | Screen lock detection, per-item TTL, no cloud | Varies | Varies |
-| **Footprint** | ~5 MB binary, minimal RAM | 100+ MB | 10–30 MB |
+- **External menu picker** (`author-clipboard-ctl picker`) — opens an external dmenu-style menu through `wofi`, `fuzzel`, or `rofi`
+- **First-party native picker** (`author-clipboard-hypr-picker`) — a standalone keyboard-first GTK4 layer-shell popup designed for Hyprland
 
 ---
 
 ## Features
 
 ### Clipboard & Storage
-- **Persistent history** with SQLite (WAL mode for crash safety)
-- **FTS5 full-text search** — instant results across your entire history
-- **Pin / unpin items** — keep important content from expiring
-- **Per-item TTL** — auto-expire unpinned items (default: 7 days)
-- **Dedup controls** — configurable window to skip duplicate copies
-- **Export / import** — JSON backup and restore
+- Persistent history with SQLite and WAL mode
+- FTS5 full-text search with LIKE fallback
+- Pin and unpin items
+- Per-item TTL and automatic cleanup
+- Configurable duplicate suppression window
+- JSON export and import
+
+### Supported Content Types
+
+| Content type | Capture | Display | Restore / copy behavior |
+|--------------|---------|---------|--------------------------|
+| Text | Yes | Yes | Restored as plain text with `wl-copy` |
+| HTML / rich text | Yes | Plain-text search/display fallback | Restored as `text/html` with `wl-copy --type text/html` |
+| Images | Yes for supported image MIME types | Thumbnail/file metadata | Restored with `wl-copy --type <mime>` |
+| File URI lists | Yes for `text/uri-list` | File names/metadata | Restored as `text/uri-list` |
 
 ### Security & Privacy
-- **Sensitive content detection** — passwords, API keys, tokens, SSH keys, URI credentials
-- **AES-256-GCM encryption** at rest for sensitive items (opt-in)
-- **Screen lock detection** — optionally clear sensitive items on lock
-- **Incognito mode** — temporarily pause recording
-- **IPC hardening** — Unix socket in XDG runtime dir (never `/tmp`)
+- Sensitive content detection for passwords, API keys, tokens, SSH keys, URI credentials, and high-entropy secrets
+- AES-256-GCM encryption at rest for sensitive items when `encrypt_sensitive` is enabled
+- Incognito mode to pause recording
+- Optional sensitive-item clearing on screen lock
+- Local-only denylist matching for MIME types and simple content patterns
+- IPC over a Unix socket in `$XDG_RUNTIME_DIR` or a private cache directory
 
-### UI & Navigation
-- **COSMIC native popup** with light/dark theme support
-- **COSMIC native icons** — symbolic icons for all actions and content types
-- **Emoji picker, symbol picker, kaomoji picker**
-- **Full keyboard navigation** — Home/End, PgUp/PgDn, Ctrl+1-9 quick select, Delete to remove
-- **Quick paste** via `wtype` / `ydotool` backends
-- **Daemon status indicator** — real-time capture status in the UI
-
-### System Integration
-- **CLI tool** (`author-clipboard-ctl`) for scripting and automation
-- **IPC via Unix socket** — toggle, list, clear, export from scripts
-- **Systemd user service** — start on login, restart on failure
-- **JSON config file** at `~/.config/author-clipboard/config.json`
-- **Global shortcut** — configurable (default: Super+V)
+### UI & Integration
+- libcosmic popup UI with light/dark theme support
+- Emoji, symbol, kaomoji, snippet, and settings tabs
+- Keyboard navigation: arrows, Home/End, PgUp/PgDn, Ctrl+1-9, Delete, Enter, Escape
+- CLI tool: `author-clipboard-ctl`
+- Systemd user service
+- Quick paste with `wtype` or `ydotool`; `wl-copy` is a copy-only fallback
+- External menu picker mode through `wofi`, `rofi`, or `fuzzel`
+- First-party Hyprland/wlroots native picker (`author-clipboard-hypr-picker`)
 
 ### Planned
-- 🗓 Image / file clipboard support
-- 🗓 Packaging (.deb, Arch AUR, Nix flake, Flatpak)
+- Waybar/Wayle status module
+- AUR package and Nix flake
+- Flatpak/AppImage packaging, subject to clipboard sandbox limitations
+- X11 fallback monitoring
+- OCR for images and richer image handling
+- Self-hosted encrypted sync
+
+---
+
+## Installation
+
+### Download `.deb` Package
+
+`.deb` packaging support exists through `cargo-deb`. If release artifacts are published, download the latest package matching your architecture from [GitHub Releases](https://github.com/namikofficial/author-clipboard/releases/latest).
+
+```bash
+# Example only; choose the current file from releases/latest.
+sudo dpkg -i author-clipboard_*_amd64.deb
+
+systemctl --user daemon-reload
+systemctl --user enable --now author-clipboard-daemon
+```
+
+### Build from Source
+
+Requirements: Rust 1.75+, Wayland development libraries, SQLite, xkbcommon, and `pkg-config`.
+
+```bash
+git clone https://github.com/namikofficial/author-clipboard
+cd author-clipboard
+cargo build --release --workspace
+
+just install
+systemctl --user daemon-reload
+systemctl --user enable --now author-clipboard-daemon
+```
+
+Ubuntu/Debian dependencies:
+
+```bash
+sudo apt install libwayland-dev libxkbcommon-dev libssl-dev libsqlite3-dev pkg-config
+```
+
+Arch dependencies:
+
+```bash
+sudo pacman -S wayland wl-clipboard sqlite xkbcommon
+```
+
+Optional quick-paste tools:
+
+```bash
+sudo pacman -S wtype
+# ydotool is optional and may require daemon/permission setup.
+```
 
 ---
 
 ## Quick Start
 
-### Prerequisites
-
-- Linux with a Wayland compositor supporting `wlr-data-control` ([details](#wayland-requirements))
-- Rust toolchain (1.75+)
-- For COSMIC desktop: `COSMIC_DATA_CONTROL_ENABLED=1` ([how to enable](#enabling-on-cosmic-desktop))
-
-### Build & Install
-
 ```bash
-git clone https://github.com/namikofficial/author-clipboard
-cd author-clipboard
-just setup         # Install dev tools
-just build         # Build all components
-just install       # Install binaries, .desktop file, icon, systemd service
-just enable        # Enable and start the daemon service
-```
-
-### CLI Tool
-
-```bash
-author-clipboard-ctl toggle          # Open or close applet
-author-clipboard-ctl show            # Open applet
-author-clipboard-ctl hide            # Close applet
-author-clipboard-ctl ping            # Check daemon status
+author-clipboard-ctl toggle          # Open or close picker
+author-clipboard-ctl show            # Open picker
+author-clipboard-ctl hide            # Close picker
+author-clipboard-ctl ping            # Check daemon IPC
 author-clipboard-ctl history         # List recent items
 author-clipboard-ctl status          # Show database stats
 author-clipboard-ctl clear           # Clear unpinned items
 author-clipboard-ctl export out.json # Export history
 author-clipboard-ctl config          # Show current config
+author-clipboard-ctl doctor          # Probe display/protocol support
+author-clipboard-ctl copy 42         # Restore item id 42
+author-clipboard-ctl picker          # Open external menu picker (wofi/fuzzel/rofi)
+author-clipboard-ctl hyprland-config # Print recommended Hyprland keybinds
+author-clipboard-hypr-picker        # Open first-party native picker
 ```
 
-### Keyboard Shortcut (Super+V)
+### COSMIC Shortcut
 
-Add a custom shortcut in **COSMIC Settings → Keyboard → Custom Shortcuts**:
+Add a custom shortcut in **COSMIC Settings -> Keyboard -> Custom Shortcuts**:
 
-1. Set command to `author-clipboard-ctl toggle`
-2. Bind to **Super+V**
+1. Command: `author-clipboard-ctl toggle`
+2. Binding: `Super+V`
 
-### Keyboard Navigation
+### Hyprland Setup
 
-| Key | Action |
-|-----|--------|
-| **↑ / ↓** | Navigate items |
-| **Enter** | Copy selected item and close |
-| **Escape** | Clear search (or close if empty) |
-| **Home / End** | Jump to first / last item |
-| **Page Up / Down** | Jump 10 items |
-| **Delete** or **Ctrl+D** | Delete selected item |
-| **Ctrl+1–9** | Quick copy by position |
-| **Ctrl+Tab / Ctrl+Shift+Tab** | Next / previous tab |
-| Type anything | Search is auto-focused |
+Install runtime packages:
+
+```bash
+sudo pacman -S wayland wl-clipboard sqlite xkbcommon
+sudo pacman -S wtype        # optional, preferred for quick paste
+sudo pacman -S ydotool      # optional, requires daemon/permissions
+sudo pacman -S wofi fuzzel  # pick one for external menu picker
+sudo pacman -S gtk4 gtk4-layer-shell  # for first-party native picker
+```
+
+Build and install:
+
+```bash
+git clone https://github.com/namikofficial/author-clipboard
+cd author-clipboard
+cargo build --release --workspace
+just install
+```
+
+Enable the daemon:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now author-clipboard-daemon
+systemctl --user status author-clipboard-daemon
+```
+
+Add Hyprland keybinds:
+
+```ini
+# External menu picker (wofi/fuzzel/rofi)
+bind = SUPER, V, exec, author-clipboard-ctl picker --menu auto
+
+# First-party native picker (standalone GTK4 popup)
+bind = SUPER SHIFT, V, exec, author-clipboard-hypr-picker
+
+# COSMIC applet toggle
+bind = SUPER ALT, V, exec, author-clipboard-ctl toggle
+```
+
+Print recommended config:
+
+```bash
+author-clipboard-ctl hyprland-config
+```
+
+For more details, see [docs/HYPRLAND.md](docs/HYPRLAND.md).
+
+Quick paste on Hyprland:
+
+- `wtype` is preferred for typing selected text into the active app.
+- `ydotool` can work but may require daemon and input permissions.
+- `wl-copy` only copies the selected item to the clipboard; it does not type or paste into the active app.
 
 ---
 
 ## Configuration
 
-Config file: `~/.config/author-clipboard/config.json`
+Config path: `~/.config/author-clipboard/config.json`
+
+Default data path: usually `~/.local/share/author-clipboard`
+
+Database path: `<data_dir>/clipboard.db`
+
+Image storage: `<data_dir>/images` and `<data_dir>/thumbnails`
+
+Incognito mode flag: `<data_dir>/.incognito`; when present, daemon capture is skipped.
 
 | Key | Default | Description |
 |-----|---------|-------------|
 | `max_items` | `100` | Maximum clipboard items to retain |
-| `max_item_size` | `1048576` | Max size per item in bytes (1 MB) |
-| `ttl_seconds` | `604800` | Auto-expire unpinned items (7 days). `0` = never |
-| `cleanup_interval_seconds` | `300` | How often cleanup runs (5 min) |
-| `keyboard_shortcut` | `"Super+V"` | Display reference for configured shortcut |
-| `encrypt_sensitive` | `false` | Encrypt sensitive items at rest (AES-256-GCM) |
-| `clear_on_lock` | `true` | Clear sensitive items on screen lock |
-| `dedup_window_seconds` | `2` | Skip duplicate copies within this window |
+| `max_item_size` | `1048576` | Maximum size per item in bytes |
+| `data_dir` | Platform data dir | Database, images, thumbnails, and runtime flags |
+| `ttl_seconds` | `604800` | Auto-expire unpinned items. `0` means never expire |
+| `cleanup_interval_seconds` | `300` | How often cleanup runs |
+| `keyboard_shortcut` | `"Super+V"` | Display/reference value; compositor binding is configured separately |
+| `encrypt_sensitive` | `false` | Encrypt sensitive items at rest |
+| `clear_on_lock` | `true` | Clear sensitive items when the screen locks |
+| `dedup_window_seconds` | `2` | Skip identical content copied within this window |
+| `mime_denylist` | `["application/x-kde-cutselection"]` | MIME prefixes or exact MIME types to skip |
+| `content_regex_denylist` | `[]` | Legacy name for simple local patterns, not full regex |
+| `picker` | See below | Picker UI configuration |
+
+Default example:
 
 ```json
 {
   "max_items": 100,
   "max_item_size": 1048576,
+  "data_dir": "/home/you/.local/share/author-clipboard",
   "ttl_seconds": 604800,
   "cleanup_interval_seconds": 300,
   "keyboard_shortcut": "Super+V",
   "encrypt_sensitive": false,
   "clear_on_lock": true,
-  "dedup_window_seconds": 2
+  "dedup_window_seconds": 2,
+  "mime_denylist": [
+    "application/x-kde-cutselection"
+  ],
+  "content_regex_denylist": [],
+  "picker": {
+    "default_mode": "external",
+    "default_source": "history",
+    "max_results": 50,
+    "show_sensitive_previews": false,
+    "confirm_sensitive_copy": true,
+    "close_after_copy": true,
+    "prefer_quick_paste": false,
+    "width": 720,
+    "height": 520
+  }
 }
 ```
 
+`content_regex_denylist` supports simple patterns only:
+
+- `^prefix` matches content that starts with `prefix`
+- `suffix$` matches content that ends with `suffix`
+- `token` matches content containing `token`
+
+Denylist matching is local-only and best-effort.
+
 ---
 
-## Enabling on COSMIC Desktop
+## Wayland Support Matrix
 
-COSMIC requires `COSMIC_DATA_CONTROL_ENABLED=1` to allow clipboard managers to access the Wayland data control protocol. Choose one method:
+| Environment | Clipboard capture | UI integration | Status |
+|-------------|-------------------|----------------|--------|
+| COSMIC Wayland | Yes, with `COSMIC_DATA_CONTROL_ENABLED=1` | Native libcosmic | Primary target |
+| Hyprland | Yes, via wlroots/wlr-data-control | External menu picker (`author-clipboard-ctl picker`) or first-party native picker (`author-clipboard-hypr-picker`) | Supported |
+| Sway | Yes, via wlroots/wlr-data-control | libcosmic app UI | Supported |
+| Other wlroots compositors | Maybe | libcosmic app UI | Best effort |
+| GNOME/Mutter | No unless protocol is available | No native support | Unsupported |
+| KDE/KWin | No unless protocol is available | No native support | Unsupported |
+| X11 | No fallback implemented | No native support | Unsupported/planned |
 
-**Session (temporary):**
+Use `author-clipboard-ctl doctor` to verify actual live Wayland registry support. If GNOME or KDE ever exposes `zwlr_data_control_manager_v1` and `wl_seat`, the daemon can attempt capture through the same registry-verified path instead of relying on desktop-name assumptions.
+
+### Enabling on COSMIC Desktop
+
+COSMIC requires `COSMIC_DATA_CONTROL_ENABLED=1` to expose the data-control protocol to clipboard managers.
+
+Temporary session:
+
 ```bash
 export COSMIC_DATA_CONTROL_ENABLED=1
 ```
 
-**Persist across logins:**
+Persist across logins:
+
 ```bash
-# Add to ~/.config/cosmic-comp/env (create if needed)
+# Add to ~/.config/cosmic-comp/env, creating the file if needed.
 COSMIC_DATA_CONTROL_ENABLED=1
 ```
 
-**System-wide (NixOS example):**
+System-wide NixOS example:
+
 ```nix
 environment.sessionVariables.COSMIC_DATA_CONTROL_ENABLED = "1";
 ```
 
-> **Security note:** This allows any Wayland application to read clipboard contents. Only enable if you trust all running applications.
-
 Log out and back in after setting the variable.
 
----
-
-## Wayland Requirements
-
-Requires `wlr-data-control-unstable-v1` protocol support.
-
-| Compositor | Status |
-|-----------|--------|
-| **COSMIC** | ✅ Supported (with `COSMIC_DATA_CONTROL_ENABLED=1`) |
-| **Sway** | ✅ Supported |
-| **Hyprland** | ✅ Supported |
-| **wlroots-based** | ✅ Supported |
-| GNOME / Mutter | ❌ Not supported |
-| KDE / KWin | ❌ Not supported |
-
-**Wayland only** — X11/XWayland clipboard events are not captured. The UI uses libcosmic and looks native only on COSMIC.
+Security note: data-control lets clipboard manager apps read clipboard contents. Only run clipboard managers you trust.
 
 ---
 
-## Architecture
+## Troubleshooting
 
-```
-author-clipboard/
-├── crates/clipboard-daemon/   # Wayland clipboard monitor (wlr-data-control)
-├── crates/applet/             # COSMIC UI applet (popup history, search, emoji)
-├── crates/ctl/                # CLI control tool (toggle, list, clear)
-└── crates/shared/             # Database, config, encryption, IPC, types
+### Daemon Not Running
+
+```bash
+systemctl --user status author-clipboard-daemon
+journalctl --user -u author-clipboard-daemon -f
 ```
 
-| Component | Binary | Purpose |
-|-----------|--------|---------|
-| **clipboard-daemon** | `author-clipboard-daemon` | Monitors Wayland clipboard, stores history in SQLite |
-| **applet** | `author-clipboard` | COSMIC UI with history, search, pins, pickers, export/import |
-| **ctl** | `author-clipboard-ctl` | CLI tool for scripting and daemon control via IPC |
-| **shared** | *(library)* | Database, types, config, encryption, IPC, sensitive detection |
+### Clipboard Not Captured
+
+```bash
+echo $WAYLAND_DISPLAY
+author-clipboard-ctl status
+```
+
+COSMIC:
+
+```bash
+echo $COSMIC_DATA_CONTROL_ENABLED
+```
+
+Hyprland:
+
+```bash
+hyprctl version
+hyprctl clients
+author-clipboard-ctl doctor
+```
+
+### Shortcut Does Nothing
+
+- Check the compositor keybind.
+- Run `author-clipboard-ctl toggle` manually.
+- Check daemon IPC with `author-clipboard-ctl ping`.
+- Check logs with `journalctl --user -u author-clipboard-daemon -f`.
+
+### App Opens But Does Not Paste
+
+- Normal selection copies the item to the clipboard; use your app's paste shortcut after that.
+- Quick paste types text only when `wtype` or a working `ydotool` setup is available.
+- If the backend is `wl-copy`, author-clipboard only updates the clipboard.
 
 ---
 
@@ -214,57 +356,73 @@ author-clipboard/
 
 ```bash
 just                # Show available commands
-just verify        # Full check: format → lint → test → build
+just verify        # Format, lint, test, build
 just build         # Build all crates
-just check         # Quick type check (no full build)
-just test          # Run all tests
+just check         # Quick type check
+just test          # Run tests
 just fmt           # Format code
 just lint          # Clippy with -D warnings
-just dev           # Watch mode (auto-rebuild on changes)
 just daemon        # Run clipboard daemon
 just applet        # Run GUI applet
 ```
 
-See [PROJECT_PLAN.md](PROJECT_PLAN.md) for the development roadmap.
-
----
-
-## Contributing
-
-Contributions are welcome! Please read **[docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)** before submitting a PR.
-
-For security issues, see **[SECURITY.md](SECURITY.md)**.
-
-```bash
-just install-deps  # Install system dependencies
-just setup         # Install Rust tools
-just doctor        # Verify environment
-just verify        # Run before committing
-```
+See [PROJECT_PLAN.md](PROJECT_PLAN.md) for the roadmap.
 
 ---
 
 ## Documentation
 
-- **[PROJECT_PLAN.md](PROJECT_PLAN.md)** — Development phases and feature specifications
-- **[docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)** — How to contribute
-- **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)** — Development tooling and workflow
-- **[docs/LOCAL_TESTING.md](docs/LOCAL_TESTING.md)** — Step-by-step local testing guide
-- **[SECURITY.md](SECURITY.md)** — Security policy and reporting
+- [FEATURES.md](FEATURES.md) - Feature overview
+- [PROJECT_PLAN.md](PROJECT_PLAN.md) - Development roadmap
+- [docs/HYPRLAND.md](docs/HYPRLAND.md) - Hyprland integration guide
+- [docs/PACKAGING.md](docs/PACKAGING.md) - Packaging notes
+- [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) - Contribution guide
+- [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) - Development tooling
+- [docs/LOCAL_TESTING.md](docs/LOCAL_TESTING.md) - Local testing guide
+- [SECURITY.md](SECURITY.md) - Security policy and threat model
 
----
+## Development
 
-## Related Projects
+This project uses **Spec-Driven Development** (GitHub Spec Kit style). All non-trivial changes follow:
 
-- [cosmic-utils/clipboard-manager](https://github.com/cosmic-utils/clipboard-manager) — Community COSMIC clipboard manager
-- [pop-os/cosmic-applets](https://github.com/pop-os/cosmic-applets) — Official COSMIC applet examples
+```
+idea → 00-brief.md → 01-requirements.md → 05-technical-design.md → 06-task-plan.md → implementation → 08-review-checklist.md
+```
+
+See [AGENTS.md](AGENTS.md) for the full spec-driven workflow and agent roles.
+
+### Specs Structure
+
+```
+/specs
+  /000-product
+    constitution.md    # Non-negotiable project rules
+    architecture.md   # System design
+    glossary.md       # Terminology
+  /features
+    /001-feature-name/
+      00-brief.md     # Feature overview
+      01-requirements.md
+      02-domain-model.md
+      03-api-contract.md
+      04-ui-flow.md
+      05-technical-design.md
+      06-task-plan.md
+      07-test-plan.md
+      08-review-checklist.md
+      09-decisions.md
+```
+
+### Quick Reference
+
+```bash
+just verify        # fmt → lint → test → build
+just build         # build all crates
+just test          # run all tests
+just fmt           # format code
+just lint          # clippy with -D warnings
+```
 
 ## License
 
 [GPL-3.0](LICENSE)
-
----
-
-<div align="center">
-<strong>Built for the COSMIC desktop ecosystem</strong>
-</div>

@@ -64,7 +64,7 @@ When `encrypt_sensitive: true` is set in config:
 
 ### COSMIC_DATA_CONTROL_ENABLED
 
-This application requires `COSMIC_DATA_CONTROL_ENABLED=1` on COSMIC desktop. This environment variable enables the `zwlr_data_control_manager_v1` Wayland protocol, which allows clipboard manager applications to monitor and set clipboard content.
+This application requires `COSMIC_DATA_CONTROL_ENABLED=1` on COSMIC desktop. This environment variable enables the `zwlr_data_control_manager_v1` Wayland protocol, which allows clipboard manager applications to monitor and set clipboard content. Hyprland, Sway, and other wlroots compositors do not need this COSMIC-specific variable, but they must expose `wlr-data-control`.
 
 **Security implication**: Enabling this grants any application with Wayland access the ability to read clipboard content. This is the same access model used by clipboard managers on X11 and other platforms.
 

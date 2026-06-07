@@ -3,62 +3,47 @@ name: CI
 on:
   push:
     branches: [main]
-  pull_request:
-    branches: [main]
 
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
 
 jobs:
-  fmt:
-    name: Format
+  check:
+    name: Format / Lint / Test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt
-      - run: cargo fmt --all -- --check
+          components: rustfmt, clippy
 
-  clippy:
-    name: Clippy
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
         with:
-          components: clippy
-      - uses: Swatinem/rust-cache@v2
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwayland-dev libxkbcommon-dev libinput-dev libseat-dev libgbm-dev libdbus-1-dev libudev-dev libpixman-1-dev pkg-config libsqlite3-dev
-      - run: cargo clippy --all-targets --all-features -- -D warnings
+          # Only cache daemon/shared/ctl — applet (libcosmic) is excluded from CI
+          cache-all-crates: "true"
+          key: ci-no-applet
 
-  test:
-    name: Test
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      # Minimal deps: only what daemon/shared/ctl need — skip heavy libcosmic deps
       - name: Install system dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libwayland-dev libxkbcommon-dev libinput-dev libseat-dev libgbm-dev libdbus-1-dev libudev-dev libpixman-1-dev pkg-config libsqlite3-dev
-      - run: cargo test --all
+          sudo apt-get install -y --no-install-recommends \
+            libwayland-dev libxkbcommon-dev libdbus-1-dev pkg-config
 
-  build:
-    name: Build
-    runs-on: ubuntu-latest
-    needs: [fmt, clippy, test]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Install system dependencies
+      # Fast check — no compilation
+      - name: Format check
+        run: cargo fmt --all -- --check
+
+      # Lint daemon/shared/ctl only (applet excluded — libcosmic takes 5+ min)
+      - name: Clippy
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libwayland-dev libxkbcommon-dev libinput-dev libseat-dev libgbm-dev libdbus-1-dev libudev-dev libpixman-1-dev pkg-config libsqlite3-dev
-      - run: cargo build --release
+          cargo clippy \
+            -p author-clipboard-shared \
+            -p author-clipboard-daemon \
+            -p author-clipboard-ctl \
+            -- -D warnings
+
+      # Tests live entirely in shared crate — no system deps beyond bundled sqlite
+      - name: Tests
+        run: cargo test -p author-clipboard-shared

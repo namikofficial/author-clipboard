@@ -1,6 +1,6 @@
 //! Database operations using `SQLite`
 
-use crate::types::{ClipboardItem, ContentType, DbStats};
+use crate::types::{ClipboardItem, ContentType, DbStats, Snippet};
 use rusqlite::{Connection, Result as SqlResult};
 use std::path::Path;
 
@@ -76,7 +76,14 @@ impl Database {
             );
             CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp DESC);
 
-            CREATE VIRTUAL TABLE IF NOT EXISTS clipboard_fts USING fts5(content, plain_text, content='clipboard_items', content_rowid='id');",
+            CREATE VIRTUAL TABLE IF NOT EXISTS clipboard_fts USING fts5(content, plain_text, content='clipboard_items', content_rowid='id');
+
+            CREATE TABLE IF NOT EXISTS snippets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                content TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );",
         )?;
         Ok(())
     }
@@ -160,6 +167,19 @@ impl Database {
                 )?;
             }
             self.set_schema_version(5)?;
+        }
+
+        if version < 6 {
+            // v6: Snippets table
+            self.conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS snippets (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL UNIQUE,
+                    content TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );",
+            )?;
+            self.set_schema_version(6)?;
         }
 
         Ok(())
@@ -573,6 +593,63 @@ impl Database {
         let items = stmt.query_map(params, Self::row_to_item)?;
         items.collect()
     }
+
+    // ── Snippets ──────────────────────────────────────────────────────
+
+    /// Insert or update a snippet by name.
+    pub fn upsert_snippet(&self, name: &str, content: &str) -> SqlResult<()> {
+        let now = chrono::Utc::now().to_rfc3339();
+        self.conn.execute(
+            "INSERT INTO snippets (name, content, updated_at) VALUES (?1, ?2, ?3)
+             ON CONFLICT(name) DO UPDATE SET content=excluded.content, updated_at=excluded.updated_at",
+            rusqlite::params![name, content, now],
+        )?;
+        Ok(())
+    }
+
+    /// List all snippets ordered by most recently updated.
+    pub fn list_snippets(&self) -> SqlResult<Vec<Snippet>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, name, content, updated_at FROM snippets ORDER BY updated_at DESC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(Snippet {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                content: row.get(2)?,
+                updated_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(3)?)
+                    .map_or_else(|_| chrono::Utc::now(), |dt| dt.with_timezone(&chrono::Utc)),
+            })
+        })?;
+        rows.collect()
+    }
+
+    /// Delete a snippet by id.
+    pub fn delete_snippet(&self, id: i64) -> SqlResult<()> {
+        self.conn
+            .execute("DELETE FROM snippets WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    /// Search snippets by name or content (case-insensitive substring).
+    pub fn search_snippets(&self, query: &str) -> SqlResult<Vec<Snippet>> {
+        let pattern = format!("%{query}%");
+        let mut stmt = self.conn.prepare(
+            "SELECT id, name, content, updated_at FROM snippets
+             WHERE name LIKE ?1 OR content LIKE ?1
+             ORDER BY updated_at DESC",
+        )?;
+        let rows = stmt.query_map([&pattern], |row| {
+            Ok(Snippet {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                content: row.get(2)?,
+                updated_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(3)?)
+                    .map_or_else(|_| chrono::Utc::now(), |dt| dt.with_timezone(&chrono::Utc)),
+            })
+        })?;
+        rows.collect()
+    }
 }
 
 #[cfg(test)]
@@ -804,9 +881,9 @@ mod tests {
     #[test]
     fn test_schema_version() {
         let db = make_db();
-        // After init, version should be 5 (latest)
+        // After init, version should be 6 (latest)
         let version = db.get_schema_version();
-        assert_eq!(version, 5);
+        assert_eq!(version, 6);
     }
 
     #[test]

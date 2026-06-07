@@ -3,6 +3,7 @@
 /// A symbol category with its items
 pub struct SymbolCategory {
     pub name: &'static str,
+    #[allow(dead_code)]
     pub icon: &'static str,
     pub symbols: &'static [(&'static str, &'static str)], // (symbol, description)
 }

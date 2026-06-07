@@ -1,0 +1,40 @@
+# Maintainer: Namik <namikofficial@users.noreply.github.com>
+pkgname=author-clipboard
+pkgver=0.5.0
+pkgrel=1
+pkgdesc='Native COSMIC clipboard manager with wlroots compositor support'
+arch=('x86_64')
+url='https://github.com/namikofficial/author-clipboard'
+license=('GPL-3.0-or-later')
+depends=('wayland' 'wl-clipboard' 'sqlite' 'xkbcommon')
+makedepends=('rust' 'cargo' 'pkgconf' 'wayland-protocols')
+optdepends=(
+  'wtype: preferred quick paste backend on Wayland'
+  'ydotool: optional input automation backend'
+)
+source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+  cd "$pkgname-$pkgver"
+  cargo build --release --workspace --locked
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+
+  install -Dm755 target/release/author-clipboard "$pkgdir/usr/bin/author-clipboard"
+  install -Dm755 target/release/author-clipboard-daemon "$pkgdir/usr/bin/author-clipboard-daemon"
+  install -Dm755 target/release/author-clipboard-ctl "$pkgdir/usr/bin/author-clipboard-ctl"
+
+  install -Dm644 data/author-clipboard-daemon.service \
+    "$pkgdir/usr/lib/systemd/user/author-clipboard-daemon.service"
+  install -Dm644 data/com.namikofficial.author-clipboard.desktop \
+    "$pkgdir/usr/share/applications/com.namikofficial.author-clipboard.desktop"
+  install -Dm644 data/com.namikofficial.author-clipboard.metainfo.xml \
+    "$pkgdir/usr/share/metainfo/com.namikofficial.author-clipboard.metainfo.xml"
+  install -Dm644 resources/icons/com.namikofficial.author-clipboard.svg \
+    "$pkgdir/usr/share/icons/hicolor/scalable/apps/com.namikofficial.author-clipboard.svg"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+}

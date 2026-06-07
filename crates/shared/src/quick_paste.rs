@@ -1,12 +1,12 @@
 //! Quick paste module for typing clipboard text into the active window.
 //!
-//! Wraps Wayland text input tools (`wtype`, `ydotool`, `wl-copy`) to
-//! simulate keyboard input from clipboard history.
+//! Wraps Wayland text input tools (`wtype`, `ydotool`) and a `wl-copy`
+//! fallback that only updates the clipboard.
 
 use std::fmt;
 use std::process::Command;
 
-/// Available backends for pasting text into applications.
+/// Available backends for typing text or copying it as a fallback.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[allow(dead_code)]
 pub enum PasteBackend {
@@ -28,7 +28,7 @@ impl fmt::Display for PasteBackend {
     }
 }
 
-/// Result of a paste operation.
+/// Result of a quick paste or copy-fallback operation.
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct PasteResult {
@@ -63,7 +63,7 @@ fn tool_exists(name: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Detect the best available paste backend.
+/// Detect the best available quick paste backend.
 ///
 /// Checks in order: `wtype` → `ydotool` → `wl-copy`.
 #[allow(dead_code)]
@@ -79,13 +79,13 @@ pub fn detect_backend() -> Option<PasteBackend> {
     }
 }
 
-/// Check whether any paste backend is available.
+/// Check whether any quick paste or copy fallback backend is available.
 #[allow(dead_code)]
 pub fn is_available() -> bool {
     detect_backend().is_some()
 }
 
-/// Determine whether a paste is permitted given content sensitivity.
+/// Determine whether a quick paste is permitted given content sensitivity.
 ///
 /// # Rules
 /// - Sensitive content that hasn't been confirmed → `RequiresConfirmation`
@@ -106,7 +106,7 @@ pub fn check_paste_permission(
     PastePermission::Allowed
 }
 
-/// Paste text using the specified backend.
+/// Paste text using the specified backend, or copy it when using `wl-copy`.
 ///
 /// # Errors
 ///

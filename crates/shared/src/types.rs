@@ -260,3 +260,12 @@ pub struct AuditEvent {
     pub details: Option<String>,
     pub timestamp: DateTime<Utc>,
 }
+
+/// A user-defined text snippet for quick reuse
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Snippet {
+    pub id: i64,
+    pub name: String,
+    pub content: String,
+    pub updated_at: DateTime<Utc>,
+}

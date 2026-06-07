@@ -1,116 +1,150 @@
 # Packaging Guide
 
-Instructions for packaging author-clipboard for various Linux distributions.
+Instructions for packaging author-clipboard for Linux distributions.
+
+Current workspace version: `0.5.0`.
+
+author-clipboard is a native COSMIC clipboard manager with wlroots compositor support, including Hyprland and Sway. The UI is built with `libcosmic`; Hyprland support is runtime/compositor support, not a Hyprland-native UI.
+
+## Debian/Ubuntu `.deb`
+
+`.deb` packaging support exists through [cargo-deb](https://github.com/kornelski/cargo-deb). Published release artifacts depend on the GitHub release workflow; users should download the latest package matching their architecture from [releases/latest](https://github.com/namikofficial/author-clipboard/releases/latest) when artifacts are available.
+
+### Prerequisites
+
+```bash
+cargo install cargo-deb
+```
+
+### Build
+
+```bash
+just deb
+
+# Or manually:
+cargo build --release --workspace
+cargo deb -p author-clipboard-applet --no-build
+```
+
+The package is written to `target/debian/author-clipboard_<version>-1_<arch>.deb`.
+
+### Test Locally
+
+```bash
+just deb-install
+```
+
+### Package Contents
+
+| File | Destination |
+|------|-------------|
+| `author-clipboard` | `/usr/bin/author-clipboard` |
+| `author-clipboard-daemon` | `/usr/bin/author-clipboard-daemon` |
+| `author-clipboard-ctl` | `/usr/bin/author-clipboard-ctl` |
+| Systemd service | `/usr/lib/systemd/user/author-clipboard-daemon.service` |
+| Desktop file | `/usr/share/applications/` |
+| AppStream metainfo | `/usr/share/metainfo/` |
+| Icon | `/usr/share/icons/hicolor/scalable/apps/` |
+
+## Arch Linux / Hyprland
+
+Runtime dependencies:
+
+- `wayland`
+- `wl-clipboard`
+- `sqlite`
+- `xkbcommon`
+
+Optional dependencies:
+
+- `wtype` for preferred Wayland quick paste
+- `ydotool` for advanced input automation, requiring daemon/permissions
+
+Make dependencies:
+
+- `rust`
+- `cargo`
+- `pkg-config`
+- `wayland-protocols`
+
+Arch/AUR templates live in:
+
+- [`packaging/arch/PKGBUILD`](../packaging/arch/PKGBUILD)
+- [`packaging/arch/.SRCINFO`](../packaging/arch/.SRCINFO)
+
+The GitHub release workflow uploads these files as release assets alongside the `.deb`. AUR publication is still a manual follow-up unless an AUR deploy key/secret is configured.
 
 ## Building from Source
 
 ### Prerequisites
 
-- Rust toolchain (stable, 1.75+)
-- System packages: `libwayland-dev`, `libxkbcommon-dev`, `pkg-config`, `libsqlite3-dev`
-- For COSMIC integration: `libcosmic` (pulled from git during build)
+- Rust toolchain, stable 1.75+
+- Wayland development headers
+- xkbcommon
+- SQLite
+- `pkg-config`
+
+Debian/Ubuntu:
+
+```bash
+sudo apt install libwayland-dev libxkbcommon-dev libssl-dev libsqlite3-dev pkg-config
+```
+
+Arch:
+
+```bash
+sudo pacman -S wayland wl-clipboard sqlite xkbcommon rust cargo pkgconf wayland-protocols
+```
 
 ### Build
 
 ```bash
-# Install system dependencies (Debian/Ubuntu/Pop!_OS)
-just install-deps
-
-# Build release binaries
-cargo build --release
-
-# Binaries are in target/release/:
-#   author-clipboard          (applet/GUI)
-#   author-clipboard-daemon   (background service)
-#   author-clipboard-ctl      (CLI control)
+cargo build --release --workspace
 ```
+
+Binaries:
+
+- `target/release/author-clipboard`
+- `target/release/author-clipboard-daemon`
+- `target/release/author-clipboard-ctl`
 
 ## Installing
-
-### Quick Install (cargo)
-
-```bash
-cargo install --path crates/applet
-cargo install --path crates/clipboard-daemon
-cargo install --path crates/ctl
-```
-
-Binaries are installed to `~/.cargo/bin/`.
 
 ### Full Install with systemd
 
 ```bash
-just install   # Build + install binaries + install systemd service
-just enable    # Start daemon on login
+just install
+systemctl --user daemon-reload
+systemctl --user enable --now author-clipboard-daemon
 ```
 
 ### Manual Install
 
 ```bash
-# Copy binaries
-sudo install -Dm755 target/release/author-clipboard /usr/local/bin/
-sudo install -Dm755 target/release/author-clipboard-daemon /usr/local/bin/
-sudo install -Dm755 target/release/author-clipboard-ctl /usr/local/bin/
+sudo install -Dm755 target/release/author-clipboard /usr/local/bin/author-clipboard
+sudo install -Dm755 target/release/author-clipboard-daemon /usr/local/bin/author-clipboard-daemon
+sudo install -Dm755 target/release/author-clipboard-ctl /usr/local/bin/author-clipboard-ctl
 
-# Install systemd service
-install -Dm644 data/author-clipboard-daemon.service ~/.config/systemd/user/
+install -Dm644 data/author-clipboard-daemon.service ~/.config/systemd/user/author-clipboard-daemon.service
 systemctl --user daemon-reload
 systemctl --user enable --now author-clipboard-daemon
 ```
 
-## Distribution Packaging
+## NixOS
 
-### Debian/Ubuntu (.deb)
+A Nix flake is planned. For now, build from source with Cargo. COSMIC users should set `COSMIC_DATA_CONTROL_ENABLED=1` in the session environment; Hyprland users do not need that COSMIC-specific variable.
 
-A `cargo-deb` configuration is planned. For now, build from source.
+## Flatpak
 
-### Arch Linux (PKGBUILD)
-
-```pkgbuild
-# Maintainer: Namik <namikofficial@users.noreply.github.com>
-pkgname=author-clipboard
-pkgver=0.3.1
-pkgrel=1
-pkgdesc='Native COSMIC desktop clipboard manager for Wayland'
-arch=('x86_64')
-url='https://github.com/namikofficial/author-clipboard'
-license=('GPL-3.0-or-later')
-depends=('wayland' 'sqlite' 'xkbcommon')
-makedepends=('rust' 'cargo' 'pkg-config' 'wayland-protocols')
-source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
-
-build() {
-    cd "$pkgname-$pkgver"
-    cargo build --release
-}
-
-package() {
-    cd "$pkgname-$pkgver"
-    install -Dm755 target/release/author-clipboard "$pkgdir/usr/bin/author-clipboard"
-    install -Dm755 target/release/author-clipboard-daemon "$pkgdir/usr/bin/author-clipboard-daemon"
-    install -Dm755 target/release/author-clipboard-ctl "$pkgdir/usr/bin/author-clipboard-ctl"
-    install -Dm644 data/author-clipboard-daemon.service "$pkgdir/usr/lib/systemd/user/author-clipboard-daemon.service"
-    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
-}
-```
-
-### NixOS
-
-A Nix flake is planned for future releases. For now, build from source using `cargo`.
-
-### Flatpak
-
-Flatpak packaging is under consideration. Clipboard managers require special portal permissions on Flatpak, which may limit functionality.
+Flatpak packaging remains planned. Clipboard managers may be limited by sandboxing and portal behavior, so any Flatpak package needs explicit Wayland clipboard testing and clear caveats.
 
 ## Uninstalling
 
 ```bash
-just uninstall-service  # Remove systemd service
-# Remove binaries
+just uninstall-service
 rm -f ~/.cargo/bin/author-clipboard
 rm -f ~/.cargo/bin/author-clipboard-daemon
 rm -f ~/.cargo/bin/author-clipboard-ctl
-# Remove data (optional)
 rm -rf ~/.local/share/author-clipboard
 rm -rf ~/.config/author-clipboard
 ```

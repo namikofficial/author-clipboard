@@ -2,6 +2,7 @@
 
 pub struct Category {
     pub name: &'static str,
+    #[allow(dead_code)]
     pub icon: &'static str,
     pub items: &'static [&'static str],
 }

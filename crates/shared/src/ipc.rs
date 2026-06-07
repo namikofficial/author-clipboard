@@ -83,6 +83,11 @@ pub fn socket_path() -> PathBuf {
     cache_dir.join("author-clipboard.sock")
 }
 
+/// Remove the default IPC socket file, ignoring errors if it does not exist.
+pub fn remove_ipc_socket() {
+    let _ = std::fs::remove_file(socket_path());
+}
+
 /// IPC server that listens for incoming connections on a Unix domain socket.
 ///
 /// The socket file is automatically removed when the server is dropped.

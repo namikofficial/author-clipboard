@@ -1,0 +1,14 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    remove|purge)
+        if command -v systemctl > /dev/null 2>&1; then
+            # Stop and disable the daemon service if running
+            systemctl --user stop author-clipboard-daemon 2>/dev/null || true
+            systemctl --user disable author-clipboard-daemon 2>/dev/null || true
+        fi
+        ;;
+esac
+
+exit 0

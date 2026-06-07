@@ -139,6 +139,13 @@ install: build-release
     @echo "📦 Installing author-clipboard..."
     install -Dm755 target/release/author-clipboard-daemon ~/.local/bin/author-clipboard-daemon
     install -Dm755 target/release/author-clipboard ~/.local/bin/author-clipboard
+    install -Dm755 target/release/author-clipboard-ctl ~/.local/bin/author-clipboard-ctl
+    install -Dm755 target/release/author-clipboard-hypr-picker ~/.local/bin/author-clipboard-hypr-picker
+    # Keep ~/.cargo/bin in sync if it exists and appears before ~/.local/bin in PATH.
+    if [ -d "$HOME/.cargo/bin" ]; then install -Dm755 target/release/author-clipboard-daemon ~/.cargo/bin/author-clipboard-daemon; fi
+    if [ -d "$HOME/.cargo/bin" ]; then install -Dm755 target/release/author-clipboard ~/.cargo/bin/author-clipboard; fi
+    if [ -d "$HOME/.cargo/bin" ]; then install -Dm755 target/release/author-clipboard-ctl ~/.cargo/bin/author-clipboard-ctl; fi
+    if [ -d "$HOME/.cargo/bin" ]; then install -Dm755 target/release/author-clipboard-hypr-picker ~/.cargo/bin/author-clipboard-hypr-picker; fi
     install -Dm644 data/com.namikofficial.author-clipboard.desktop ~/.local/share/applications/com.namikofficial.author-clipboard.desktop
     install -Dm644 resources/icons/com.namikofficial.author-clipboard.svg ~/.local/share/icons/hicolor/scalable/apps/com.namikofficial.author-clipboard.svg
     install -Dm644 data/author-clipboard-daemon.service ~/.config/systemd/user/author-clipboard-daemon.service
@@ -167,11 +174,44 @@ logs:
 uninstall: disable
     rm -f ~/.local/bin/author-clipboard-daemon
     rm -f ~/.local/bin/author-clipboard
+    rm -f ~/.local/bin/author-clipboard-ctl
+    rm -f ~/.local/bin/author-clipboard-hypr-picker
+    rm -f ~/.cargo/bin/author-clipboard-daemon
+    rm -f ~/.cargo/bin/author-clipboard
+    rm -f ~/.cargo/bin/author-clipboard-ctl
+    rm -f ~/.cargo/bin/author-clipboard-hypr-picker
     rm -f ~/.local/share/applications/com.namikofficial.author-clipboard.desktop
     rm -f ~/.local/share/icons/hicolor/scalable/apps/com.namikofficial.author-clipboard.svg
     rm -f ~/.config/systemd/user/author-clipboard-daemon.service
     systemctl --user daemon-reload
     @echo "🗑️  Uninstalled author-clipboard"
+
+# ── Debian Packaging ───────────────────────────────────────────────────
+
+# Build a .deb package (requires cargo-deb: cargo install cargo-deb)
+deb:
+	@echo "Building release binaries first..."
+	cargo build --release --workspace
+	@echo "Building .deb package..."
+	cargo deb -p author-clipboard-applet --no-build
+	@echo ""
+	@echo "Package built in target/debian/"
+	ls -la target/debian/*.deb 2>/dev/null || echo "No .deb found - check errors above"
+
+# Build .deb and install it locally (for testing)
+deb-install: deb
+	@echo "Installing .deb locally (requires sudo)..."
+	sudo dpkg -i target/debian/author-clipboard_*.deb
+
+# Show what files would be in the .deb (dry run)
+deb-check:
+	cargo deb -p author-clipboard-applet --no-build --no-strip -- --verbose 2>&1 | head -60 || \
+	cargo deb -p author-clipboard-applet --no-build 2>&1 | head -60
+
+# Remove locally installed .deb
+deb-remove:
+	@echo "Removing author-clipboard package..."
+	sudo dpkg -r author-clipboard
 
 # ── Setup ──────────────────────────────────────────────────────────────
 

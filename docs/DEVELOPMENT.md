@@ -2,6 +2,58 @@
 
 > Complete guide to the development tooling, workflow, and conventions for author-clipboard.
 
+## Spec-Driven Development
+
+This project uses **Spec-Driven Development** (GitHub Spec Kit style). Before writing code for any non-trivial feature:
+
+1. **Create feature spec** in `/specs/features/FFF-name/`
+2. **Write requirements** with acceptance criteria
+3. **Design technical approach** listing affected files
+4. **Break into atomic tasks** with verification commands
+5. **Implement one task at a time**
+6. **Verify against spec** before moving to next task
+
+See [AGENTS.md](../AGENTS.md) for the full spec-driven workflow, agent roles, and rule summary.
+
+### Spec Template
+
+Use the template in `/specs/features/.template/` when creating new feature specs:
+
+```
+00-brief.md           # What problem does this feature solve?
+01-requirements.md    # User stories, acceptance criteria
+02-domain-model.md    # Data structures, state
+03-api-contract.md    # IPC commands, CLI changes
+04-ui-flow.md         # User interaction flows
+05-technical-design.md # Implementation approach
+06-task-plan.md       # Atomic, verifiable tasks
+07-test-plan.md       # Test strategy
+08-review-checklist.md # Pre-merge checklist
+09-decisions.md       # Architectural decisions
+```
+
+### Adding a New Feature
+
+```bash
+# 1. Create feature directory
+mkdir -p specs/features/XXX-new-feature
+
+# 2. Copy template files
+cp specs/features/.template/* specs/features/XXX-new-feature/
+
+# 3. Fill in 00-brief.md with rough idea
+
+# 4. Ask LLM to create 01-requirements.md from brief
+
+# 5. Ask LLM to create 05-technical-design.md from requirements
+
+# 6. Ask LLM to create 06-task-plan.md from design
+
+# 7. Implement tasks one at a time
+```
+
+---
+
 ## Tooling Overview
 
 This project uses Rust-native tools that serve the same purpose as popular Node.js tools:

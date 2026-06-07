@@ -37,6 +37,71 @@ fn default_clear_on_lock() -> bool {
 fn default_dedup_window_seconds() -> u64 {
     2 // Skip duplicate content within 2 seconds
 }
+fn default_mime_denylist() -> Vec<String> {
+    vec!["application/x-kde-cutselection".to_string()]
+}
+fn default_content_regex_denylist() -> Vec<String> {
+    vec![]
+}
+
+/// Default picker UI mode.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PickerMode {
+    #[default]
+    External,
+    Native,
+}
+
+impl std::fmt::Display for PickerMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::External => write!(f, "external"),
+            Self::Native => write!(f, "native"),
+        }
+    }
+}
+
+/// Configuration for picker UIs (external menu and native picker).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct PickerConfig {
+    /// Default picker mode (`external` or `native`).
+    pub default_mode: PickerMode,
+    /// Default picker source (history, snippets, emoji, symbols, kaomoji, all).
+    pub default_source: String,
+    /// Maximum number of results to display.
+    pub max_results: usize,
+    /// Whether to show sensitive item previews (masked by default).
+    pub show_sensitive_previews: bool,
+    /// Whether to require confirmation before copying sensitive items.
+    pub confirm_sensitive_copy: bool,
+    /// Whether to close the picker after a successful copy.
+    pub close_after_copy: bool,
+    /// Whether to prefer quick-paste over copy when possible.
+    pub prefer_quick_paste: bool,
+    /// Default picker window width (native picker only).
+    pub width: u32,
+    /// Default picker window height (native picker only).
+    pub height: u32,
+}
+
+impl Default for PickerConfig {
+    fn default() -> Self {
+        Self {
+            default_mode: PickerMode::External,
+            default_source: "history".to_string(),
+            max_results: 50,
+            show_sensitive_previews: false,
+            confirm_sensitive_copy: true,
+            close_after_copy: true,
+            prefer_quick_paste: false,
+            width: 720,
+            height: 520,
+        }
+    }
+}
 
 /// Application configuration for author-clipboard.
 ///
@@ -72,6 +137,18 @@ pub struct Config {
     /// Dedup window: skip items with identical hash within this many seconds.
     #[serde(default = "default_dedup_window_seconds")]
     pub dedup_window_seconds: u64,
+    /// MIME types that should never be stored in clipboard history.
+    #[serde(default = "default_mime_denylist")]
+    pub mime_denylist: Vec<String>,
+    /// Simple content patterns that should never be stored.
+    ///
+    /// Despite the legacy field name, these are not full regular expressions.
+    /// Supported forms are `^prefix`, `suffix$`, and plain substring matching.
+    #[serde(default = "default_content_regex_denylist")]
+    pub content_regex_denylist: Vec<String>,
+    /// Configuration for picker UIs.
+    #[serde(default)]
+    pub picker: PickerConfig,
 }
 
 impl Default for Config {
@@ -86,6 +163,9 @@ impl Default for Config {
             encrypt_sensitive: default_encrypt_sensitive(),
             clear_on_lock: default_clear_on_lock(),
             dedup_window_seconds: default_dedup_window_seconds(),
+            mime_denylist: default_mime_denylist(),
+            content_regex_denylist: default_content_regex_denylist(),
+            picker: PickerConfig::default(),
         }
     }
 }
@@ -170,6 +250,30 @@ impl Config {
         }
         Ok(enabled)
     }
+
+    /// Check if a MIME type is in the denylist.
+    #[must_use]
+    pub fn is_mime_denied(&self, mime_type: &str) -> bool {
+        self.mime_denylist
+            .iter()
+            .any(|denied| denied == mime_type || mime_type.starts_with(denied.as_str()))
+    }
+
+    /// Check if content matches any simple pattern in the denylist.
+    ///
+    /// Supports `^prefix` (starts-with), `suffix$` (ends-with), and plain substring matching.
+    #[must_use]
+    pub fn is_content_denied(&self, content: &str) -> bool {
+        self.content_regex_denylist.iter().any(|pattern| {
+            if let Some(prefix) = pattern.strip_prefix('^') {
+                content.starts_with(prefix)
+            } else if let Some(suffix) = pattern.strip_suffix('$') {
+                content.ends_with(suffix)
+            } else {
+                content.contains(pattern.as_str())
+            }
+        })
+    }
 }
 
 #[cfg(test)]
@@ -200,6 +304,9 @@ mod tests {
             encrypt_sensitive: true,
             clear_on_lock: false,
             dedup_window_seconds: 5,
+            mime_denylist: vec!["application/x-secret".to_string()],
+            content_regex_denylist: vec!["^OTP:".to_string()],
+            picker: PickerConfig::default(),
         };
         let json = serde_json::to_string_pretty(&original).unwrap();
         let loaded: Config = serde_json::from_str(&json).unwrap();
@@ -218,5 +325,70 @@ mod tests {
         assert_eq!(cfg.keyboard_shortcut, "Super+V");
         assert!(!cfg.encrypt_sensitive);
         assert!(cfg.clear_on_lock);
+    }
+
+    #[test]
+    fn test_mime_denylist() {
+        let config = Config {
+            mime_denylist: vec!["application/x-secret".to_string()],
+            ..Default::default()
+        };
+        assert!(config.is_mime_denied("application/x-secret"));
+        assert!(!config.is_mime_denied("text/plain"));
+    }
+
+    #[test]
+    fn test_picker_config_defaults() {
+        let picker = PickerConfig::default();
+        assert_eq!(picker.default_mode, PickerMode::External);
+        assert_eq!(picker.default_source, "history");
+        assert_eq!(picker.max_results, 50);
+        assert!(!picker.show_sensitive_previews);
+        assert!(picker.confirm_sensitive_copy);
+        assert!(picker.close_after_copy);
+        assert!(!picker.prefer_quick_paste);
+        assert_eq!(picker.width, 720);
+        assert_eq!(picker.height, 520);
+    }
+
+    #[test]
+    fn test_picker_config_roundtrip() {
+        let picker = PickerConfig {
+            default_mode: PickerMode::Native,
+            default_source: "emoji".to_string(),
+            max_results: 100,
+            show_sensitive_previews: true,
+            confirm_sensitive_copy: false,
+            close_after_copy: false,
+            prefer_quick_paste: true,
+            width: 800,
+            height: 600,
+        };
+        let json = serde_json::to_string_pretty(&picker).unwrap();
+        let loaded: PickerConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(picker, loaded);
+    }
+
+    #[test]
+    fn test_picker_config_partial_defaults_default_mode() {
+        let json = r#"{ "default_source": "history" }"#;
+        let picker: PickerConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(picker.default_mode, PickerMode::External);
+    }
+
+    #[test]
+    fn test_content_denylist() {
+        let config = Config {
+            content_regex_denylist: vec![
+                "^OTP:".to_string(),
+                "SECRET".to_string(),
+                ".token$".to_string(),
+            ],
+            ..Default::default()
+        };
+        assert!(config.is_content_denied("OTP: 123456"));
+        assert!(config.is_content_denied("my SECRET code"));
+        assert!(config.is_content_denied("session.token"));
+        assert!(!config.is_content_denied("normal text"));
     }
 }

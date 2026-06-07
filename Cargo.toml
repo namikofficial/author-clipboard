@@ -5,14 +5,17 @@ members = [
     "crates/applet",
     "crates/shared",
     "crates/ctl",
+    "crates/hypr-picker",
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.5.0"
 edition = "2021"
 license = "GPL-3.0"
 authors = ["Namik"]
 repository = "https://github.com/namikofficial/author-clipboard"
+description = "Native COSMIC clipboard manager with wlroots compositor support"
+homepage = "https://github.com/namikofficial/author-clipboard"
 
 # Clippy lint configuration (equivalent to ESLint in Node.js)
 [workspace.lints.clippy]
@@ -66,7 +69,11 @@ wayland-protocols-wlr = { version = "0.2", features = ["client"] }
 rustix = { version = "0.38", features = ["pipe"] }
 
 # COSMIC (check for latest version)
-libcosmic = { git = "https://github.com/pop-os/libcosmic.git", default-features = false, features = ["winit", "wgpu", "tokio"] }
+libcosmic = { git = "https://github.com/pop-os/libcosmic.git", default-features = false, features = [
+    "winit",
+    "wgpu",
+    "tokio",
+] }
 
 # Image processing
 image = "0.25"
