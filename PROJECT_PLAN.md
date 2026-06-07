@@ -2,9 +2,9 @@
 
 > Development roadmap and technical specifications for the COSMIC-native clipboard manager with wlroots compositor support
 
-**Document Version:** 1.2
+**Document Version:** 1.3
 **Last Updated:** June 8, 2026
-**Project Status:** Phase 14 Complete — v0.5.0
+**Project Status:** Phase 19 Complete — v0.5.0
 
 ---
 
@@ -541,14 +541,15 @@ CREATE INDEX idx_pinned ON clipboard_items(pinned);
 - ✅ FTS5, WAL, dedup, per-item TTL, GitHub Actions CI (Phase 12)
 - ✅ Systemd service and packaging docs (Phase 13)
 - ✅ SECURITY.md, CODEOWNERS, screen lock detection (Phase 14)
+- ✅ Phase 18: Distribution packaging & release artifacts (AUR, Flatpak, AppImage, Nix)
+- ✅ Phase 19: Hyprland-native UX & wlroots polish (Waybar module, AUR package, Nix flake, demo docs)
 
 ### Next Milestones
 
 - **Phase 15**: Automation rules, snippets, OCR
 - **Phase 16**: Image enhancements, X11 fallback
 - **Phase 17**: Self-hosted E2EE sync
-- **Phase 18**: Distribution packages and release artifacts
-- **Phase 19**: Hyprland-native UX and wlroots polish
+- **Phase 20**: Community, docs & growth
 
 > **Note**: Planned features have specs in `/specs/features/` with 00-brief.md files. New features should be spec'd before implementation.
 
@@ -670,7 +671,7 @@ CREATE INDEX idx_pinned ON clipboard_items(pinned);
 | Phase 16 | TBD | Image & X11 support | 📋 Planned |
 | Phase 17 | TBD | Sync & collaboration | 📋 Planned |
 | Phase 18 | 1 week | Distribution packaging & releases | ✅ Complete |
-| Phase 19 | TBD | Hyprland-native UX | 📋 Planned |
+| Phase 19 | 1 week | Hyprland-native UX & wlroots polish | ✅ Complete |
 | Phase 20 | TBD | Community & growth | 📋 Planned |
 
 ---
@@ -731,21 +732,28 @@ Planned Deliverables
 - [x] Reproducible build notes and binary signing instructions (GPG) for releases (`docs/RELEASING.md`)
 - [ ] COSMIC app store submission — manual external step; checklist at `docs/COSMIC_STORE.md`
 
-### Phase 19: Hyprland-native UX & wlroots Polish (PLANNED)
+### Phase 19: Hyprland-native UX & wlroots Polish ✅ **COMPLETE**
 **Goal:** Make Hyprland and wlroots usage feel first-class while keeping the product positioning honest.
 
-Planned Deliverables
-- [x] Native Hyprland setup documentation
-- [x] External menu picker mode via wofi/rofi/fuzzel
+#### Deliverables
+- [x] Native Hyprland setup documentation (`docs/HYPRLAND.md`)
+- [x] External menu picker mode via wofi/rofi/fuzzel (`author-clipboard-ctl picker`)
 - [x] First-party Hyprland picker (`author-clipboard-hypr-picker`) with GTK4 layer-shell
 - [x] Shared picker module in `shared::picker` for reuse across picker UIs
 - [x] `author-clipboard-ctl hyprland-config` helper
 - [x] Picker configuration in `config.json` (`picker` section)
 - [x] Layer-shell popup mode for native picker
-- [ ] Waybar/Wayle module or status indicator
-- [ ] AUR package
-- [ ] Nix flake
-- [ ] Demo GIF for Hyprland
+- [x] Waybar/Wayle status module (`contrib/waybar/clipboard.sh` + `status --json`)
+- [x] AUR package (PKGBUILD + `.SRCINFO` + `docs/AUR.md`)
+- [x] Nix flake (`flake.nix` / `default.nix` with dev shell and per-binary outputs)
+- [x] Demo section in `docs/HYPRLAND.md` (reproducible shell transcript + ASCII layout)
+
+#### Success Criteria
+- Waybar module renders running/down state and item count
+- AUR PKGBUILD installs all four binaries + systemd service + desktop file
+- Nix flake exposes `default`, `applet`, `daemon`, `ctl`, `hypr-picker`, `apps.default`, `devShells.default`
+- `just waybar-check` and `just aur-check` both pass
+- `just nix-check` passes (requires Nix; `just aur-check` available without Arch)
 
 ### Phase 20: Community, Docs & Growth (PLANNED)
 **Goal:** Increase adoption via docs, demos, and a welcoming community — all free and open.
@@ -758,5 +766,5 @@ Planned Deliverables
 - [ ] Accessibility automation tests (a11y CI checks)
 
 **Document Status:** Living document, updated as project evolves
-**Last Review:** Spec Kit restructure, v0.5.0 documentation alignment (June 8, 2026)
+**Last Review:** Phase 19 complete — Waybar module, AUR package, Nix flake, demo docs (June 8, 2026)
 **Maintained by:** Project team

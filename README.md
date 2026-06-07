@@ -52,10 +52,10 @@ The default GUI is COSMIC-native through `libcosmic`. Hyprland and wlroots users
 - Quick paste with `wtype` or `ydotool`; `wl-copy` is a copy-only fallback
 - External menu picker mode through `wofi`, `rofi`, or `fuzzel`
 - First-party Hyprland/wlroots native picker (`author-clipboard-hypr-picker`)
+- Waybar / Wayle status module (`contrib/waybar/clipboard.sh` + `author-clipboard-ctl status --json`)
+- AUR package and Nix flake (flake.nix / default.nix)
 
 ### Planned
-- Waybar/Wayle status module
-- AUR package and Nix flake
 - Flatpak/AppImage packaging, subject to clipboard sandbox limitations
 - X11 fallback monitoring
 - OCR for images and richer image handling
@@ -374,12 +374,14 @@ See [PROJECT_PLAN.md](PROJECT_PLAN.md) for the roadmap.
 
 - [FEATURES.md](FEATURES.md) - Feature overview
 - [PROJECT_PLAN.md](PROJECT_PLAN.md) - Development roadmap
-- [docs/HYPRLAND.md](docs/HYPRLAND.md) - Hyprland integration guide
-- [docs/PACKAGING.md](docs/PACKAGING.md) - Packaging notes
+- [docs/HYPRLAND.md](docs/HYPRLAND.md) - Hyprland integration guide (with Waybar module setup)
+- [docs/AUR.md](docs/AUR.md) - AUR submission guide
+- [docs/PACKAGING.md](docs/PACKAGING.md) - Packaging notes (AUR, Flatpak, AppImage, Nix)
 - [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) - Contribution guide
 - [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) - Development tooling
 - [docs/LOCAL_TESTING.md](docs/LOCAL_TESTING.md) - Local testing guide
 - [SECURITY.md](SECURITY.md) - Security policy and threat model
+- [contrib/waybar/](contrib/waybar/) - Waybar / Wayle status module
 
 ## Development
 
