@@ -1,0 +1,15 @@
+{
+  "custom/clipboard": {
+    "exec": "~/.local/share/author-clipboard/clipboard.sh",
+    "exec-on-event": true,
+    "interval": 30,
+    "signal": 7,
+    "format": "{text}",
+    "format-tooltip": "{tooltip}",
+    "on-click": "author-clipboard-hypr-picker",
+    "on-click-right": "author-clipboard-ctl toggle",
+    "tooltip": true,
+    "return-type": "json",
+    "class": "clipboard-module"
+  }
+}
