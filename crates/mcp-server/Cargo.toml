@@ -12,7 +12,9 @@ tracing = { workspace = true }
 anyhow = { workspace = true }
 clap = { workspace = true }
 thiserror = { workspace = true }
-mcp-server = "0.1.0"
+mcp-server = { workspace = true }
+mcp-spec = { workspace = true }
+tower = { workspace = true }
 
 [features]
 default = ["stdio"]

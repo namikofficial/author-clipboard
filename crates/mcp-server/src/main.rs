@@ -1,5 +1,8 @@
 use anyhow::Result;
+use author_clipboard_mcp::{ClipboardService, McpServer};
 use clap::Parser;
+use mcp_server::{ByteTransport, Server};
+use std::io::{BufReader, stdin, stdout};
 
 #[derive(Parser)]
 struct Args {
@@ -11,19 +14,26 @@ struct Args {
     port: u16,
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let args = Args::parse();
 
     match args.transport.as_str() {
-        "stdio" => run_stdio_server()?,
+        "stdio" => run_stdio_server().await?,
         _ => anyhow::bail!("Unknown transport: {}", args.transport),
     }
     Ok(())
 }
 
-fn run_stdio_server() -> Result<()> {
-    // For now, just print a message that the server is ready
-    // Full MCP implementation would use the mcp crate
-    println!("author-clipboard-mcp ready (stdio mode)");
+async fn run_stdio_server() -> Result<()> {
+    let service = ClipboardService::new();
+    let server = Server::new(service);
+
+    let transport = ByteTransport::new(
+        BufReader::new(stdin()),
+        stdout(),
+    );
+
+    server.run(transport).await?;
     Ok(())
 }

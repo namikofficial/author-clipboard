@@ -4,9 +4,11 @@
 //! as tools, resources, and prompts for AI coding agents.
 
 mod error;
+mod handler;
 mod resources;
 mod server;
 mod tools;
 
 pub use error::McpError;
+pub use handler::ClipboardService;
 pub use server::McpServer;
