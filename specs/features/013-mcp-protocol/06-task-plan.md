@@ -204,14 +204,14 @@ cargo test -p author-clipboard-mcp --all
 
 | Task | Status | Notes |
 |------|--------|-------|
-| T001 | Pending | |
-| T002 | Pending | |
-| T003 | Pending | |
-| T004 | Pending | |
-| T005 | Pending | |
-| T006 | Pending | |
-| T007 | Pending | |
+| T001 | Completed | Crate created with mcp-server, mcp-spec, tower dependencies |
+| T002 | Completed | All tools wired to IPC: search, get, copy, pin, unpin, delete, stats, snippets |
+| T003 | Completed | Resources wired: recent, pins, snippets, stats, item/{id} |
+| T004 | Completed | Prompts wired: summarize_recent, find_pattern |
+| T005 | Completed | Stdio transport implemented with ByteTransport |
+| T006 | Completed | MCP server compiles and runs, all checks pass |
+| T007 | Pending | Documentation in spec files |
 
 ---
 
-**Last Updated**: Phase 15
+**Last Updated**: Phase 16
