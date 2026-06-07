@@ -94,11 +94,11 @@ just verify
 
 | Task | Status | Notes |
 |------|--------|-------|
-| T001 | Pending | |
-| T002 | Pending | |
-| T003 | Pending | |
-| T004 | Pending | |
+| T001 | Completed | hash_content function uses sha2::Sha256 |
+| T002 | Completed | dedup window enforced in insert_or_bump |
+| T003 | Completed | content_hash column uses TEXT not INTEGER |
+| T004 | Completed | Tests pass with just verify |
 
 ---
 
-**Last Updated**: Phase 15
+**Last Updated**: Phase 16

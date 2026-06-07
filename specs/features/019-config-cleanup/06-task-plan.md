@@ -61,10 +61,10 @@ author-clipboard-ctl config | grep content
 
 | Task | Status | Notes |
 |------|--------|-------|
-| T001 | Pending | |
-| T002 | Pending | |
-| T003 | Pending | |
+| T001 | Completed | Config content_denylist with serde alias for backward compat |
+| T002 | Completed | ContentPatternMode enum: AllowList, BlockList, None |
+| T003 | Completed | just verify passes |
 
 ---
 
-**Last Updated**: Phase 15
+**Last Updated**: Phase 16
