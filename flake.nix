@@ -68,14 +68,17 @@
           # We don't run the test suite from the flake; CI does that.
           doCheck = false;
 
-          # Runtime deps. COSMIC_DATA_CONTROL_ENABLED is set at runtime by
-          # the user; we don't bake it into the wrapper.
+          # Build deps. Runtime deps (gtk4, gtk4-layer-shell) are needed to
+          # build the hypr-picker. COSMIC_DATA_CONTROL_ENABLED is set at
+          # runtime by the user; we don't bake it into the wrapper.
           buildInputs = with pkgs; [
             wayland
             libxkbcommon
             sqlite
             pkg-config
             wayland-protocols
+            gtk4
+            gtk4-layer-shell
           ];
 
           # No postInstall patching needed: the binaries are static enough
