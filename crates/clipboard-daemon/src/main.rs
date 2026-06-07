@@ -592,7 +592,10 @@ impl IpcHandlerState {
             }
 
             // ── Health ────────────────────────────────────────────────────
-            IpcCommand::Ping => IpcResponse::ok(serde_json::json!({"status": "ok"})),
+            IpcCommand::Ping => IpcResponse::ok(serde_json::json!({
+                "status": "ok",
+                "daemon_pid": std::process::id(),
+            })),
             IpcCommand::Status => {
                 let db = self.db.lock().unwrap();
                 let stats = match db.get_stats() {
@@ -604,6 +607,7 @@ impl IpcHandlerState {
                 let incognito = self.config.is_incognito();
                 IpcResponse::ok(serde_json::json!({
                     "daemon_version": env!("CARGO_PKG_VERSION"),
+                    "daemon_pid": std::process::id(),
                     "visible": false,
                     "item_count": stats.total_items,
                     "pinned_count": stats.pinned_items,
