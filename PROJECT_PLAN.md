@@ -669,7 +669,7 @@ CREATE INDEX idx_pinned ON clipboard_items(pinned);
 | Phase 15 | TBD | Automation & content | 📋 Planned |
 | Phase 16 | TBD | Image & X11 support | 📋 Planned |
 | Phase 17 | TBD | Sync & collaboration | 📋 Planned |
-| Phase 18 | TBD | Distribution packaging | 📋 Planned |
+| Phase 18 | 1 week | Distribution packaging & releases | ✅ Complete |
 | Phase 19 | TBD | Hyprland-native UX | 📋 Planned |
 | Phase 20 | TBD | Community & growth | 📋 Planned |
 
@@ -716,17 +716,20 @@ Planned Deliverables
 ### Phase 18: Distribution Packaging & Releases (PLANNED)
 **Goal:** Make installation simple across distributions and ensure reproducible, signed releases.
 
+**Spec**: [`/specs/features/020-distribution-release/`](../specs/features/020-distribution-release/)
+
 Planned Deliverables
 - [x] `.deb` packaging support via `cargo-deb`
-- [ ] Published `.deb` release artifacts for Pop!_OS/Ubuntu/Debian
-- [ ] AUR package
+- [x] Published `.deb` release artifacts for Pop!_OS/Ubuntu/Debian
+- [x] AUR package (PKGBUILD + .SRCINFO template; AUR push is a manual follow-up — see `docs/AUR.md`)
 - [x] Arch PKGBUILD and `.SRCINFO` template in `packaging/arch`
-- [ ] Arch PKGBUILD validation in CI
-- [ ] Flatpak/AppImage builds (Wayland-friendly sandboxing guidance)
-- [ ] Nix flake
-- [ ] GitHub Actions release workflow with binary artifacts
-- [ ] Reproducible build notes and binary signing instructions (GPG) for releases
-- [ ] COSMIC app store submission
+- [x] Arch PKGBUILD validation in CI (`ci.yml` → `arch-pkg` job)
+- [x] Flatpak manifest (`packaging/flatpak/com.namikofficial.author-clipboard.yml`)
+- [x] AppImage build script (`packaging/appimage/build.sh`)
+- [x] Nix flake (`flake.nix`) and non-flake fallback (`default.nix`)
+- [x] GitHub Actions release workflow with binary artifacts (`release.yml` builds `.deb`, tarball, SHA256SUMS, AUR bundle)
+- [x] Reproducible build notes and binary signing instructions (GPG) for releases (`docs/RELEASING.md`)
+- [ ] COSMIC app store submission — manual external step; checklist at `docs/COSMIC_STORE.md`
 
 ### Phase 19: Hyprland-native UX & wlroots Polish (PLANNED)
 **Goal:** Make Hyprland and wlroots usage feel first-class while keeping the product positioning honest.
