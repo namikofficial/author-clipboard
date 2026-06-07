@@ -7,7 +7,7 @@ arch=('x86_64')
 url='https://github.com/namikofficial/author-clipboard'
 license=('GPL-3.0-or-later')
 depends=('wayland' 'wl-clipboard' 'sqlite' 'xkbcommon')
-makedepends=('rust' 'cargo' 'pkgconf' 'wayland-protocols')
+makedepends=('rust' 'cargo' 'pkgconf' 'wayland-protocols' 'gtk4' 'gtk4-layer-shell')
 optdepends=(
   'wtype: preferred quick paste backend on Wayland'
   'ydotool: optional input automation backend'
@@ -26,6 +26,7 @@ package() {
   install -Dm755 target/release/author-clipboard "$pkgdir/usr/bin/author-clipboard"
   install -Dm755 target/release/author-clipboard-daemon "$pkgdir/usr/bin/author-clipboard-daemon"
   install -Dm755 target/release/author-clipboard-ctl "$pkgdir/usr/bin/author-clipboard-ctl"
+  install -Dm755 target/release/author-clipboard-hypr-picker "$pkgdir/usr/bin/author-clipboard-hypr-picker"
 
   install -Dm644 data/author-clipboard-daemon.service \
     "$pkgdir/usr/lib/systemd/user/author-clipboard-daemon.service"
