@@ -344,7 +344,7 @@ async fn handle_method(
         }
 
         "resources/read" => {
-            let uri = params.and_then(|p| p.get("uri")).and_then(|v| v.as_str()).unwrap_or("");
+            let uri = params.as_ref().and_then(|p| p.get("uri")).and_then(|v| v.as_str()).unwrap_or("");
             let uri_path = uri.strip_prefix("clipboard://").unwrap_or(uri);
 
             match uri_path {
