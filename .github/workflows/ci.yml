@@ -78,9 +78,12 @@ jobs:
       - name: Regenerate .SRCINFO and verify it matches
         run: |
           cd packaging/arch
+          # Create a non-root user to run makepkg (it refuses to run as root)
+          useradd -m builder
+          chown -R builder:builder .
           # makepkg's --printsrcinfo writes a freshly-generated .SRCINFO to stdout
           # when not run from a full package build. We re-generate and diff.
-          makepkg --printsrcinfo > .SRCINFO.new
+          su builder -c 'makepkg --printsrcinfo' > .SRCINFO.new
           if ! diff -u .SRCINFO .SRCINFO.new; then
             echo "::error::packaging/arch/.SRCINFO is out of sync with PKGBUILD."
             echo "Run 'makepkg --printsrcinfo > packaging/arch/.SRCINFO' to regenerate."
@@ -95,7 +98,8 @@ jobs:
           export BUILDDIR=/tmp/arch-build
           export PKGDEST=/tmp/arch-dest
           mkdir -p "$BUILDDIR" "$PKGDEST"
-          makepkg --nocheck --nodeps --skippgpcheck
+          # Run as non-root user since makepkg refuses to run as root
+          su builder -c 'makepkg --nocheck --nodeps --skippgpcheck'
           # We don't install; just confirm the build produced a package.
           ls -la *.pkg.tar.*
 
@@ -117,7 +121,8 @@ jobs:
 
       - name: Install system dependencies
         run: |
-          sudo apt-get install -y --no-install-recommends \
+          sudo apt-get update || true
+          sudo apt-get install -y --no-install-recommends --fix-missing \
             libwayland-dev libxkbcommon-dev libdbus-1-dev \
             libgtk-4-dev libudev-dev libinput-dev libgbm-dev \
             libseat-dev libpixman-1-dev libxcb-render0-dev \
