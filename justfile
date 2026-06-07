@@ -213,6 +213,126 @@ deb-remove:
 	@echo "Removing author-clipboard package..."
 	sudo dpkg -r author-clipboard
 
+# Inspect the contents of a built .deb (binaries, paths, postinst)
+deb-inspect: deb
+	@DEB=$$(ls target/debian/author-clipboard_*.deb | head -1); \
+		echo "── metadata ──"; \
+		dpkg-deb -I "$$DEB"; \
+		echo ""; \
+		echo "── contents ──"; \
+		dpkg-deb -c "$$DEB" | grep -E "(usr/bin/author-clipboard|usr/lib/systemd|usr/share/)"
+
+# ── Release Artifacts ──────────────────────────────────────────────────
+
+# Build a release tarball containing the four binaries.
+release-archive: build-release
+	@mkdir -p dist
+	@VERSION=$$(grep '^version' Cargo.toml | head -1 | cut -d'"' -f2); \
+		tar -C target/release -cJf \
+			"dist/author-clipboard-$$VERSION-linux-x86_64.tar.xz" \
+			author-clipboard \
+			author-clipboard-daemon \
+			author-clipboard-ctl \
+			author-clipboard-hypr-picker
+	@ls -la dist/*.tar.xz
+
+# Generate SHA256SUMS for all artifacts in dist/.
+release-checksums:
+	@cd dist && sha256sum -- *.deb *.tar.xz *.xml > SHA256SUMS 2>/dev/null || \
+		sha256sum -- *.tar.xz > SHA256SUMS
+	@cat dist/SHA256SUMS
+
+# Sign SHA256SUMS with GPG. Requires a GPG key on the local keyring.
+release-sign:
+	@if [ ! -f dist/SHA256SUMS ]; then echo "Run 'just release-checksums' first."; exit 1; fi
+	@cd dist && gpg --armor --detach-sign --output SHA256SUMS.asc SHA256SUMS
+	@echo "Signed: dist/SHA256SUMS.asc"
+	@gpg --verify dist/SHA256SUMS.asc dist/SHA256SUMS
+
+# Verify a signed release locally (downloads artifacts via `gh`).
+release-verify version:
+	@gh release download "v{{version}}" --dir dist/verify
+	@cd dist/verify && sha256sum -c SHA256SUMS
+	@if [ -f dist/verify/SHA256SUMS.asc ]; then \
+		gpg --verify dist/verify/SHA256SUMS.asc dist/verify/SHA256SUMS; \
+	fi
+
+# Bundle the AUR PKGBUILD + .SRCINFO into a single tarball.
+aur-bundle:
+	@mkdir -p dist
+	@tar -C packaging/arch -czf dist/author-clipboard-aur-files.tar.gz PKGBUILD .SRCINFO
+	@ls -la dist/author-clipboard-aur-files.tar.gz
+
+# Verify .SRCINFO matches the current PKGBUILD.
+aur-check:
+	@cd packaging/arch && makepkg --printsrcinfo > .SRCINFO.new
+	@if diff -u packaging/arch/.SRCINFO packaging/arch/.SRCINFO.new; then \
+		echo "✓ .SRCINFO is in sync with PKGBUILD"; \
+		rm packaging/arch/.SRCINFO.new; \
+	else \
+		echo "✗ .SRCINFO is OUT OF SYNC with PKGBUILD."; \
+		echo "  Fix with: cd packaging/arch && makepkg --printsrcinfo > .SRCINFO"; \
+		exit 1; \
+	fi
+
+# ── Arch PKGBUILD ──────────────────────────────────────────────────────
+
+# Build the Arch package via `makepkg` (Arch-only).
+arch-build:
+	@if ! command -v makepkg > /dev/null 2>&1; then \
+		echo "makepkg not found. Run inside Arch Linux or archlinux:latest container."; \
+		exit 1; \
+	fi
+	@cd packaging/arch && makepkg --nocheck --nodeps
+
+# ── Flatpak ────────────────────────────────────────────────────────────
+
+# Build the Flatpak (requires flatpak-builder + Freedesktop runtime).
+flatpak-build:
+	@if ! command -v flatpak-builder > /dev/null 2>&1; then \
+		echo "flatpak-builder not installed. Install with your distro package manager."; \
+		exit 1; \
+	fi
+	flatpak-builder --user --force-clean build-dir \
+		packaging/flatpak/com.namikofficial.author-clipboard.yml
+	@echo "✓ Built Flatpak into build-dir/"
+	@echo "Install with: flatpak-builder --user --install build-dir packaging/flatpak/com.namikofficial.author-clipboard.yml"
+
+# Validate Flatpak manifest YAML (no full build required).
+flatpak-validate:
+	@python3 -c "import yaml; yaml.safe_load(open('packaging/flatpak/com.namikofficial.author-clipboard.yml'))" && \
+		echo "✓ Flatpak manifest is valid YAML"
+
+# ── AppImage ───────────────────────────────────────────────────────────
+
+# Build an AppImage (requires cargo build --release --workspace to have run).
+appimage-build: build-release
+	@bash packaging/appimage/build.sh
+
+# Validate AppImage build script syntax.
+appimage-check:
+	@bash -n packaging/appimage/build.sh && echo "✓ packaging/appimage/build.sh is valid"
+	@bash -n packaging/appimage/AppRun && echo "✓ packaging/appimage/AppRun is valid"
+
+# ── Nix ────────────────────────────────────────────────────────────────
+
+# Run `nix flake check` (requires nix with flakes enabled).
+nix-check:
+	@if ! command -v nix > /dev/null 2>&1; then \
+		echo "nix not installed. See https://nixos.org/download.html"; \
+		exit 1; \
+	fi
+	nix flake check --no-build
+
+# Build with nix (default package only).
+nix-build:
+	@if ! command -v nix > /dev/null 2>&1; then \
+		echo "nix not installed. See https://nixos.org/download.html"; \
+		exit 1; \
+	fi
+	nix build
+	@ls -la result/bin/
+
 # ── Setup ──────────────────────────────────────────────────────────────
 
 # Setup development environment (first-time)
