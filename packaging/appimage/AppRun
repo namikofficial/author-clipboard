@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# AppRun entry point for the author-clipboard AppImage.
+#
+# This script is invoked by the AppImage runtime when the user double-clicks
+# the .AppImage or runs it from the command line. It launches the bundled
+# applet binary; the daemon and ctl binaries are reachable on PATH inside
+# the AppImage.
+set -euo pipefail
+
+# `APPIMAGE`-style env: when running inside the FUSE-mounted AppImage, the
+# `APPDIR` is provided by the runtime. When running unpacked (e.g. during
+# development), fall back to the script's own directory.
+APPDIR="${APPDIR:-$(dirname -- "$(readlink -f -- "$0")")}"
+
+exec "${APPDIR}/usr/bin/author-clipboard" "$@"
