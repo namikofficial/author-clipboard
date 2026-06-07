@@ -134,7 +134,7 @@ quick: check test
 
 # ── Install / Uninstall ────────────────────────────────────────────────
 
-# Install binaries, .desktop file, icon, and systemd service
+# Install binaries, .desktop file, icon, systemd service, and Waybar module
 install: build-release
     @echo "📦 Installing author-clipboard..."
     install -Dm755 target/release/author-clipboard-daemon ~/.local/bin/author-clipboard-daemon
@@ -149,8 +149,15 @@ install: build-release
     install -Dm644 data/com.namikofficial.author-clipboard.desktop ~/.local/share/applications/com.namikofficial.author-clipboard.desktop
     install -Dm644 resources/icons/com.namikofficial.author-clipboard.svg ~/.local/share/icons/hicolor/scalable/apps/com.namikofficial.author-clipboard.svg
     install -Dm644 data/author-clipboard-daemon.service ~/.config/systemd/user/author-clipboard-daemon.service
+    # Install Waybar module and contrib docs
+    mkdir -p ~/.local/share/author-clipboard
+    install -Dm755 contrib/waybar/clipboard.sh ~/.local/share/author-clipboard/clipboard.sh
+    install -Dm644 contrib/waybar/README.md ~/.local/share/doc/author-clipboard-waybar/README.md 2>/dev/null || true
+    install -Dm644 contrib/waybar/style.css ~/.local/share/doc/author-clipboard-waybar/style.css 2>/dev/null || true
+    install -Dm644 contrib/waybar/config.example.json ~/.local/share/doc/author-clipboard-waybar/config.example.json 2>/dev/null || true
     systemctl --user daemon-reload
     @echo "✅ Installed! Enable daemon with: just enable"
+    @echo "   Waybar module: ~/.local/share/author-clipboard/clipboard.sh"
 
 # Enable and start the clipboard daemon service
 enable:
@@ -183,6 +190,8 @@ uninstall: disable
     rm -f ~/.local/share/applications/com.namikofficial.author-clipboard.desktop
     rm -f ~/.local/share/icons/hicolor/scalable/apps/com.namikofficial.author-clipboard.svg
     rm -f ~/.config/systemd/user/author-clipboard-daemon.service
+    rm -f ~/.local/share/author-clipboard/clipboard.sh
+    rm -rf ~/.local/share/doc/author-clipboard-waybar
     systemctl --user daemon-reload
     @echo "🗑️  Uninstalled author-clipboard"
 
@@ -313,6 +322,17 @@ appimage-build: build-release
 appimage-check:
 	@bash -n packaging/appimage/build.sh && echo "✓ packaging/appimage/build.sh is valid"
 	@bash -n packaging/appimage/AppRun && echo "✓ packaging/appimage/AppRun is valid"
+
+# ── Waybar ─────────────────────────────────────────────────────────────
+
+# Lint and check the Waybar module script.
+waybar-check:
+	@if ! command -v shellcheck > /dev/null 2>&1; then \
+		echo "shellcheck not installed (dev dependency; install via your package manager)"; \
+		exit 1; \
+	fi
+	@bash -n contrib/waybar/clipboard.sh && echo "✓ clipboard.sh syntax OK"
+	@shellcheck -S warning contrib/waybar/clipboard.sh && echo "✓ clipboard.sh shellcheck OK"
 
 # ── Nix ────────────────────────────────────────────────────────────────
 
