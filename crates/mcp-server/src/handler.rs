@@ -8,7 +8,7 @@ use author_clipboard_shared::ipc::{IpcClient, IpcCommand, FilterOptions, CopyMod
 use mcp_spec::protocol::{JsonRpcRequest, JsonRpcResponse};
 use mcp_server::BoxError;
 use serde_json::Value;
-use tower_service::Service;
+use tower::Service;
 
 pub struct ClipboardService {
     client: IpcClient,
@@ -213,11 +213,12 @@ async fn handle_method(
                     let pinned = arguments.get("pinned").and_then(|v| v.as_bool());
                     let sensitive = arguments.get("sensitive").and_then(|v| v.as_bool());
 
-                    let filters = SearchFilters {
+                    let filters = FilterOptions {
                         content_type,
                         pinned,
                         sensitive,
                         source_app: None,
+                        age_min_seconds: None,
                         age_max_seconds: None,
                     };
 
@@ -348,7 +349,7 @@ async fn handle_method(
 
             match uri_path {
                 "recent" => {
-                    match client.send_command(&IpcCommand::History { limit: Some(50), offset: Some(0) }) {
+                    match client.send_command(&IpcCommand::History { limit: 50, offset: Some(0), filters: None }) {
                         Ok(resp) => serde_json::json!({"contents": [{"uri": uri, "mimeType": "application/json", "text": serde_json::to_string(&resp.data).unwrap_or_default()}]}),
                         Err(e) => serde_json::json!({"contents": [{"uri": uri, "mimeType": "application/json", "text": e.to_string()}]})
                     }
@@ -403,13 +404,13 @@ async fn handle_method(
         }
 
         "prompts/get" => {
-            let name = params.and_then(|p| p.get("name")).and_then(|v| v.as_str()).unwrap_or("");
-            let arguments = params.and_then(|p| p.get("arguments")).cloned().unwrap_or_default();
+            let name = params.as_ref().and_then(|p| p.get("name")).and_then(|v| v.as_str()).unwrap_or("");
+            let arguments = params.as_ref().and_then(|p| p.get("arguments")).cloned().unwrap_or_default();
 
             match name {
                 "clipboard:summarize_recent" => {
                     let limit = arguments.get("limit").and_then(|v| v.as_u64()).map(|v| v as usize).unwrap_or(10);
-                    match client.send_command(&IpcCommand::History { limit: Some(limit), offset: Some(0) }) {
+                    match client.send_command(&IpcCommand::History { limit, offset: Some(0), filters: None }) {
                         Ok(resp) => {
                             let items = resp.data.as_ref().map(|d| serde_json::to_string(d).unwrap_or_default()).unwrap_or_default();
                             serde_json::json!({
@@ -428,11 +429,12 @@ async fn handle_method(
                 }
                 "clipboard:find_pattern" => {
                     let pattern = arguments.get("pattern").and_then(|v| v.as_str()).unwrap_or("");
-                    let filters = SearchFilters {
+                    let filters = FilterOptions {
                         content_type: None,
                         pinned: None,
                         sensitive: None,
                         source_app: None,
+                        age_min_seconds: None,
                         age_max_seconds: None,
                     };
                     match client.send_command(&IpcCommand::Search { query: pattern.to_string(), limit: Some(50), filters: Some(filters) }) {
