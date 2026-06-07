@@ -172,13 +172,13 @@ just verify
 
 | Task | Status | Notes |
 |------|--------|-------|
-| T001 | Pending | |
-| T002 | Pending | |
-| T003 | Pending | |
-| T004 | Pending | |
-| T005 | Pending | |
-| T006 | Pending | |
+| T001 | Completed | IpcCommand expanded with collections, stars, ToggleStar, GetCollectionItems, AddToCollection, RemoveFromCollection |
+| T002 | Completed | CLI routes through daemon IPC via IpcClient::send_command |
+| T003 | Completed | All query commands support FilterOptions with content_type, pinned, sensitive, source_app, age filters |
+| T004 | Completed | CopyMode enum with Copy, QuickPaste, CopyPlainText, CopyRedacted |
+| T005 | Completed | Service normalizes all operations through daemon |
+| T006 | Completed | Daemon handles all mutations, CLI is read-only client |
 
 ---
 
-**Last Updated**: Phase 15
+**Last Updated**: Phase 16
