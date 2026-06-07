@@ -10,13 +10,14 @@ env:
   RUSTFLAGS: "-D warnings"
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
 
+permissions:
+  contents: write
+
 jobs:
   release:
     name: Build & Release
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         with:
@@ -28,6 +29,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
+          cache-all-crates: "true"
           key: release-full
 
       # Full deps including libcosmic requirements
@@ -35,40 +37,87 @@ jobs:
         run: |
           sudo apt-get install -y --no-install-recommends \
             libwayland-dev libxkbcommon-dev libinput-dev libseat-dev \
-            libgbm-dev libdbus-1-dev libudev-dev libpixman-1-dev pkg-config
+            libgbm-dev libdbus-1-dev libudev-dev libpixman-1-dev \
+            libgtk-4-dev libxcb-render0-dev libxcb-shape0-dev \
+            libxcb-xfixes0-dev dpkg-dev fakeroot pkg-config
 
       # Quick sanity checks before spending time on a full build
       - name: Format check
         run: cargo fmt --all -- --check
 
-      - name: Clippy (shared/daemon/ctl)
+      - name: Clippy (shared/daemon/ctl/mcp)
         run: |
           cargo clippy \
             -p author-clipboard-shared \
             -p author-clipboard-daemon \
             -p author-clipboard-ctl \
+            -p author-clipboard-mcp \
             -- -D warnings
 
       - name: Tests
         run: cargo test -p author-clipboard-shared
 
-      # Full release build (includes applet / libcosmic)
+      # Set SOURCE_DATE_EPOCH for reproducible build metadata.
+      # We use the commit timestamp of the tag's underlying commit.
+      - name: Set SOURCE_DATE_EPOCH
+        id: sde
+        run: |
+          EPOCH=$(git log -1 --format=%ct "$GITHUB_REF")
+          echo "epoch=$EPOCH" >> "$GITHUB_OUTPUT"
+          echo "SOURCE_DATE_EPOCH=$EPOCH"
+
+      # Full release build (includes applet / libcosmic + hypr-picker)
       - name: Build release binaries
-        run: cargo build --release --workspace
+        env:
+          SOURCE_DATE_EPOCH: ${{ steps.sde.outputs.epoch }}
+        run: cargo build --release --workspace --locked
 
       # Install cargo-deb and build the .deb package
       - name: Install cargo-deb
         run: cargo install cargo-deb --locked
 
       - name: Build .deb package
+        env:
+          SOURCE_DATE_EPOCH: ${{ steps.sde.outputs.epoch }}
         run: cargo deb -p author-clipboard-applet --no-build
 
-      - name: Package Arch/AUR files
+      - name: Stage release artifacts
+        env:
+          VERSION: ${{ github.ref_name }}
         run: |
-          mkdir -p target/arch
-          cp packaging/arch/PKGBUILD target/arch/PKGBUILD
-          cp packaging/arch/.SRCINFO target/arch/.SRCINFO
-          tar -C packaging/arch -czf target/arch/author-clipboard-aur-files.tar.gz PKGBUILD .SRCINFO
+          set -euo pipefail
+          mkdir -p release-staging
+          cp target/debian/author-clipboard_*.deb release-staging/
+          tar -C target/release -cJf \
+            "release-staging/author-clipboard-${VERSION}-linux-x86_64.tar.xz" \
+            author-clipboard \
+            author-clipboard-daemon \
+            author-clipboard-ctl \
+            author-clipboard-hypr-picker
+          cp data/com.namikofficial.author-clipboard.metainfo.xml \
+            release-staging/
+
+      - name: Generate SHA256SUMS
+        working-directory: release-staging
+        run: sha256sum -- *.deb *.tar.xz *.xml > SHA256SUMS
+
+      - name: Sign SHA256SUMS with GPG (if secret is configured)
+        if: ${{ env.GPG_PRIVATE_KEY != '' }}
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        working-directory: release-staging
+        run: |
+          set -euo pipefail
+          if [ -n "$GPG_PRIVATE_KEY" ]; then
+            echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+            echo "SHA256SUMS" | gpg --batch --yes --pinentry-mode loopback \
+              --passphrase "$GPG_PASSPHRASE" --armor --detach-sign --output SHA256SUMS.asc
+            gpg --armor --output SHA256SUMS.sig --detach-sign SHA256SUMS || true
+            echo "Signed SHA256SUMS (detached armored signature uploaded)"
+          else
+            echo "GPG_PRIVATE_KEY not set; uploading SHA256SUMS without signature"
+          fi
 
       # Generate changelog for this tag using git-cliff
       - name: Generate changelog
@@ -81,7 +130,31 @@ jobs:
           OUTPUT: RELEASE_NOTES.md
           GITHUB_REPO: ${{ github.repository }}
 
-      # Create the GitHub Release with .deb as asset
+      # Verify AUR package files (defense-in-depth; ci.yml also runs makepkg).
+      - name: Verify AUR PKGBUILD & .SRCINFO are in sync
+        run: |
+          cd packaging/arch
+          makepkg --printsrcinfo > .SRCINFO.new
+          if ! diff -u .SRCINFO .SRCINFO.new; then
+            echo "::error::packaging/arch/.SRCINFO is out of sync with PKGBUILD."
+            echo "Run 'makepkg --printsrcinfo > packaging/arch/.SRCINFO' to regenerate."
+            exit 1
+          fi
+          rm -f .SRCINFO.new
+          mkdir -p ../../release-staging/aur
+          cp PKGBUILD .SRCINFO ../../release-staging/aur/
+          tar -C ../arch -czf ../../release-staging/aur/author-clipboard-aur-files.tar.gz \
+            PKGBUILD .SRCINFO
+
+      - name: Upload build artifacts (debug)
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-staging
+          path: release-staging/
+          if-no-files-found: error
+          retention-days: 7
+
+      # Create the GitHub Release with all artifacts
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -90,9 +163,14 @@ jobs:
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
           files: |
-            target/debian/author-clipboard_*.deb
-            target/arch/author-clipboard-aur-files.tar.gz
-            target/arch/PKGBUILD
-            target/arch/.SRCINFO
+            release-staging/*.deb
+            release-staging/*.tar.xz
+            release-staging/SHA256SUMS
+            release-staging/SHA256SUMS.asc
+            release-staging/SHA256SUMS.sig
+            release-staging/*.xml
+            release-staging/aur/PKGBUILD
+            release-staging/aur/.SRCINFO
+            release-staging/aur/author-clipboard-aur-files.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
