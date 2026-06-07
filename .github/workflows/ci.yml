@@ -9,6 +9,10 @@ env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
 
+permissions:
+  contents: read
+  statuses: write
+
 jobs:
   check:
     name: Format / Lint / Test
@@ -63,7 +67,7 @@ jobs:
       - name: Bootstrap pacman & install build deps
         run: |
           pacman -Sy --noconfirm --needed base-devel rust cargo pkgconf wayland-protocols \
-            wl-clipboard sqlite xkbcommon wayland
+            wl-clipboard sqlite libxkbcommon wayland
 
       - name: Verify PKGBUILD parses & sources
         run: |
