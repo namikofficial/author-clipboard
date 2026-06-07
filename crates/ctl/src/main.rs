@@ -175,8 +175,7 @@ fn main() -> Result<()> {
             if json || pretty {
                 let payload = build_status_json_payload()?;
                 let rendered = if pretty {
-                    serde_json::to_string_pretty(&payload)
-                        .context("Failed to format JSON")?
+                    serde_json::to_string_pretty(&payload).context("Failed to format JSON")?
                 } else {
                     serde_json::to_string(&payload).context("Failed to serialize JSON")?
                 };
@@ -384,8 +383,7 @@ impl Command {
     #[allow(dead_code)]
     fn is_json(&self) -> bool {
         match self {
-            Command::History { json, .. } => *json,
-            Command::Status { json, .. } => *json,
+            Command::History { json, .. } | Command::Status { json, .. } => *json,
             _ => false,
         }
     }
@@ -403,7 +401,7 @@ fn print_json(resp: &author_clipboard_shared::ipc::IpcResponse, pretty: bool) ->
 
 /// Build the structured status payload for `--json` output.
 ///
-/// Always reads from the local SQLite database so the payload is
+/// Always reads from the local `SQLite` database so the payload is
 /// available even when the daemon is down (graceful degradation for
 /// the Waybar / Wayle module). The `running` and `daemon_pid` fields
 /// reflect the live IPC ping.
