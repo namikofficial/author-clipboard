@@ -11,6 +11,9 @@ makedepends=('rust' 'cargo' 'pkgconf' 'wayland-protocols' 'gtk4' 'gtk4-layer-she
 optdepends=(
   'wtype: preferred quick paste backend on Wayland'
   'ydotool: optional input automation backend'
+  'wofi: external menu picker for clipboard history'
+  'fuzzel: minimal external menu picker alternative'
+  'rofi: feature-rich external menu picker alternative'
 )
 source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
 sha256sums=('SKIP')
