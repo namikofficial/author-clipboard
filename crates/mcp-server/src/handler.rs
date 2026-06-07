@@ -243,10 +243,15 @@ async fn handle_method(
 
                 "clipboard.copy" => {
                     let id = arguments.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
-                    let mode = arguments.get("mode").and_then(|v| v.as_str()).unwrap_or("copy");
-                    let confirm_sensitive = arguments.get("confirm_sensitive").and_then(|v| v.as_bool()).unwrap_or(false);
+                    let mode_str = arguments.get("mode").and_then(|v| v.as_str()).unwrap_or("copy");
+                    let mode = match mode_str {
+                        "quick_paste" => CopyMode::QuickPaste,
+                        "copy_plain_text" => CopyMode::CopyPlainText,
+                        "copy_redacted" => CopyMode::CopyRedacted,
+                        _ => CopyMode::Copy,
+                    };
 
-                    match client.send_command(&IpcCommand::Copy { id, mode: mode.to_string(), confirm_sensitive }) {
+                    match client.send_command(&IpcCommand::Copy { id, mode }) {
                         Ok(resp) => serde_json::json!({"content": [{"type": "text", "text": serde_json::to_string(&resp.data).unwrap_or_default()}]}),
                         Err(e) => serde_json::json!({"isError": true, "content": [{"type": "text", "text": e.to_string()}]})
                     }
@@ -349,11 +354,12 @@ async fn handle_method(
                     }
                 }
                 "pins" => {
-                    let filters = SearchFilters {
+                    let filters = FilterOptions {
                         content_type: None,
                         pinned: Some(true),
                         sensitive: None,
                         source_app: None,
+                        age_min_seconds: None,
                         age_max_seconds: None,
                     };
                     match client.send_command(&IpcCommand::Search { query: String::new(), limit: Some(100), filters: Some(filters) }) {

@@ -704,10 +704,12 @@ dependencies = [
  "author-clipboard-shared",
  "clap",
  "mcp-server",
+ "mcp-spec",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
  "tokio",
+ "tower",
  "tracing",
 ]
 
