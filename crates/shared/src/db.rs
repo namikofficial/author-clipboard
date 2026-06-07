@@ -308,6 +308,22 @@ impl Database {
         Self::collect_items(&mut stmt, [limit])
     }
 
+    /// Get the single most recent item by timestamp, regardless of pin state.
+    ///
+    /// `get_recent` orders pinned items first; for the status bar we want
+    /// the *latest* paste, which may or may not be pinned. Returns
+    /// `Ok(None)` when the history is empty.
+    pub fn get_most_recent(&self) -> SqlResult<Option<ClipboardItem>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, content_hash, content, mime_type, content_type, timestamp, pinned, starred, source_app, sensitive, plain_text
+             FROM clipboard_items
+             ORDER BY timestamp DESC
+             LIMIT 1",
+        )?;
+        let mut rows = Self::collect_items(&mut stmt, [])?;
+        Ok(rows.pop())
+    }
+
     /// Search items by content. Uses FTS5 for performance with LIKE fallback.
     pub fn search(&self, query: &str, limit: usize) -> SqlResult<Vec<ClipboardItem>> {
         // Try FTS5 first for better performance
