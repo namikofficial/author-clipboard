@@ -1,5 +1,55 @@
 # AGENTS.md — author-clipboard
 
+## Spec-Driven Development
+
+**Prompt creates spec. Spec creates code. Code must pass spec.**
+
+This project uses GitHub Spec Kit style development. All non-trivial changes follow this workflow:
+
+```
+idea → 00-brief.md → 01-requirements.md → 05-technical-design.md → 06-task-plan.md → implementation → 08-review-checklist.md
+```
+
+### Feature Spec Structure
+
+All features have specs under `/specs/features/FFF-name/`:
+
+```
+00-brief.md           # What problem does this solve?
+01-requirements.md    # User stories, acceptance criteria
+02-domain-model.md    # Data structures, state
+03-api-contract.md    # IPC commands, CLI changes
+04-ui-flow.md         # User interaction flows
+05-technical-design.md # Implementation approach
+06-task-plan.md       # Atomic, verifiable tasks
+07-test-plan.md       # Test strategy
+08-review-checklist.md # Pre-merge checklist
+09-decisions.md       # Architectural decisions
+```
+
+### Agent Roles
+
+| Role | Responsibility |
+|------|----------------|
+| **Spec Agent** | Turn rough intent into requirements, define acceptance criteria |
+| **Architect Agent** | Propose technical design, preserve conventions |
+| **Task Planner** | Convert specs into atomic, independently verifiable tasks |
+| **Implementation Agent** | Execute one task at a time, verify against spec |
+| **Review Agent** | Check requirements coverage, security, test quality |
+
+### Rule Summary
+
+1. **Do not write code first.** Create or update a feature spec.
+2. **Requirements need acceptance criteria.** Each criterion must be independently verifiable.
+3. **Design must list affected files.** No unspecified side-effects.
+4. **Tasks must be atomic.** One task, one goal, one verification command.
+5. **Implement one task at a time.** No combining unrelated changes.
+6. **Verify against spec.** Run tests after implementation.
+7. **Document deviations.** Update `09-decisions.md` if implementation differs from design.
+8. **No unrelated refactors.** Stay focused on the current task.
+
+---
+
 ## Build & Verify Commands
 
 ```bash
@@ -85,6 +135,10 @@ just dev            # watch mode (auto-rebuild on changes)
 ## Reference
 
 - `justfile` — exact build/test/run commands
+- `specs/000-product/constitution.md` — non-negotiable project rules
+- `specs/000-product/architecture.md` — system design
+- `specs/000-product/glossary.md` — terminology
+- `specs/features/` — feature specifications
 - `docs/DEVELOPMENT.md` — tooling, lint config, git hooks detail
 - `docs/LOCAL_TESTING.md` — daemon/applet testing, Wayland troubleshooting
 - `.github/copilot-instructions.md` — architecture overview, MCP setup

@@ -4,6 +4,8 @@
 
 author-clipboard is free and open source under GPL-3.0. COSMIC is the primary UI target through `libcosmic`; Hyprland, Sway, and other wlroots compositors are supported through Wayland `wlr-data-control` when the compositor exposes it.
 
+**Development**: This project uses Spec-Driven Development. See [`/specs/`](../specs/) for feature specifications.
+
 ---
 
 ### Core Clipboard
@@ -93,6 +95,8 @@ author-clipboard is free and open source under GPL-3.0. COSMIC is the primary UI
 - [ ] Self-hosted E2EE sync.
 - [ ] Demo GIFs for COSMIC and Hyprland.
 - [ ] Shortcut configuration UI where compositor APIs allow it.
+
+> **Note**: Planned features have specs in `/specs/features/`. New features should be spec'd before implementation per the spec-driven development workflow.
 
 ---
 

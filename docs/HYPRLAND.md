@@ -2,6 +2,8 @@
 
 > Setup guide for using author-clipboard on Hyprland with external menu pickers and the first-party native picker.
 
+**Feature Spec**: See `/specs/features/011-hyprland-integration/` for requirements, design, and tasks.
+
 ---
 
 ## Overview

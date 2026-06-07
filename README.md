@@ -381,6 +381,48 @@ See [PROJECT_PLAN.md](PROJECT_PLAN.md) for the roadmap.
 - [docs/LOCAL_TESTING.md](docs/LOCAL_TESTING.md) - Local testing guide
 - [SECURITY.md](SECURITY.md) - Security policy and threat model
 
+## Development
+
+This project uses **Spec-Driven Development** (GitHub Spec Kit style). All non-trivial changes follow:
+
+```
+idea → 00-brief.md → 01-requirements.md → 05-technical-design.md → 06-task-plan.md → implementation → 08-review-checklist.md
+```
+
+See [AGENTS.md](AGENTS.md) for the full spec-driven workflow and agent roles.
+
+### Specs Structure
+
+```
+/specs
+  /000-product
+    constitution.md    # Non-negotiable project rules
+    architecture.md   # System design
+    glossary.md       # Terminology
+  /features
+    /001-feature-name/
+      00-brief.md     # Feature overview
+      01-requirements.md
+      02-domain-model.md
+      03-api-contract.md
+      04-ui-flow.md
+      05-technical-design.md
+      06-task-plan.md
+      07-test-plan.md
+      08-review-checklist.md
+      09-decisions.md
+```
+
+### Quick Reference
+
+```bash
+just verify        # fmt → lint → test → build
+just build         # build all crates
+just test          # run all tests
+just fmt           # format code
+just lint          # clippy with -D warnings
+```
+
 ## License
 
 [GPL-3.0](LICENSE)

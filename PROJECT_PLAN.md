@@ -2,8 +2,8 @@
 
 > Development roadmap and technical specifications for the COSMIC-native clipboard manager with wlroots compositor support
 
-**Document Version:** 1.1
-**Last Updated:** May 31, 2026
+**Document Version:** 1.2
+**Last Updated:** June 8, 2026
 **Project Status:** Phase 14 Complete — v0.5.0
 
 ---
@@ -17,6 +17,18 @@
 - [Success Criteria](#success-criteria)
 - [Risk Assessment](#risk-assessment)
 - [Resources & References](#resources--references)
+
+---
+
+## Spec-Driven Development
+
+This project uses **Spec-Driven Development** (GitHub Spec Kit style). See:
+
+- [`/specs/000-product/constitution.md`](../specs/000-product/constitution.md) — Non-negotiable project rules
+- [`/specs/000-product/architecture.md`](../specs/000-product/architecture.md) — System design
+- [`/specs/000-product/glossary.md`](../specs/000-product/glossary.md) — Terminology
+- [`/specs/features/`](../specs/features/) — Feature specifications with requirements, design, and tasks
+- [`AGENTS.md`](../AGENTS.md) — Spec workflow and agent roles
 
 ---
 
@@ -538,6 +550,8 @@ CREATE INDEX idx_pinned ON clipboard_items(pinned);
 - **Phase 18**: Distribution packages and release artifacts
 - **Phase 19**: Hyprland-native UX and wlroots polish
 
+> **Note**: Planned features have specs in `/specs/features/` with 00-brief.md files. New features should be spec'd before implementation.
+
 ### Risk Mitigation
 
 | Risk | Impact | Mitigation |
@@ -668,6 +682,8 @@ The project is committed to remaining open-source and free. The following planne
 ### Phase 15: Advanced Automation & Content (PLANNED)
 **Goal:** Power-user features for automation and richer content handling.
 
+**Spec**: See `/specs/features/` for feature specs when planning.
+
 Planned Deliverables
 - [x] "Never store" rules: MIME type denylist and simple content pattern exclusion rules
 - [ ] Full regex denylist support, if needed beyond the current simple prefix/suffix/substring matching
@@ -739,5 +755,5 @@ Planned Deliverables
 - [ ] Accessibility automation tests (a11y CI checks)
 
 **Document Status:** Living document, updated as project evolves
-**Last Review:** Phase 14 complete, v0.5.0 documentation alignment (May 31, 2026)
+**Last Review:** Spec Kit restructure, v0.5.0 documentation alignment (June 8, 2026)
 **Maintained by:** Project team
