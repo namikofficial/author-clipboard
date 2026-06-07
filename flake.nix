@@ -63,14 +63,10 @@
           RUSTFLAGS = "-D warnings";
 
           # Build all binaries in the workspace.
-          buildAndTestSubdir = ".";
           cargoBuildFlags = [ "--workspace" ];
 
           # We don't run the test suite from the flake; CI does that.
           doCheck = false;
-
-          # Strip the binaries for size.
-          dontStrip = false;
 
           # Runtime deps. COSMIC_DATA_CONTROL_ENABLED is set at runtime by
           # the user; we don't bake it into the wrapper.
@@ -114,10 +110,7 @@
 
           RUSTFLAGS = "-D warnings";
           LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath (
-            pkgs.buildInputs ++ [
-              pkgs.gtk4
-              pkgs.gtk4-layer-shell
-            ]
+            (with pkgs; [ wayland libxkbcommon sqlite gtk4 gtk4-layer-shell ])
           );
         };
 
