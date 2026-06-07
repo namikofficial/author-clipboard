@@ -12,6 +12,9 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+/// Protocol version for IPC requests/responses.
+pub const IPC_VERSION: &str = "1.0";
+
 /// Messages exchanged between daemon and applet over IPC.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum IpcMessage {
@@ -29,6 +32,279 @@ pub enum IpcMessage {
     Pong,
     /// Status report from the daemon.
     Status { visible: bool, item_count: usize },
+    /// Versioned request for normalized service API.
+    Request(IpcRequest),
+    /// Versioned response for normalized service API.
+    Response(IpcResponse),
+}
+
+/// Versioned IPC request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IpcRequest {
+    /// Protocol version (e.g., "1.0").
+    pub version: String,
+    /// Command name.
+    pub cmd: String,
+    /// Command arguments (JSON).
+    pub args: serde_json::Value,
+    /// Optional request ID for tracking.
+    pub request_id: Option<u64>,
+}
+
+impl IpcRequest {
+    /// Create a new request with the given command and arguments.
+    pub fn new(cmd: impl Into<String>, args: serde_json::Value) -> Self {
+        Self {
+            version: IPC_VERSION.to_string(),
+            cmd: cmd.into(),
+            args,
+            request_id: None,
+        }
+    }
+
+    /// Create a new request with a request ID.
+    pub fn with_id(cmd: impl Into<String>, args: serde_json::Value, request_id: u64) -> Self {
+        Self {
+            version: IPC_VERSION.to_string(),
+            cmd: cmd.into(),
+            args,
+            request_id: Some(request_id),
+        }
+    }
+}
+
+/// Versioned IPC response.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IpcResponse {
+    /// Protocol version.
+    pub version: String,
+    /// Whether the request succeeded.
+    pub ok: bool,
+    /// Response data (on success).
+    pub data: Option<serde_json::Value>,
+    /// Error details (on failure).
+    pub error: Option<IpcErrorDetail>,
+}
+
+impl IpcResponse {
+    /// Create a success response.
+    pub fn ok(data: serde_json::Value) -> Self {
+        Self {
+            version: IPC_VERSION.to_string(),
+            ok: true,
+            data: Some(data),
+            error: None,
+        }
+    }
+
+    /// Create an error response.
+    pub fn err(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            version: IPC_VERSION.to_string(),
+            ok: false,
+            data: None,
+            error: Some(IpcErrorDetail {
+                code: code.into(),
+                message: message.into(),
+                min_version: None,
+            }),
+        }
+    }
+
+    /// Create an error response with minimum version.
+    pub fn err_with_min_version(
+        code: impl Into<String>,
+        message: impl Into<String>,
+        min_version: impl Into<String>,
+    ) -> Self {
+        Self {
+            version: IPC_VERSION.to_string(),
+            ok: false,
+            data: None,
+            error: Some(IpcErrorDetail {
+                code: code.into(),
+                message: message.into(),
+                min_version: Some(min_version.into()),
+            }),
+        }
+    }
+}
+
+/// Error details in an IPC response.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IpcErrorDetail {
+    /// Error code (e.g., `UNKNOWN_COMMAND`, `SENSITIVE_CONTENT`).
+    pub code: String,
+    /// Human-readable error message.
+    pub message: String,
+    /// Minimum protocol version required (for version errors).
+    pub min_version: Option<String>,
+}
+
+/// Filter options for query commands.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct FilterOptions {
+    /// Filter by content types (e.g., `["text", "html"]`).
+    pub content_type: Option<Vec<String>>,
+    /// Filter by pinned state.
+    pub pinned: Option<bool>,
+    /// Filter by sensitive state.
+    pub sensitive: Option<bool>,
+    /// Filter by source app.
+    pub source_app: Option<String>,
+    /// Filter items newer than this many seconds.
+    pub age_min_seconds: Option<u64>,
+    /// Filter items older than this many seconds.
+    pub age_max_seconds: Option<u64>,
+}
+
+/// Copy mode for copy operations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum CopyMode {
+    /// Write to clipboard only.
+    #[default]
+    Copy,
+    /// Write to clipboard and type into active window.
+    QuickPaste,
+    /// Strip formatting before copying.
+    CopyPlainText,
+    /// Replace sensitive patterns with bullets before copying.
+    CopyRedacted,
+}
+
+/// IPC commands for the normalized service API.
+/// These are sent as `IpcRequest` with cmd field set to the variant name.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "cmd", content = "args")]
+pub enum IpcCommand {
+    // ── Visibility ────────────────────────────────────────────────
+    /// Toggle picker visibility.
+    Toggle,
+    /// Show the picker.
+    Show,
+    /// Hide the picker.
+    Hide,
+    /// Show picker at specific coordinates.
+    ShowAt { x: i32, y: i32 },
+
+    // ── Health ────────────────────────────────────────────────────
+    /// Health check.
+    Ping,
+    /// Detailed daemon status.
+    Status,
+
+    // ── Query ────────────────────────────────────────────────────
+    /// Get recent clipboard items with optional filtering.
+    History {
+        /// Maximum number of items to return.
+        limit: usize,
+        /// Offset for pagination.
+        offset: Option<usize>,
+        /// Filter options.
+        filters: Option<FilterOptions>,
+    },
+    /// Get a single item by ID.
+    GetItem { id: i64 },
+    /// Full-text search with filtering.
+    Search {
+        /// Search query string.
+        query: String,
+        /// Maximum number of results.
+        limit: Option<usize>,
+        /// Filter options.
+        filters: Option<FilterOptions>,
+    },
+    /// Get database statistics.
+    GetStats,
+    /// Get recent audit log entries.
+    GetAuditLog {
+        /// Maximum number of entries to return.
+        limit: Option<usize>,
+    },
+
+    // ── Mutations ────────────────────────────────────────────────
+    /// Copy an item to the clipboard.
+    Copy {
+        /// Item ID to copy.
+        id: i64,
+        /// Copy mode.
+        mode: CopyMode,
+    },
+    /// Pin an item.
+    Pin { id: i64 },
+    /// Unpin an item.
+    Unpin { id: i64 },
+    /// Toggle star on an item.
+    ToggleStar { id: i64 },
+    /// Delete a single item.
+    Delete { id: i64 },
+    /// Delete all unpinned items.
+    ClearUnpinned,
+    /// Delete all items including pinned.
+    ClearAll,
+
+    // ── Snippets ──────────────────────────────────────────────────
+    /// List all snippets.
+    ListSnippets,
+    /// Create or update a snippet.
+    UpsertSnippet {
+        /// Snippet name.
+        name: String,
+        /// Snippet content.
+        content: String,
+    },
+    /// Delete a snippet.
+    DeleteSnippet { id: i64 },
+
+    // ── Collections ───────────────────────────────────────────────
+    /// List all collections.
+    ListCollections,
+    /// Create a new collection.
+    CreateCollection {
+        /// Collection name.
+        name: String,
+    },
+    /// Delete a collection.
+    DeleteCollection {
+        /// Collection ID.
+        id: String,
+    },
+    /// Rename a collection.
+    RenameCollection {
+        /// Collection ID.
+        id: String,
+        /// New name.
+        new_name: String,
+    },
+    /// Get items in a collection.
+    GetCollectionItems {
+        /// Collection ID.
+        id: String,
+    },
+    /// Add item to a collection.
+    AddToCollection {
+        /// Collection ID.
+        collection_id: String,
+        /// Item ID.
+        item_id: i64,
+    },
+    /// Remove item from a collection.
+    RemoveFromCollection {
+        /// Collection ID.
+        collection_id: String,
+        /// Item ID.
+        item_id: i64,
+    },
+
+    // ── Config ────────────────────────────────────────────────────
+    /// Get current configuration.
+    GetConfig,
+    /// Update configuration.
+    UpdateConfig {
+        /// Configuration values to update.
+        config: serde_json::Value,
+    },
 }
 
 /// Errors that can occur during IPC operations.
@@ -212,6 +488,60 @@ impl IpcClient {
         self.send(&IpcMessage::Toggle)?;
         Ok(())
     }
+
+    /// Send a versioned request and receive a versioned response.
+    pub fn send_request(&self, request: &IpcRequest) -> Result<IpcResponse, IpcError> {
+        let response = self.send(&IpcMessage::Request(request.clone()))?;
+        match response {
+            Some(IpcMessage::Response(resp)) => Ok(resp),
+            Some(other) => Err(IpcError::InvalidMessage(format!(
+                "Expected Response message, got: {other:?}"
+            ))),
+            None => Err(IpcError::ReceiveFailed(
+                "Server closed connection".to_string(),
+            )),
+        }
+    }
+
+    /// Send a command and parse the response data.
+    pub fn send_command(&self, cmd: &IpcCommand) -> Result<IpcResponse, IpcError> {
+        let args =
+            serde_json::to_value(cmd).map_err(|e| IpcError::InvalidMessage(e.to_string()))?;
+        let cmd_name = match &cmd {
+            IpcCommand::Toggle => "Toggle",
+            IpcCommand::Show => "Show",
+            IpcCommand::Hide => "Hide",
+            IpcCommand::ShowAt { .. } => "ShowAt",
+            IpcCommand::Ping => "Ping",
+            IpcCommand::Status => "Status",
+            IpcCommand::History { .. } => "History",
+            IpcCommand::GetItem { .. } => "GetItem",
+            IpcCommand::Search { .. } => "Search",
+            IpcCommand::GetStats => "GetStats",
+            IpcCommand::GetAuditLog { .. } => "GetAuditLog",
+            IpcCommand::Copy { .. } => "Copy",
+            IpcCommand::Pin { .. } => "Pin",
+            IpcCommand::Unpin { .. } => "Unpin",
+            IpcCommand::Delete { .. } => "Delete",
+            IpcCommand::ClearUnpinned => "ClearUnpinned",
+            IpcCommand::ClearAll => "ClearAll",
+            IpcCommand::ListSnippets => "ListSnippets",
+            IpcCommand::UpsertSnippet { .. } => "UpsertSnippet",
+            IpcCommand::DeleteSnippet { .. } => "DeleteSnippet",
+            IpcCommand::ToggleStar { .. } => "ToggleStar",
+            IpcCommand::ListCollections => "ListCollections",
+            IpcCommand::CreateCollection { .. } => "CreateCollection",
+            IpcCommand::DeleteCollection { .. } => "DeleteCollection",
+            IpcCommand::RenameCollection { .. } => "RenameCollection",
+            IpcCommand::GetCollectionItems { .. } => "GetCollectionItems",
+            IpcCommand::AddToCollection { .. } => "AddToCollection",
+            IpcCommand::RemoveFromCollection { .. } => "RemoveFromCollection",
+            IpcCommand::GetConfig => "GetConfig",
+            IpcCommand::UpdateConfig { .. } => "UpdateConfig",
+        };
+        let request = IpcRequest::new(cmd_name, args);
+        self.send_request(&request)
+    }
 }
 
 impl Default for IpcClient {
@@ -250,7 +580,7 @@ mod tests {
     fn test_socket_path_not_empty() {
         let path = socket_path();
         assert!(
-            !path.as_os_str().is_empty(),
+            !path.to_str().is_none_or(str::is_empty),
             "socket path should not be empty"
         );
         assert!(
@@ -308,5 +638,43 @@ mod tests {
 
         let deserialized: IpcMessage = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn test_ipc_request_response_roundtrip() {
+        let request = IpcRequest::new("History", serde_json::json!({"limit": 10}));
+        let json = serde_json::to_string(&request).expect("serialize");
+        let deserialized: IpcRequest = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(request.version, deserialized.version);
+        assert_eq!(request.cmd, deserialized.cmd);
+
+        let response = IpcResponse::ok(serde_json::json!({"items": []}));
+        let json = serde_json::to_string(&response).expect("serialize");
+        let deserialized: IpcResponse = serde_json::from_str(&json).expect("deserialize");
+        assert!(deserialized.ok);
+        assert!(deserialized.error.is_none());
+    }
+
+    #[test]
+    fn test_copy_mode_serialization() {
+        let modes = vec![
+            CopyMode::Copy,
+            CopyMode::QuickPaste,
+            CopyMode::CopyPlainText,
+            CopyMode::CopyRedacted,
+        ];
+        for mode in &modes {
+            let json = serde_json::to_string(mode).expect("serialize");
+            let deserialized: CopyMode = serde_json::from_str(&json).expect("deserialize");
+            assert_eq!(*mode, deserialized);
+        }
+    }
+
+    #[test]
+    fn test_filter_options_default() {
+        let filters = FilterOptions::default();
+        assert!(filters.content_type.is_none());
+        assert!(filters.pinned.is_none());
+        assert!(filters.sensitive.is_none());
     }
 }

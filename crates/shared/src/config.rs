@@ -40,8 +40,21 @@ fn default_dedup_window_seconds() -> u64 {
 fn default_mime_denylist() -> Vec<String> {
     vec!["application/x-kde-cutselection".to_string()]
 }
-fn default_content_regex_denylist() -> Vec<String> {
+fn default_content_denylist() -> Vec<String> {
     vec![]
+}
+fn default_content_pattern_mode() -> ContentPatternMode {
+    ContentPatternMode::Substring
+}
+
+/// Pattern matching mode for content denylist.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContentPatternMode {
+    Substring, // default
+    Prefix,
+    Suffix,
+    Exact,
 }
 
 /// Default picker UI mode.
@@ -140,12 +153,12 @@ pub struct Config {
     /// MIME types that should never be stored in clipboard history.
     #[serde(default = "default_mime_denylist")]
     pub mime_denylist: Vec<String>,
-    /// Simple content patterns that should never be stored.
-    ///
-    /// Despite the legacy field name, these are not full regular expressions.
-    /// Supported forms are `^prefix`, `suffix$`, and plain substring matching.
-    #[serde(default = "default_content_regex_denylist")]
-    pub content_regex_denylist: Vec<String>,
+    /// Content patterns that should never be stored (matched according to `content_pattern_mode`).
+    #[serde(default = "default_content_denylist", alias = "content_regex_denylist")]
+    pub content_denylist: Vec<String>,
+    /// How to match content patterns: `substring`, `prefix`, `suffix`, or `exact`.
+    #[serde(default = "default_content_pattern_mode")]
+    pub content_pattern_mode: ContentPatternMode,
     /// Configuration for picker UIs.
     #[serde(default)]
     pub picker: PickerConfig,
@@ -164,7 +177,8 @@ impl Default for Config {
             clear_on_lock: default_clear_on_lock(),
             dedup_window_seconds: default_dedup_window_seconds(),
             mime_denylist: default_mime_denylist(),
-            content_regex_denylist: default_content_regex_denylist(),
+            content_denylist: default_content_denylist(),
+            content_pattern_mode: default_content_pattern_mode(),
             picker: PickerConfig::default(),
         }
     }
@@ -259,20 +273,17 @@ impl Config {
             .any(|denied| denied == mime_type || mime_type.starts_with(denied.as_str()))
     }
 
-    /// Check if content matches any simple pattern in the denylist.
-    ///
-    /// Supports `^prefix` (starts-with), `suffix$` (ends-with), and plain substring matching.
+    /// Check if content matches any pattern in the denylist.
     #[must_use]
     pub fn is_content_denied(&self, content: &str) -> bool {
-        self.content_regex_denylist.iter().any(|pattern| {
-            if let Some(prefix) = pattern.strip_prefix('^') {
-                content.starts_with(prefix)
-            } else if let Some(suffix) = pattern.strip_suffix('$') {
-                content.ends_with(suffix)
-            } else {
-                content.contains(pattern.as_str())
-            }
-        })
+        self.content_denylist
+            .iter()
+            .any(|pattern| match self.content_pattern_mode {
+                ContentPatternMode::Substring => content.contains(pattern),
+                ContentPatternMode::Prefix => content.starts_with(pattern),
+                ContentPatternMode::Suffix => content.ends_with(pattern),
+                ContentPatternMode::Exact => content == pattern,
+            })
     }
 }
 
@@ -305,7 +316,8 @@ mod tests {
             clear_on_lock: false,
             dedup_window_seconds: 5,
             mime_denylist: vec!["application/x-secret".to_string()],
-            content_regex_denylist: vec!["^OTP:".to_string()],
+            content_denylist: vec!["SECRET".to_string()],
+            content_pattern_mode: ContentPatternMode::Substring,
             picker: PickerConfig::default(),
         };
         let json = serde_json::to_string_pretty(&original).unwrap();
@@ -377,18 +389,46 @@ mod tests {
     }
 
     #[test]
-    fn test_content_denylist() {
+    fn test_content_denylist_substring() {
         let config = Config {
-            content_regex_denylist: vec![
-                "^OTP:".to_string(),
-                "SECRET".to_string(),
-                ".token$".to_string(),
-            ],
+            content_denylist: vec!["SECRET".to_string()],
+            content_pattern_mode: ContentPatternMode::Substring,
+            ..Default::default()
+        };
+        assert!(config.is_content_denied("my SECRET code"));
+        assert!(!config.is_content_denied("no secret here"));
+    }
+
+    #[test]
+    fn test_content_denylist_prefix() {
+        let config = Config {
+            content_denylist: vec!["OTP:".to_string()],
+            content_pattern_mode: ContentPatternMode::Prefix,
             ..Default::default()
         };
         assert!(config.is_content_denied("OTP: 123456"));
-        assert!(config.is_content_denied("my SECRET code"));
+        assert!(!config.is_content_denied("not an OTP"));
+    }
+
+    #[test]
+    fn test_content_denylist_suffix() {
+        let config = Config {
+            content_denylist: vec![".token".to_string()],
+            content_pattern_mode: ContentPatternMode::Suffix,
+            ..Default::default()
+        };
         assert!(config.is_content_denied("session.token"));
-        assert!(!config.is_content_denied("normal text"));
+        assert!(!config.is_content_denied("tokenizer"));
+    }
+
+    #[test]
+    fn test_content_denylist_exact() {
+        let config = Config {
+            content_denylist: vec!["PASSWORD".to_string()],
+            content_pattern_mode: ContentPatternMode::Exact,
+            ..Default::default()
+        };
+        assert!(config.is_content_denied("PASSWORD"));
+        assert!(!config.is_content_denied("PASSWORD123"));
     }
 }

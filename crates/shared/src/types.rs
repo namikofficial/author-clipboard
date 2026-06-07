@@ -1,11 +1,10 @@
 //! Core data types for clipboard items
 
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 /// The type of clipboard content
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -62,6 +61,8 @@ pub struct ClipboardItem {
     pub timestamp: DateTime<Utc>,
     /// Whether this item is pinned
     pub pinned: bool,
+    /// Whether this item is starred (priority ranking)
+    pub starred: bool,
     /// Optional: which app it came from
     pub source_app: Option<String>,
     /// Whether this item contains sensitive content
@@ -82,6 +83,7 @@ impl ClipboardItem {
             content_type: ContentType::Text,
             timestamp: Utc::now(),
             pinned: false,
+            starred: false,
             source_app: None,
             sensitive,
             plain_text: None,
@@ -99,6 +101,7 @@ impl ClipboardItem {
             content_type: ContentType::Image,
             timestamp: Utc::now(),
             pinned: false,
+            starred: false,
             source_app: None,
             sensitive: false,
             plain_text: None,
@@ -116,6 +119,7 @@ impl ClipboardItem {
             content_type: ContentType::Html,
             timestamp: Utc::now(),
             pinned: false,
+            starred: false,
             source_app: None,
             sensitive: false,
             plain_text: Some(plain_text),
@@ -134,6 +138,7 @@ impl ClipboardItem {
             content_type: ContentType::Files,
             timestamp: Utc::now(),
             pinned: false,
+            starred: false,
             source_app: None,
             sensitive: false,
             plain_text: None,
@@ -142,16 +147,18 @@ impl ClipboardItem {
 
     /// Compute a fast hash of content for deduplication.
     pub fn hash_content(content: &str) -> u64 {
-        let mut hasher = DefaultHasher::new();
-        content.hash(&mut hasher);
-        hasher.finish()
+        let mut hasher = Sha256::new();
+        hasher.update(content.as_bytes());
+        let result = hasher.finalize();
+        u64::from_le_bytes(result[0..8].try_into().unwrap())
     }
 
     /// Compute a hash of raw bytes (for images).
     pub fn hash_bytes(data: &[u8]) -> u64 {
-        let mut hasher = DefaultHasher::new();
-        data.hash(&mut hasher);
-        hasher.finish()
+        let mut hasher = Sha256::new();
+        hasher.update(data);
+        let result = hasher.finalize();
+        u64::from_le_bytes(result[0..8].try_into().unwrap())
     }
 
     /// Whether this is an image item.
@@ -267,5 +274,14 @@ pub struct Snippet {
     pub id: i64,
     pub name: String,
     pub content: String,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// A named collection (board) for grouping clipboard items
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Collection {
+    pub id: String,
+    pub name: String,
+    pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

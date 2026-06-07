@@ -1,6 +1,6 @@
 //! Database operations using `SQLite`
 
-use crate::types::{ClipboardItem, ContentType, DbStats, Snippet};
+use crate::types::{ClipboardItem, Collection, ContentType, DbStats, Snippet};
 use rusqlite::{Connection, Result as SqlResult};
 use std::path::Path;
 
@@ -89,6 +89,7 @@ impl Database {
     }
 
     /// Run versioned schema migrations for existing databases.
+    #[allow(clippy::too_many_lines)]
     fn migrate(&self) -> SqlResult<()> {
         let version = self.get_schema_version();
 
@@ -182,6 +183,42 @@ impl Database {
             self.set_schema_version(6)?;
         }
 
+        if version < 7 {
+            // v7: Add starred column
+            let has_starred = self
+                .conn
+                .prepare("SELECT starred FROM clipboard_items LIMIT 0")
+                .is_ok();
+            if !has_starred {
+                self.conn.execute_batch(
+                    "ALTER TABLE clipboard_items ADD COLUMN starred INTEGER NOT NULL DEFAULT 0;",
+                )?;
+            }
+            self.set_schema_version(7)?;
+        }
+
+        if version < 8 {
+            // v8: Add collections and collection_memberships tables
+            self.conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS collections (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL UNIQUE,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS collection_memberships (
+                    collection_id TEXT NOT NULL,
+                    item_id INTEGER NOT NULL,
+                    added_at TEXT NOT NULL,
+                    PRIMARY KEY (collection_id, item_id),
+                    FOREIGN KEY (collection_id) REFERENCES collections(id) ON DELETE CASCADE,
+                    FOREIGN KEY (item_id) REFERENCES clipboard_items(id) ON DELETE CASCADE
+                );",
+            )?;
+            self.set_schema_version(8)?;
+        }
+
         Ok(())
     }
 
@@ -226,19 +263,24 @@ impl Database {
         Ok(self.conn.last_insert_rowid())
     }
 
-    /// Insert only if content hash doesn't already exist.
-    /// If duplicate, bumps the existing item's timestamp instead.
+    /// Insert only if content hash doesn't already exist within the dedup window.
+    /// If duplicate within `dedup_window_seconds`, bumps the existing item's timestamp instead.
     /// Returns the id of the inserted or bumped row.
-    pub fn insert_or_bump(&self, item: &ClipboardItem) -> SqlResult<i64> {
+    pub fn insert_or_bump(
+        &self,
+        item: &ClipboardItem,
+        dedup_window_seconds: u64,
+    ) -> SqlResult<i64> {
         if let Some(existing_id) = self.find_by_hash(item.content_hash)? {
-            self.conn.execute(
-                "UPDATE clipboard_items SET timestamp = ?1 WHERE id = ?2",
-                (item.timestamp.to_rfc3339(), existing_id),
-            )?;
-            Ok(existing_id)
-        } else {
-            self.insert_item(item)
+            if self.has_recent_duplicate(item.content_hash, dedup_window_seconds)? {
+                self.conn.execute(
+                    "UPDATE clipboard_items SET timestamp = ?1 WHERE id = ?2",
+                    (item.timestamp.to_rfc3339(), existing_id),
+                )?;
+                return Ok(existing_id);
+            }
         }
+        self.insert_item(item)
     }
 
     /// Find an item by content hash (for deduplication).
@@ -258,7 +300,7 @@ impl Database {
     /// Get the most recent items, pinned first.
     pub fn get_recent(&self, limit: usize) -> SqlResult<Vec<ClipboardItem>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, content_hash, content, mime_type, content_type, timestamp, pinned, source_app, sensitive, plain_text
+            "SELECT id, content_hash, content, mime_type, content_type, timestamp, pinned, starred, source_app, sensitive, plain_text
              FROM clipboard_items
              ORDER BY pinned DESC, timestamp DESC
              LIMIT ?1",
@@ -270,7 +312,7 @@ impl Database {
     pub fn search(&self, query: &str, limit: usize) -> SqlResult<Vec<ClipboardItem>> {
         // Try FTS5 first for better performance
         let fts_result = self.conn.prepare(
-            "SELECT ci.id, ci.content_hash, ci.content, ci.mime_type, ci.content_type, ci.timestamp, ci.pinned, ci.source_app, ci.sensitive, ci.plain_text
+            "SELECT ci.id, ci.content_hash, ci.content, ci.mime_type, ci.content_type, ci.timestamp, ci.pinned, ci.starred, ci.source_app, ci.sensitive, ci.plain_text
              FROM clipboard_fts fts
              JOIN clipboard_items ci ON ci.id = fts.rowid
              WHERE clipboard_fts MATCH ?1
@@ -295,7 +337,7 @@ impl Database {
         // Fallback: LIKE search
         let pattern = format!("%{query}%");
         let mut stmt = self.conn.prepare(
-            "SELECT id, content_hash, content, mime_type, content_type, timestamp, pinned, source_app, sensitive, plain_text
+            "SELECT id, content_hash, content, mime_type, content_type, timestamp, pinned, starred, source_app, sensitive, plain_text
              FROM clipboard_items
              WHERE (content LIKE ?1 OR plain_text LIKE ?1)
              ORDER BY pinned DESC, timestamp DESC
@@ -307,7 +349,7 @@ impl Database {
     /// Get a single item by id.
     pub fn get_by_id(&self, id: i64) -> SqlResult<Option<ClipboardItem>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, content_hash, content, mime_type, content_type, timestamp, pinned, source_app, sensitive, plain_text
+            "SELECT id, content_hash, content, mime_type, content_type, timestamp, pinned, starred, source_app, sensitive, plain_text
              FROM clipboard_items WHERE id = ?1",
         )?;
         let mut items = stmt.query_map([id], Self::row_to_item)?;
@@ -540,7 +582,7 @@ impl Database {
 
         let mut count = 0;
         for item in &items {
-            match self.insert_or_bump(item) {
+            match self.insert_or_bump(item, 0) {
                 Ok(_) => count += 1,
                 Err(e) => {
                     tracing::warn!("Failed to import item: {e}");
@@ -580,9 +622,10 @@ impl Database {
             timestamp: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(5)?)
                 .map_or_else(|_| chrono::Utc::now(), |dt| dt.with_timezone(&chrono::Utc)),
             pinned: row.get::<_, i32>(6)? != 0,
-            source_app: row.get(7)?,
-            sensitive: row.get::<_, i32>(8).unwrap_or(0) != 0,
-            plain_text: row.get(9).ok(),
+            starred: row.get::<_, i32>(7)? != 0,
+            source_app: row.get(8)?,
+            sensitive: row.get::<_, i32>(9).unwrap_or(0) != 0,
+            plain_text: row.get(10).ok(),
         })
     }
 
@@ -650,6 +693,135 @@ impl Database {
         })?;
         rows.collect()
     }
+
+    // ── Star ─────────────────────────────────────────────────────────
+
+    /// Toggle the starred state of an item. Returns the new starred value.
+    pub fn toggle_star(&self, id: i64) -> SqlResult<bool> {
+        self.conn.execute(
+            "UPDATE clipboard_items SET starred = NOT starred WHERE id = ?1",
+            [id],
+        )?;
+        let starred: bool = self.conn.query_row(
+            "SELECT starred FROM clipboard_items WHERE id = ?1",
+            [id],
+            |row| row.get(0),
+        )?;
+        Ok(starred)
+    }
+
+    /// Set starred state explicitly.
+    pub fn set_starred(&self, id: i64, starred: bool) -> SqlResult<()> {
+        self.conn.execute(
+            "UPDATE clipboard_items SET starred = ?1 WHERE id = ?2",
+            (i32::from(starred), id),
+        )?;
+        Ok(())
+    }
+
+    // ── Collections ───────────────────────────────────────────────────
+
+    /// Create a new collection. Returns the generated ID.
+    pub fn create_collection(&self, name: &str) -> SqlResult<String> {
+        let id = uuid::Uuid::new_v4().to_string();
+        let now = chrono::Utc::now().to_rfc3339();
+        self.conn.execute(
+            "INSERT INTO collections (id, name, created_at, updated_at) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![&id, name, &now, &now],
+        )?;
+        Ok(id)
+    }
+
+    /// List all collections ordered by name.
+    pub fn list_collections(&self) -> SqlResult<Vec<Collection>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, name, created_at, updated_at FROM collections ORDER BY name ASC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(Collection {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                created_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(2)?)
+                    .map_or_else(|_| chrono::Utc::now(), |dt| dt.with_timezone(&chrono::Utc)),
+                updated_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(3)?)
+                    .map_or_else(|_| chrono::Utc::now(), |dt| dt.with_timezone(&chrono::Utc)),
+            })
+        })?;
+        rows.collect()
+    }
+
+    /// Delete a collection by ID.
+    pub fn delete_collection(&self, id: &str) -> SqlResult<()> {
+        self.conn
+            .execute("DELETE FROM collections WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    /// Rename a collection.
+    pub fn rename_collection(&self, id: &str, new_name: &str) -> SqlResult<()> {
+        let now = chrono::Utc::now().to_rfc3339();
+        self.conn.execute(
+            "UPDATE collections SET name = ?1, updated_at = ?2 WHERE id = ?3",
+            rusqlite::params![new_name, &now, id],
+        )?;
+        Ok(())
+    }
+
+    // ── Collection Membership ─────────────────────────────────────────
+
+    /// Add an item to a collection.
+    pub fn add_to_collection(&self, collection_id: &str, item_id: i64) -> SqlResult<()> {
+        let now = chrono::Utc::now().to_rfc3339();
+        self.conn.execute(
+            "INSERT OR IGNORE INTO collection_memberships (collection_id, item_id, added_at) VALUES (?1, ?2, ?3)",
+            rusqlite::params![collection_id, item_id, &now],
+        )?;
+        Ok(())
+    }
+
+    /// Remove an item from a collection.
+    pub fn remove_from_collection(&self, collection_id: &str, item_id: i64) -> SqlResult<()> {
+        self.conn.execute(
+            "DELETE FROM collection_memberships WHERE collection_id = ?1 AND item_id = ?2",
+            rusqlite::params![collection_id, item_id],
+        )?;
+        Ok(())
+    }
+
+    /// Get all items in a collection, ordered by `added_at` DESC.
+    pub fn get_collection_items(&self, collection_id: &str) -> SqlResult<Vec<ClipboardItem>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT ci.id, ci.content_hash, ci.content, ci.mime_type, ci.content_type, ci.timestamp, ci.pinned, ci.starred, ci.source_app, ci.sensitive, ci.plain_text
+             FROM clipboard_items ci
+             JOIN collection_memberships cm ON ci.id = cm.item_id
+             WHERE cm.collection_id = ?1
+             ORDER BY cm.added_at DESC",
+        )?;
+        let items = stmt.query_map([collection_id], Self::row_to_item)?;
+        items.collect()
+    }
+
+    /// Get all collections an item belongs to.
+    pub fn get_item_collections(&self, item_id: i64) -> SqlResult<Vec<Collection>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT c.id, c.name, c.created_at, c.updated_at
+             FROM collections c
+             JOIN collection_memberships cm ON c.id = cm.collection_id
+             WHERE cm.item_id = ?1
+             ORDER BY c.name ASC",
+        )?;
+        let rows = stmt.query_map([item_id], |row| {
+            Ok(Collection {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                created_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(2)?)
+                    .map_or_else(|_| chrono::Utc::now(), |dt| dt.with_timezone(&chrono::Utc)),
+                updated_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(3)?)
+                    .map_or_else(|_| chrono::Utc::now(), |dt| dt.with_timezone(&chrono::Utc)),
+            })
+        })?;
+        rows.collect()
+    }
 }
 
 #[cfg(test)]
@@ -677,10 +849,10 @@ mod tests {
     fn test_dedup_insert_or_bump() {
         let db = make_db();
         let item1 = ClipboardItem::new_text("duplicate".to_string());
-        let id1 = db.insert_or_bump(&item1).unwrap();
+        let id1 = db.insert_or_bump(&item1, 60).unwrap();
 
         let item2 = ClipboardItem::new_text("duplicate".to_string());
-        let id2 = db.insert_or_bump(&item2).unwrap();
+        let id2 = db.insert_or_bump(&item2, 60).unwrap();
 
         assert_eq!(id1, id2, "Same content should return same id");
         assert_eq!(
@@ -881,9 +1053,9 @@ mod tests {
     #[test]
     fn test_schema_version() {
         let db = make_db();
-        // After init, version should be 6 (latest)
+        // After init, version should be 8 (latest)
         let version = db.get_schema_version();
-        assert_eq!(version, 6);
+        assert_eq!(version, 8);
     }
 
     #[test]
