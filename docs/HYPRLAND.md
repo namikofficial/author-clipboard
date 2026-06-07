@@ -265,6 +265,94 @@ journalctl --user -u author-clipboard-daemon -f
 
 ---
 
+## Demo
+
+> **Note**: A real animated GIF screencast is a future release artifact.
+> The section below is the canonical reproducible demo. Run these commands
+> in a fresh Hyprland session to evaluate the picker without installing
+> additional software.
+
+### Reproducible shell transcript
+
+```bash
+# 1. Install the AUR package (Arch) or use Nix / binary release.
+#    Here we assume the binaries are in PATH after install.
+
+# 2. Enable and start the daemon.
+systemctl --user enable --now author-clipboard-daemon
+systemctl --user status author-clipboard-daemon   # confirm "active (running)"
+
+# 3. Copy some text from any application (e.g., firefox, alacritty).
+#    The daemon captures it automatically.
+
+# 4. Open the native picker with Super+Shift+V.
+author-clipboard-hypr-picker          # or use the keybind
+
+# 5. Type to filter, use ↑/↓ to navigate, Enter to copy.
+#    The picker closes after copying (if close_after_copy is true in config).
+
+# 6. Paste in any application with Ctrl+V.
+#    The pasted text matches what you selected in step 5.
+
+# 7. Check daemon status and item count.
+author-clipboard-ctl status
+author-clipboard-ctl status --json    # structured output for bar modules
+
+# 8. Use the external menu picker instead (no GTK4 required).
+author-clipboard-ctl picker --menu wofi --source history
+```
+
+### Layer-shell popup layout
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│  🔍  Search clipboard…                                           │
+├──────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │  echo 'hello from the picker'              12:34:05  📌    │  │
+│  ├────────────────────────────────────────────────────────────┤  │
+│  │  https://github.com/...                   12:30:22         │  │
+│  ├────────────────────────────────────────────────────────────┤  │
+│  │  Last copied text here...                    12:28:01      │  │
+│  ├────────────────────────────────────────────────────────────┤  │
+│  │  🖼️  image-preview.png                         11:55:40     │  │
+│  └────────────────────────────────────────────────────────────┘  │
+│                                                                  │
+│  3/7  ·  ↑↓ navigate  ·  Enter copy  ·  Esc close            │
+└──────────────────────────────────────────────────────────────────┘
+          ↑─────────────────────────────────────────────────↑
+          │                Layer-shell overlay                │
+          │           (640×480, top-anchored, full-width)    │
+          └──────────────────────────────────────────────────┘
+```
+
+### Waybar / Wayle status module
+
+Once the daemon is running, add the clipboard module to your bar:
+
+```bash
+# Copy the module script into your data directory
+mkdir -p ~/.local/share/author-clipboard
+cp /path/to/contrib/waybar/clipboard.sh \
+   ~/.local/share/author-clipboard/clipboard.sh
+chmod +x ~/.local/share/author-clipboard/clipboard.sh
+```
+
+The module script is not included in the binary release packages.  It lives
+in the source tree under `contrib/waybar/`.  If you installed from the
+AUR, clone the repo to get the script:
+
+```bash
+git clone https://github.com/namikofficial/author-clipboard
+cp author-clipboard/contrib/waybar/clipboard.sh ~/.local/share/author-clipboard/
+```
+
+See `contrib/waybar/README.md` for the full Waybar config snippet,
+CSS classes, and signal-based refresh instructions.
+
+---
+
 ## Known Limitations
 
 - The COSMIC applet uses `libcosmic` and may not visually match Hyprland themes
