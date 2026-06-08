@@ -7,6 +7,12 @@
 [![Release](https://img.shields.io/github/v/release/namikofficial/author-clipboard)](https://github.com/namikofficial/author-clipboard/releases)
 [![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org/)
 
+> **Branch status**
+>
+> - **`main`** — stable. Latest release: **[`v0.3.1`](https://github.com/namikofficial/author-clipboard/releases/tag/v0.3.1)**.
+> - **`dev`** — pre-release, **not supported for production use**. Workspace version is `0.5.0`; next release is targeted at `0.6.0`. Pre-release work is documented in [`CHANGELOG.md`](CHANGELOG.md) under `[Unreleased]` and tracked in [`specs/features/022-hardening-pass/`](specs/features/022-hardening-pass/).
+> - For the most accurate "what is actually supported right now", see [`SECURITY.md`](SECURITY.md) → "Supported Versions".
+
 **author-clipboard** is a privacy-focused clipboard manager for COSMIC and wlroots Wayland compositors. It stores clipboard history in a local SQLite database with FTS5 search, detects sensitive content, supports optional encryption for sensitive items, and provides a libcosmic popup UI with emoji, symbol, and kaomoji pickers.
 
 The default GUI is COSMIC-native through `libcosmic`. Hyprland and wlroots users have two picker options:
