@@ -2,9 +2,21 @@
 
 > Development roadmap and technical specifications for the COSMIC-native clipboard manager with wlroots compositor support
 
-**Document Version:** 1.3
+**Document Version:** 1.3.1
 **Last Updated:** June 8, 2026
-**Project Status:** Phase 19 Complete — v0.5.0
+**Project Status:** Phase 19 implementation complete on `dev` — pre-release, targeting `0.6.0`. Latest **released** version: `v0.3.1` on `main`. See [`SECURITY.md`](../SECURITY.md) and [`CHANGELOG.md`](../CHANGELOG.md) for the authoritative split.
+
+> **Read first**
+> This document describes the development plan and the implementation
+> status of each phase on the `dev` branch. The numbers in
+> "Project Status" refer to development phases, not to released
+> versions. The `dev` branch's `Cargo.toml` workspace version is
+> `0.5.0`, but **no `v0.5.0` (or `v0.4.0`) release has been tagged or
+> published**; the only released tags are `v0.2.0`, `v0.3.0`, and
+> `v0.3.1`. Any phase marked "Complete" here means "implemented on
+> the `dev` branch", not "shipped to users". The current hardening
+> pass is tracked under
+> [`specs/features/022-hardening-pass/`](../specs/features/022-hardening-pass/).
 
 ---
 
