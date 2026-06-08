@@ -54,56 +54,57 @@ jobs:
       - name: Tests
         run: cargo test -p author-clipboard-shared
 
-  # arch-pkg:
-  #   name: Arch PKGBUILD
-  #   runs-on: ubuntu-latest
-  #   timeout-minutes: 10
-  #   container:
-  #     image: archlinux:latest
-  #     options: --privileged
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #
-  #     - name: Bootstrap pacman & install build deps
-  #       run: |
-  #         pacman -Sy --noconfirm --needed base-devel rust cargo pkgconf wayland-protocols \
-  #           wl-clipboard sqlite libxkbcommon wayland
-  #
-  #     - name: Verify PKGBUILD parses & sources
-  #       run: |
-  #         cd packaging/arch
-  #         # `source` (PKGBUILD) just parses and defines variables
-  #         bash -c 'source ./PKGBUILD && echo "pkgname=$pkgname pkgver=$pkgver"'
-  #
-  #     - name: Regenerate .SRCINFO and verify it matches
-  #       run: |
-  #         cd packaging/arch
-  #         # Create a non-root user to run makepkg (it refuses to run as root)
-  #         useradd -m builder
-  #         chown -R builder:builder .
-  #         # makepkg's --printsrcinfo writes a freshly-generated .SRCINFO to stdout
-  #         # when not run from a full package build. We re-generate and diff.
-  #         su builder -c 'makepkg --printsrcinfo' > .SRCINFO.new
-  #         if ! diff -u .SRCINFO .SRCINFO.new; then
-  #           echo "::error::packaging/arch/.SRCINFO is out of sync with PKGBUILD."
-  #           echo "Run 'makepkg --printsrcinfo > packaging/arch/.SRCINFO' to regenerate."
-  #           exit 1
-  #         fi
-  #         rm -f .SRCINFO.new
-  #
-  #     - name: Build PKGBUILD (nocheck, nodeps — CI verification only)
-  #       run: |
-  #         cd packaging/arch
-  #         # Use a writable BUILDDIR under /tmp to avoid HOME/permission surprises.
-  #         export BUILDDIR=/tmp/arch-build
-  #         export PKGDEST=/tmp/arch-dest
-  #         mkdir -p "$BUILDDIR" "$PKGDEST"
-  #         # Run as non-root user since makepkg refuses to run as root
-  #         su builder -c 'makepkg --nocheck --nodeps --skippgpcheck'
-  #         # We don't install; just confirm the build produced a package.
-  #         ls -la *.pkg.tar.*
-  #
-  # deb:
+  arch-pkg:
+    name: Arch PKGBUILD
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container:
+      image: archlinux:latest
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Bootstrap pacman & install build deps
+        run: |
+          pacman -Sy --noconfirm --needed base-devel rust cargo pkgconf wayland-protocols \
+            wl-clipboard sqlite libxkbcommon wayland gtk4
+          # gtk4-layer-shell may not be in official repos, build from AUR if missing
+          if ! pacman -Qs gtk4-layer-shell > /dev/null 2>&1; then
+            cd /tmp
+            git clone https://aur.archlinux.org/gtk4-layer-shell.git
+            cd gtk4-layer-shell
+            makepkg --noconfirm --skippgpcheck
+            pacman --noconfirm --upgrade gtk4-layer-shell-*.pkg.tar.zst
+          fi
+
+      - name: Verify PKGBUILD parses & sources
+        run: |
+          cd packaging/arch
+          bash -c 'source ./PKGBUILD && echo "pkgname=$pkgname pkgver=$pkgver"'
+
+      - name: Regenerate .SRCINFO and verify it matches
+        run: |
+          cd packaging/arch
+          useradd -m builder
+          chown -R builder:builder .
+          su builder -c 'makepkg --printsrcinfo' > .SRCINFO.new
+          if ! diff -u .SRCINFO .SRCINFO.new; then
+            echo "::error::packaging/arch/.SRCINFO is out of sync with PKGBUILD."
+            echo "Run 'makepkg --printsrcinfo > packaging/arch/.SRCINFO' to regenerate."
+            exit 1
+          fi
+          rm -f .SRCINFO.new
+
+      - name: Build PKGBUILD (nocheck, nodeps — CI verification only)
+        run: |
+          cd packaging/arch
+          export BUILDDIR=/tmp/arch-build
+          export PKGDEST=/tmp/arch-dest
+          mkdir -p "$BUILDDIR" "$PKGDEST"
+          su builder -c 'makepkg --nocheck --nodeps --skippgpcheck'
+          ls -la *.pkg.tar.*
+
+ deb:
   #   name: Debian .deb build
   #   runs-on: ubuntu-latest
   #   timeout-minutes: 25
