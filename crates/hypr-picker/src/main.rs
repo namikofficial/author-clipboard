@@ -25,6 +25,16 @@ use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 
 const APP_ID: &str = "com.namikofficial.author-clipboard-hypr-picker";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ContentFilter {
+    All,
+    Text,
+    Images,
+    Files,
+    Pinned,
+    Sensitive,
+}
+
 struct PickerState {
     entries: Vec<PickerEntry>,
     filtered: Vec<PickerEntry>,
@@ -34,6 +44,9 @@ struct PickerState {
     action: PickerAction,
     pending_sensitive_key: Option<String>,
     status_message: Option<String>,
+    search_debounce_source: Option<glib::SourceId>,
+    pending_query: Option<String>,
+    content_filter: ContentFilter,
 }
 
 #[derive(Parser, Debug, Clone)]
@@ -78,6 +91,66 @@ fn main() -> Result<()> {
     Ok(())
 }
 
+fn uncheck_others(buttons: &[gtk::ToggleButton], active_idx: usize) {
+    for (i, btn) in buttons.iter().enumerate() {
+        if i != active_idx {
+            btn.set_active(false);
+        }
+    }
+}
+
+fn apply_filter(
+    state: &Rc<RefCell<PickerState>>,
+    filter: ContentFilter,
+    list_box: &gtk::ListBox,
+    status: &gtk::Label,
+) {
+    let mut s = state.borrow_mut();
+    s.content_filter = filter;
+    let query = s.pending_query.clone().unwrap_or_default();
+
+    let filtered = filter_entries(&s.entries, &query, filter);
+    s.filtered = filtered;
+    s.selected_index = 0;
+    drop(s);
+
+    populate_list_box(list_box, &state.borrow());
+    update_status(status, &state.borrow());
+
+    if let Some(row) = list_box.row_at_index(0) {
+        list_box.select_row(Some(&row));
+    }
+}
+
+fn filter_entries(entries: &[PickerEntry], query: &str, filter: ContentFilter) -> Vec<PickerEntry> {
+    let base_filtered = if query.is_empty() {
+        entries.to_vec()
+    } else {
+        picker::filter_entries(entries, query)
+    };
+
+    base_filtered
+        .into_iter()
+        .filter(|e| match filter {
+            ContentFilter::All => true,
+            ContentFilter::Text => matches!(
+                e.content_type,
+                Some(author_clipboard_shared::types::ContentType::Text)
+            ),
+            ContentFilter::Images => matches!(
+                e.content_type,
+                Some(author_clipboard_shared::types::ContentType::Image)
+            ),
+            ContentFilter::Files => matches!(
+                e.content_type,
+                Some(author_clipboard_shared::types::ContentType::Files)
+            ),
+            ContentFilter::Pinned => e.pinned,
+            ContentFilter::Sensitive => e.sensitive,
+        })
+        .collect()
+}
+
 #[allow(clippy::too_many_lines, clippy::needless_pass_by_value)]
 fn build_ui(app: &gtk::Application, options: PickerOptions) {
     let config = Config::load();
@@ -94,6 +167,9 @@ fn build_ui(app: &gtk::Application, options: PickerOptions) {
         action: options.action,
         pending_sensitive_key: None,
         status_message: None,
+        search_debounce_source: None,
+        pending_query: None,
+        content_filter: ContentFilter::All,
     }));
 
     let width: i32 = config.picker.width.try_into().unwrap_or(720);
@@ -142,6 +218,109 @@ fn build_ui(app: &gtk::Application, options: PickerOptions) {
     let status_label = gtk::Label::new(None);
     update_status(&status_label, &state.borrow());
     main_box.append(&status_label);
+
+    let filter_box = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+    let state_for_filter = Rc::clone(&state);
+    let list_for_filter = list_box.clone();
+    let status_for_filter = status_label.clone();
+
+    let btn_all = gtk::ToggleButton::with_label("All");
+    btn_all.set_active(true);
+    let btn_text = gtk::ToggleButton::with_label("Text");
+    let btn_images = gtk::ToggleButton::with_label("Images");
+    let btn_files = gtk::ToggleButton::with_label("Files");
+    let btn_pinned = gtk::ToggleButton::with_label("Pinned");
+    let btn_sensitive = gtk::ToggleButton::with_label("Sensitive");
+
+    let filter_buttons: [gtk::ToggleButton; 6] = [
+        btn_all.clone(),
+        btn_text.clone(),
+        btn_images.clone(),
+        btn_files.clone(),
+        btn_pinned.clone(),
+        btn_sensitive.clone(),
+    ];
+    for (idx, btn) in filter_buttons.iter().enumerate() {
+        btn.set_has_tooltip(true);
+        match idx {
+            0 => btn.set_tooltip_text(Some("Show all items")),
+            1 => btn.set_tooltip_text(Some("Text only")),
+            2 => btn.set_tooltip_text(Some("Images only")),
+            3 => btn.set_tooltip_text(Some("Files only")),
+            4 => btn.set_tooltip_text(Some("Pinned items")),
+            5 => btn.set_tooltip_text(Some("Sensitive items")),
+            _ => {}
+        }
+        filter_box.append(btn);
+    }
+
+    let state_c = Rc::clone(&state_for_filter);
+    let list_c = list_for_filter.clone();
+    let status_c = status_for_filter.clone();
+    let filter_buttons_all = filter_buttons.clone();
+    btn_all.connect_toggled(move |b| {
+        if b.is_active() {
+            uncheck_others(&filter_buttons_all, 0);
+            apply_filter(&state_c, ContentFilter::All, &list_c, &status_c);
+        }
+    });
+
+    let state_c = Rc::clone(&state_for_filter);
+    let list_c = list_for_filter.clone();
+    let status_c = status_for_filter.clone();
+    let filter_buttons_text = filter_buttons.clone();
+    btn_text.connect_toggled(move |b| {
+        if b.is_active() {
+            uncheck_others(&filter_buttons_text, 1);
+            apply_filter(&state_c, ContentFilter::Text, &list_c, &status_c);
+        }
+    });
+
+    let state_c = Rc::clone(&state_for_filter);
+    let list_c = list_for_filter.clone();
+    let status_c = status_for_filter.clone();
+    let filter_buttons_images = filter_buttons.clone();
+    btn_images.connect_toggled(move |b| {
+        if b.is_active() {
+            uncheck_others(&filter_buttons_images, 2);
+            apply_filter(&state_c, ContentFilter::Images, &list_c, &status_c);
+        }
+    });
+
+    let state_c = Rc::clone(&state_for_filter);
+    let list_c = list_for_filter.clone();
+    let status_c = status_for_filter.clone();
+    let filter_buttons_files = filter_buttons.clone();
+    btn_files.connect_toggled(move |b| {
+        if b.is_active() {
+            uncheck_others(&filter_buttons_files, 3);
+            apply_filter(&state_c, ContentFilter::Files, &list_c, &status_c);
+        }
+    });
+
+    let state_c = Rc::clone(&state_for_filter);
+    let list_c = list_for_filter.clone();
+    let status_c = status_for_filter.clone();
+    let filter_buttons_pinned = filter_buttons.clone();
+    btn_pinned.connect_toggled(move |b| {
+        if b.is_active() {
+            uncheck_others(&filter_buttons_pinned, 4);
+            apply_filter(&state_c, ContentFilter::Pinned, &list_c, &status_c);
+        }
+    });
+
+    let state_c = Rc::clone(&state_for_filter);
+    let list_c = list_for_filter.clone();
+    let status_c = status_for_filter.clone();
+    let filter_buttons_sensitive = filter_buttons.clone();
+    btn_sensitive.connect_toggled(move |b| {
+        if b.is_active() {
+            uncheck_others(&filter_buttons_sensitive, 5);
+            apply_filter(&state_c, ContentFilter::Sensitive, &list_c, &status_c);
+        }
+    });
+
+    main_box.append(&filter_box);
 
     window.set_child(Some(&main_box));
 
@@ -239,29 +418,57 @@ fn build_ui(app: &gtk::Application, options: PickerOptions) {
     // ── Search filtering ───────────────────────────────────────
 
     let state_for_search = Rc::clone(&state);
-    let list_for_search = list_box.clone();
-    let status_for_search = status_label.clone();
+    let list_box_clone = list_box.clone();
+    let status_label_clone = status_label.clone();
 
     search_entry.connect_search_changed(move |entry| {
         let query = entry.text().to_string();
         let mut s = state_for_search.borrow_mut();
-        if query.is_empty() {
-            let cloned = s.entries.clone();
-            s.filtered = cloned;
-        } else {
-            s.filtered = picker::filter_entries(&s.entries, &query);
+
+        // Cancel any existing debounce timeout
+        if let Some(source_id) = s.search_debounce_source.take() {
+            source_id.remove();
         }
+
+        // Store the pending query
+        s.pending_query = Some(query.clone());
         s.pending_sensitive_key = None;
         s.status_message = None;
-        s.selected_index = 0;
-        drop(s);
 
-        populate_list_box(&list_for_search, &state_for_search.borrow());
-        update_status(&status_for_search, &state_for_search.borrow());
+        // Schedule a new debounced search (200ms delay)
+        let state_clone = Rc::clone(&state_for_search);
+        let list_clone = list_box_clone.clone();
+        let status_clone = status_label_clone.clone();
+        let query_clone = query.clone();
 
-        if let Some(row) = list_for_search.row_at_index(0) {
-            list_for_search.select_row(Some(&row));
-        }
+        let source_id = glib::timeout_add_local(std::time::Duration::from_millis(200), move || {
+            let mut s = state_clone.borrow_mut();
+            let current_query = s.pending_query.take().unwrap_or_default();
+
+            // Only process if this is still the current query
+            if current_query != query_clone {
+                return glib::ControlFlow::Break;
+            }
+
+            let filter = s.content_filter;
+            drop(s);
+
+            let filtered = filter_entries(&state_clone.borrow().entries, &current_query, filter);
+            state_clone.borrow_mut().filtered = filtered;
+            state_clone.borrow_mut().selected_index = 0;
+            state_clone.borrow_mut().search_debounce_source = None;
+
+            populate_list_box(&list_clone, &state_clone.borrow());
+            update_status(&status_clone, &state_clone.borrow());
+
+            if let Some(row) = list_clone.row_at_index(0) {
+                list_clone.select_row(Some(&row));
+            }
+
+            glib::ControlFlow::Break
+        });
+
+        s.search_debounce_source = Some(source_id);
     });
 
     search_entry.grab_focus();
@@ -330,9 +537,49 @@ fn populate_list_box(list_box: &gtk::ListBox, state: &PickerState) {
 
     for entry in &state.filtered {
         let label_text = if entry.sensitive {
-            "\u{1f512}  Sensitive item".to_string()
+            let age = entry
+                .timestamp
+                .as_ref()
+                .map(picker::format_age)
+                .unwrap_or_default();
+            let pin_badge = if entry.pinned { " \u{1f4cc}" } else { "" };
+            let age_chip = if age.is_empty() {
+                String::new()
+            } else {
+                format!("  \u{00b7}  {age}")
+            };
+            format!(
+                "\u{1f512}  {}  (sensitive){age_chip}{pin_badge}",
+                entry.title
+            )
         } else {
-            picker::format_external_label(entry, false)
+            let icon = entry
+                .content_type
+                .as_ref()
+                .map_or("text", |ct| picker::content_type_icon(ct));
+
+            let title = &entry.title;
+            let subtitle = entry.subtitle.as_deref().unwrap_or("");
+            let age = entry
+                .timestamp
+                .as_ref()
+                .map(picker::format_age)
+                .unwrap_or_default();
+
+            let pin_badge = if entry.pinned { " \u{1f4cc}" } else { "" };
+            let age_chip = if age.is_empty() {
+                String::new()
+            } else {
+                format!("  \u{00b7}  {age}")
+            };
+
+            let subtitle_part = if subtitle.is_empty() {
+                String::new()
+            } else {
+                format!("  \u{00b7}  {subtitle}")
+            };
+
+            format!("{icon}  {title}{subtitle_part}{age_chip}{pin_badge}")
         };
         let label = gtk::Label::builder()
             .label(&label_text)
@@ -356,7 +603,23 @@ fn update_status(label: &gtk::Label, state: &PickerState) {
     let total = state.filtered.len();
     let selected = state.selected_index + 1;
     if total == 0 {
-        label.set_text("No items found");
+        let filter_name = match state.content_filter {
+            ContentFilter::All => "items",
+            ContentFilter::Text => "text items",
+            ContentFilter::Images => "images",
+            ContentFilter::Files => "files",
+            ContentFilter::Pinned => "pinned items",
+            ContentFilter::Sensitive => "sensitive items",
+        };
+        let query_part = state
+            .pending_query
+            .as_ref()
+            .filter(|q| !q.is_empty())
+            .map(|q| format!(" matching \"{q}\""))
+            .unwrap_or_default();
+        label.set_text(&format!(
+            "No {filter_name} found{query_part}  \u{00b7}  try a different filter or search"
+        ));
     } else {
         label.set_text(&format!(
             "{selected}/{total}  \u{00b7}  \u{2191}\u{2193} navigate  \u{00b7}  Enter copy  \u{00b7}  Ctrl+Enter quick-paste  \u{00b7}  Ctrl+P pin  \u{00b7}  Ctrl+1-9 quick  \u{00b7}  Esc close"

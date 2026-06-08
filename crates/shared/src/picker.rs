@@ -591,17 +591,25 @@ pub fn restore_entry(
             PickerAction::QuickPaste => crate::ipc::CopyMode::QuickPaste,
         };
         let client = crate::ipc::IpcClient::new();
-        if let Ok(response) = client.send_command(&crate::ipc::IpcCommand::Copy { id, mode: copy_mode }) {
+        if let Ok(response) = client.send_command(&crate::ipc::IpcCommand::Copy {
+            id,
+            mode: copy_mode,
+        }) {
             if response.ok {
                 // IPC succeeded - parse the result
                 if let Some(data) = response.data {
-                    let mime_type = data.get("mime_type")
+                    let mime_type = data
+                        .get("mime_type")
                         .and_then(|v| v.as_str())
                         .unwrap_or("text/plain")
                         .to_string();
                     return Ok(clipboard::ClipboardSetResult {
                         mime_type,
-                        behavior: if matches!(action, PickerAction::QuickPaste) { "quick-paste" } else { "copy" },
+                        behavior: if matches!(action, PickerAction::QuickPaste) {
+                            "quick-paste"
+                        } else {
+                            "copy"
+                        },
                     });
                 }
             }

@@ -411,11 +411,7 @@ impl cosmic::Application for App {
                             info!("Copied item {} via daemon IPC", id);
                             std::process::exit(0);
                         } else if let Some(ref err) = response.error {
-                            warn!(
-                                "Copy via IPC failed (code {}): {}",
-                                err.code,
-                                err.message
-                            );
+                            warn!("Copy via IPC failed (code {}): {}", err.code, err.message);
                         }
                     }
                     Err(e) => {
@@ -1213,30 +1209,60 @@ impl cosmic::Application for App {
             .width(Length::Fill)
             .padding(10);
 
+        let daemon_indicator = {
+            let (icon, tooltip) = if self.daemon_running {
+                ("network-server-symbolic", "Daemon running")
+            } else {
+                ("network-offline-symbolic", "Daemon not running")
+            };
+            widget::tooltip(
+                widget::button::icon(icon::from_name(icon).size(18)).padding(6),
+                text(tooltip).size(12.0),
+                widget::tooltip::Position::Bottom,
+            )
+        };
+
         let incognito_btn = {
             let icon_name = if self.incognito {
                 "object-locked-symbolic"
             } else {
                 "object-unlocked-symbolic"
             };
-            widget::button::icon(icon::from_name(icon_name).size(18))
-                .on_press(Message::ToggleIncognito)
-                .padding(6)
+            let tooltip = if self.incognito {
+                "Capture paused (incognito)"
+            } else {
+                "Capture active"
+            };
+            widget::tooltip(
+                widget::button::icon(icon::from_name(icon_name).size(18))
+                    .on_press(Message::ToggleIncognito)
+                    .padding(6),
+                text(tooltip).size(12.0),
+                widget::tooltip::Position::Bottom,
+            )
         };
 
         let header = match self.active_tab {
-            AppTab::Clipboard => row()
-                .spacing(6)
-                .push(search_bar)
-                .push(incognito_btn)
-                .push(widget::tooltip(
-                    widget::button::icon(icon::from_name("edit-clear-symbolic").size(18))
-                        .on_press(Message::ClearAll)
-                        .padding(6),
-                    text("Clear unpinned").size(12.0),
-                    widget::tooltip::Position::Bottom,
-                ))
-                .align_y(iced::Alignment::Center),
+            AppTab::Clipboard => {
+                let item_count_badge =
+                    widget::button::standard(format!("{} items", self.items.len()))
+                        .padding([4, 8])
+                        .width(Length::Shrink);
+                row()
+                    .spacing(6)
+                    .push(search_bar)
+                    .push(daemon_indicator)
+                    .push(item_count_badge)
+                    .push(incognito_btn)
+                    .push(widget::tooltip(
+                        widget::button::icon(icon::from_name("edit-clear-symbolic").size(18))
+                            .on_press(Message::ClearAll)
+                            .padding(6),
+                        text("Clear unpinned").size(12.0),
+                        widget::tooltip::Position::Bottom,
+                    ))
+                    .align_y(iced::Alignment::Center)
+            }
             AppTab::Snippets => row()
                 .spacing(6)
                 .push(
