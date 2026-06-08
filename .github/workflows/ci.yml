@@ -67,7 +67,7 @@ jobs:
       - name: Bootstrap pacman & install build deps
         run: |
           pacman -Sy --noconfirm --needed base-devel rust cargo pkgconf wayland-protocols \
-            wl-clipboard sqlite libxkbcommon wayland gtk4
+            wl-clipboard sqlite libxkbcommon wayland gtk4 git
           # gtk4-layer-shell may not be in official repos, build from AUR if missing
           if ! pacman -Qs gtk4-layer-shell > /dev/null 2>&1; then
             cd /tmp
