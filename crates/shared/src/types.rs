@@ -52,6 +52,11 @@ pub struct ClipboardItem {
     /// Hash of the content for deduplication
     pub content_hash: u64,
     /// The actual content (text) or file path (images)
+    ///
+    /// If `encrypted` is true, this holds the base64(nonce || ct)
+    /// ciphertext and must not be displayed, logged, or exported
+    /// without going through the EncryptionManager. Use
+    /// `redacted_preview` for safe display.
     pub content: String,
     /// MIME type (e.g., "text/plain", "image/png")
     pub mime_type: String,
@@ -68,7 +73,25 @@ pub struct ClipboardItem {
     /// Whether this item contains sensitive content
     pub sensitive: bool,
     /// Plain text representation for search indexing (used for HTML items)
+    ///
+    /// If `encrypted` is true, this is also ciphertext and must
+    /// not be displayed / logged / searched without going through
+    /// the EncryptionManager.
+    #[serde(default)]
     pub plain_text: Option<String>,
+    /// Whether the `content` (and `plain_text`, if any) is stored
+    /// as ciphertext. Defaults to `false` (plaintext at rest).
+    #[serde(default)]
+    pub encrypted: bool,
+    /// Cipher scheme version used to encrypt the row, or `None`
+    /// when `encrypted` is false. Currently always `Some(1)`.
+    #[serde(default)]
+    pub encryption_version: Option<i32>,
+    /// Redacted placeholder used by UIs and exports so they never
+    /// have to decrypt the row to render a list item.
+    /// `None` for non-sensitive items.
+    #[serde(default)]
+    pub redacted_preview: Option<String>,
 }
 
 impl ClipboardItem {
@@ -87,6 +110,9 @@ impl ClipboardItem {
             source_app: None,
             sensitive,
             plain_text: None,
+            encrypted: false,
+            encryption_version: None,
+            redacted_preview: None,
         }
     }
 
@@ -105,6 +131,9 @@ impl ClipboardItem {
             source_app: None,
             sensitive: false,
             plain_text: None,
+            encrypted: false,
+            encryption_version: None,
+            redacted_preview: None,
         }
     }
 
@@ -131,6 +160,9 @@ impl ClipboardItem {
             source_app: None,
             sensitive,
             plain_text: Some(plain_text),
+            encrypted: false,
+            encryption_version: None,
+            redacted_preview: None,
         }
     }
 
@@ -154,6 +186,9 @@ impl ClipboardItem {
             source_app: None,
             sensitive,
             plain_text: None,
+            encrypted: false,
+            encryption_version: None,
+            redacted_preview: None,
         }
     }
 
