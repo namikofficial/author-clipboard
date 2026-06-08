@@ -104,7 +104,7 @@ jobs:
           su builder -c 'makepkg --nocheck --nodeps --skippgpcheck'
           ls -la *.pkg.tar.*
 
- deb:
+  # deb:
   #   name: Debian .deb build
   #   runs-on: ubuntu-latest
   #   timeout-minutes: 25

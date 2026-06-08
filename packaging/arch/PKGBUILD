@@ -16,7 +16,7 @@ optdepends=(
   'rofi: feature-rich external menu picker alternative'
 )
 source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz"
-        "gtk4-layer-shell::git+https://aur.archlinux.org/gtk4-layer-shell.git")
+        "gtk4-layer-shell::https://aur.archlinux.org/gtk4-layer-shell.git")
 sha256sums=('SKIP'
             'SKIP')
 
