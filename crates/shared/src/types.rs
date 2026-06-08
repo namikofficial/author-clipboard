@@ -55,7 +55,7 @@ pub struct ClipboardItem {
     ///
     /// If `encrypted` is true, this holds the base64(nonce || ct)
     /// ciphertext and must not be displayed, logged, or exported
-    /// without going through the EncryptionManager. Use
+    /// without going through the `EncryptionManager`. Use
     /// `redacted_preview` for safe display.
     pub content: String,
     /// MIME type (e.g., "text/plain", "image/png")
@@ -76,7 +76,7 @@ pub struct ClipboardItem {
     ///
     /// If `encrypted` is true, this is also ciphertext and must
     /// not be displayed / logged / searched without going through
-    /// the EncryptionManager.
+    /// the `EncryptionManager`.
     #[serde(default)]
     pub plain_text: Option<String>,
     /// Whether the `content` (and `plain_text`, if any) is stored

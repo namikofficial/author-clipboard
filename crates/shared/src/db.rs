@@ -763,7 +763,7 @@ impl Database {
 
     /// Whether the given item is stored as ciphertext in the
     /// `content` (and `plain_text`, if any) columns. The
-    /// EncryptionManager must be used to read these fields.
+    /// `EncryptionManager` must be used to read these fields.
     pub fn is_item_encrypted(item: &crate::types::ClipboardItem) -> bool {
         item.encrypted
     }
