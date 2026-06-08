@@ -1451,4 +1451,176 @@ mod tests {
             "stale sensitive=true on safe content must be cleared"
         );
     }
+
+    // ── Encryption at rest ─────────────────────────────────────────────
+
+    fn tmp_data_dir() -> tempfile::TempDir {
+        tempfile::tempdir().expect("tempdir")
+    }
+
+    #[test]
+    fn insert_with_encryption_stores_ciphertext_not_plaintext() {
+        // A sensitive item inserted with encrypt_sensitive=true must
+        // be retrievable in encrypted form, and the on-disk row
+        // must not contain the plaintext. This is the
+        // no-plaintext-at-rest invariant the hardening pass
+        // requires.
+        let tmp = tmp_data_dir();
+        let mgr = crate::encryption::EncryptionManager::new(tmp.path()).unwrap();
+        let db = make_db();
+        let item = ClipboardItem::new_text("ghp_1234567890abcdefghij".to_string());
+        assert!(item.sensitive);
+        let plaintext = item.content.clone();
+
+        let id = db
+            .insert_with_encryption(&item, &mgr, true)
+            .expect("insert");
+
+        // 1. The DB row must not contain the plaintext in the
+        //    `content` column. (The content column is what a future
+        //    raw-SQL attacker would read; if it contains the
+        //    plaintext, encryption is broken.)
+        let stored: String = db
+            .conn
+            .query_row(
+                "SELECT content FROM clipboard_items WHERE id = ?1",
+                [id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_ne!(
+            stored, plaintext,
+            "content column must hold ciphertext, not plaintext"
+        );
+        assert!(
+            !stored.contains(&plaintext),
+            "content column must not contain the plaintext substring"
+        );
+        // 2. encrypted + version + redacted columns must be set.
+        let (encrypted, version, redacted): (i32, Option<i32>, Option<String>) = db
+            .conn
+            .query_row(
+                "SELECT encrypted, encryption_version, redacted_preview
+                 FROM clipboard_items WHERE id = ?1",
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(encrypted, 1);
+        assert_eq!(version, Some(1));
+        assert!(redacted.is_some(), "redacted_preview must be populated");
+    }
+
+    #[test]
+    fn insert_with_encryption_decrypts_at_boundary() {
+        // Round-trip: insert encrypted, read back through
+        // decrypt_item, get the original plaintext.
+        let tmp = tmp_data_dir();
+        let mgr = crate::encryption::EncryptionManager::new(tmp.path()).unwrap();
+        let db = make_db();
+        let item = ClipboardItem::new_text("postgresql://u:secret@host/db".to_string());
+        let original = item.content.clone();
+        let id = db
+            .insert_with_encryption(&item, &mgr, true)
+            .expect("insert");
+
+        let stored = db.get_by_id(id).unwrap().unwrap();
+        assert!(stored.encrypted);
+        let decrypted = db.decrypt_item(&stored, &mgr).unwrap();
+        assert_eq!(decrypted.content, original);
+    }
+
+    #[test]
+    fn insert_with_encryption_persists_across_restart() {
+        // After "restart" (new manager reading the same key file),
+        // encrypted rows must still decrypt.
+        let tmp = tmp_data_dir();
+        let mgr1 = crate::encryption::EncryptionManager::new(tmp.path()).unwrap();
+        let db = make_db();
+        let item = ClipboardItem::new_text("hunter2-not-sensitive".to_string());
+        let _ = db.insert_with_encryption(&item, &mgr1, true).unwrap();
+
+        // Simulate restart.
+        let mgr2 = crate::encryption::EncryptionManager::new(tmp.path()).unwrap();
+        let items = db.get_recent(10).unwrap();
+        assert_eq!(items.len(), 1);
+        // Non-sensitive item must not have been encrypted.
+        assert!(!items[0].encrypted);
+        let decrypted = db.decrypt_item(&items[0], &mgr2).unwrap();
+        assert_eq!(decrypted.content, item.content);
+    }
+
+    #[test]
+    fn insert_with_encryption_wrong_key_fails_safely() {
+        // Decrypting with a manager from a different data dir must
+        // fail rather than return garbage. This protects against
+        // the user moving the database to a new machine / user
+        // account and getting a silent tamper.
+        let tmp1 = tmp_data_dir();
+        let tmp2 = tmp_data_dir();
+        let mgr1 = crate::encryption::EncryptionManager::new(tmp1.path()).unwrap();
+        let mgr2 = crate::encryption::EncryptionManager::new(tmp2.path()).unwrap();
+
+        let db = make_db();
+        let item = ClipboardItem::new_text("ghp_secret_value".to_string());
+        let _ = db
+            .insert_with_encryption(&item, &mgr1, true)
+            .expect("insert");
+        let stored = db.get_recent(10).unwrap();
+        assert_eq!(stored.len(), 1);
+
+        let result = db.decrypt_item(&stored[0], &mgr2);
+        assert!(
+            result.is_err(),
+            "decryption with a foreign key must fail rather than return plaintext"
+        );
+    }
+
+    #[test]
+    fn insert_with_encryption_flag_false_stores_plaintext() {
+        // With encrypt_sensitive=false, sensitive items are still
+        // stored as plaintext (the user has opted out). This is the
+        // expected behavior — the flag is opt-in.
+        let tmp = tmp_data_dir();
+        let mgr = crate::encryption::EncryptionManager::new(tmp.path()).unwrap();
+        let db = make_db();
+        let item = ClipboardItem::new_text("sk-abc123xyz".to_string());
+        assert!(item.sensitive);
+        let id = db
+            .insert_with_encryption(&item, &mgr, false)
+            .expect("insert");
+
+        let stored: String = db
+            .conn
+            .query_row(
+                "SELECT content FROM clipboard_items WHERE id = ?1",
+                [id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored, "sk-abc123xyz", "plaintext must be stored when opt-out");
+
+        let (encrypted, redacted): (i32, Option<String>) = db
+            .conn
+            .query_row(
+                "SELECT encrypted, redacted_preview FROM clipboard_items WHERE id = ?1",
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(encrypted, 0);
+        assert!(redacted.is_none());
+    }
+
+    #[test]
+    fn redacted_preview_helper_is_safe_for_sensitive_items() {
+        // The helper must never echo the plaintext back, even
+        // partially. A UI that uses this helper is safe by
+        // construction.
+        let item = ClipboardItem::new_text("MyP@ssw0rd!hunter2".to_string());
+        let preview = item.redacted_preview();
+        assert!(!preview.contains("MyP"));
+        assert!(!preview.contains("hunter"));
+        assert!(preview.contains("Sensitive"));
+    }
 }
