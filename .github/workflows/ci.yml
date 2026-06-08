@@ -95,7 +95,7 @@ jobs:
           export BUILDDIR=/tmp/arch-build
           export PKGDEST=/tmp/arch-dest
           mkdir -p "$BUILDDIR" "$PKGDEST"
-          chown -R builder:builder "$BUILDDIR" "$PKGDEST"
+          chown -R builder:builder . "$BUILDDIR" "$PKGDEST"
           su builder -c 'makepkg --nocheck --nodeps --skippgpcheck'
           ls -la *.pkg.tar.*
 
