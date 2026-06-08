@@ -109,8 +109,16 @@ impl ClipboardItem {
     }
 
     /// Create a new HTML clipboard item with both HTML content and plain text for search.
+    ///
+    /// `html_content` is the raw `text/html` payload, `plain_text` is the
+    /// browser-provided `text/plain` companion. Sensitive detection runs
+    /// on the plain text, on the tag-stripped HTML body, on every quoted
+    /// attribute value, and on the raw HTML — see
+    /// `crate::sensitive::check_sensitive_html`.
     pub fn new_html(html_content: String, plain_text: String) -> Self {
         let content_hash = Self::hash_content(&html_content);
+        let sensitive =
+            crate::sensitive::check_sensitive_html(&html_content, &plain_text).is_sensitive;
         Self {
             id: 0,
             content_hash,
@@ -121,15 +129,19 @@ impl ClipboardItem {
             pinned: false,
             starred: false,
             source_app: None,
-            sensitive: false,
+            sensitive,
             plain_text: Some(plain_text),
         }
     }
 
     /// Create a new file list clipboard item.
-    /// `file_list` is the raw text/uri-list content.
+    /// `file_list` is the raw text/uri-list content. Sensitive
+    /// detection runs on the full URI list so that URIs with embedded
+    /// credentials (e.g. `postgresql://user:pass@host/db`) are
+    /// flagged the same way as a plain-text credential.
     pub fn new_files(file_list: String) -> Self {
         let content_hash = Self::hash_content(&file_list);
+        let sensitive = crate::sensitive::check_sensitivity(&file_list).is_sensitive;
         Self {
             id: 0,
             content_hash,
@@ -140,7 +152,7 @@ impl ClipboardItem {
             pinned: false,
             starred: false,
             source_app: None,
-            sensitive: false,
+            sensitive,
             plain_text: None,
         }
     }

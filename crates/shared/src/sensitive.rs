@@ -292,14 +292,17 @@ fn is_jwt_like(s: &str) -> bool {
 
 fn has_connection_credentials(s: &str) -> bool {
     let lower = s.to_lowercase();
-    // URI format: scheme://user:password@host
-    if lower.contains("://") && lower.contains('@') {
-        // Check for user:pass@host pattern
-        if let Some(after_scheme) = lower.split("://").nth(1) {
-            if after_scheme.contains(':') && after_scheme.contains('@') {
-                let at_pos = after_scheme.find('@').unwrap_or(0);
-                let colon_pos = after_scheme.find(':').unwrap_or(0);
-                if colon_pos < at_pos {
+    // URI format: scheme://user:password@host. We must scan every
+    // URI in the input, not just the first one — clipboard payloads
+    // can be a multi-line text/uri-list where the first `://` is an
+    // innocent `file://` and a later line is the real
+    // `postgres://user:pass@host/db`.
+    for part in lower.split_whitespace() {
+        if let Some(scheme_end) = part.find("://") {
+            let after = &part[scheme_end + 3..];
+            if let Some(at_pos) = after.find('@') {
+                let userinfo = &after[..at_pos];
+                if userinfo.contains(':') {
                     return true;
                 }
             }
@@ -419,6 +422,16 @@ mod tests {
         assert!(check_sensitivity("host=localhost password=secret").is_sensitive);
         // Plain URL without credentials should not trigger
         assert!(!check_sensitivity("https://example.com/page").is_sensitive);
+    }
+
+    #[test]
+    fn test_connection_string_in_text_uri_list() {
+        // text/uri-list with a leading innocent file:// line and a
+        // later credentialed postgres:// line. The first
+        // `://` is file://; the detector must still spot the
+        // credentialed URI in the next line.
+        let list = "file:///home/me/db.dump\npostgresql://admin:secret@db.example.com/x";
+        assert!(check_sensitivity(list).is_sensitive);
     }
 
     #[test]
