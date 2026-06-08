@@ -45,6 +45,7 @@ impl std::str::FromStr for ContentType {
 }
 
 /// Represents a single clipboard entry
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClipboardItem {
     /// Unique identifier
