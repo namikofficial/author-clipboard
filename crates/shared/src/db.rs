@@ -292,6 +292,103 @@ impl Database {
         Ok(self.conn.last_insert_rowid())
     }
 
+    /// Insert with the encryption-at-rest policy applied.
+    ///
+    /// If `item.sensitive` is true AND `encrypt_sensitive` is true,
+    /// the `content` column is replaced with the ciphertext and the
+    /// `encrypted` / `encryption_version` / `redacted_preview`
+    /// columns are populated. Otherwise the item is inserted as a
+    /// plain row (the same shape as `insert_item`).
+    ///
+    /// The FTS5 index is built from the *redacted* form for
+    /// encrypted items, so a free-text search never sees the
+    /// plaintext of an encrypted item. This is the safe default.
+    ///
+    /// Returns the new row id. A failure to encrypt or insert
+    /// propagates the error and **no row is created**.
+    pub fn insert_with_encryption(
+        &self,
+        item: &ClipboardItem,
+        manager: &crate::encryption::EncryptionManager,
+        encrypt_sensitive: bool,
+    ) -> SqlResult<i64> {
+        // Decide whether to encrypt before touching the DB.
+        let (stored_content, stored_plain_text, encrypted, version, redacted) =
+            if item.sensitive && encrypt_sensitive {
+                let ciphertext = manager
+                    .encrypt(&item.content)
+                    .map_err(|e| rusqlite::Error::InvalidQuery)?;
+                let plain_text_ciphertext = match &item.plain_text {
+                    Some(plain) if !plain.is_empty() => Some(
+                        manager
+                            .encrypt(plain)
+                            .map_err(|e| rusqlite::Error::InvalidQuery)?,
+                    ),
+                    _ => None,
+                };
+                let redacted = item.redacted_preview();
+                (ciphertext, plain_text_ciphertext, 1_i32, Some(1_i32), Some(redacted))
+            } else {
+                (
+                    item.content.clone(),
+                    item.plain_text.clone(),
+                    0_i32,
+                    None,
+                    None,
+                )
+            };
+
+        self.conn.execute(
+            "INSERT INTO clipboard_items
+                (content_hash, content, mime_type, content_type, timestamp, pinned, source_app, sensitive, plain_text,
+                 encrypted, encryption_version, redacted_preview)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            rusqlite::params![
+                item.content_hash.cast_signed(),
+                stored_content,
+                &item.mime_type,
+                item.content_type.as_str(),
+                item.timestamp.to_rfc3339(),
+                i32::from(item.pinned),
+                &item.source_app,
+                i32::from(item.sensitive),
+                &stored_plain_text,
+                encrypted,
+                version,
+                &redacted,
+            ],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    /// Decrypt the content of a stored item, returning a fresh
+    /// `ClipboardItem` whose `content` (and `plain_text`, if any)
+    /// has been replaced with the plaintext.
+    ///
+    /// If the item is not encrypted (`encrypted = 0`), the input
+    /// item is returned unchanged. If the item is encrypted but
+    /// the supplied `EncryptionManager` cannot decrypt it
+    /// (e.g. wrong key, tampered ciphertext), an error is
+    /// returned and the caller must decide what to do.
+    pub fn decrypt_item(
+        &self,
+        item: &ClipboardItem,
+        manager: &crate::encryption::EncryptionManager,
+    ) -> Result<ClipboardItem, String> {
+        // Fast path: not encrypted, no work to do.
+        if !Self::is_item_encrypted(item) {
+            return Ok(item.clone());
+        }
+        let mut out = item.clone();
+        out.content = manager.decrypt(&item.content)?;
+        if let Some(ciphertext) = &item.plain_text {
+            if !ciphertext.is_empty() {
+                out.plain_text = Some(manager.decrypt(ciphertext)?);
+            }
+        }
+        Ok(out)
+    }
+
     /// Insert only if content hash doesn't already exist within the dedup window.
     /// If duplicate within `dedup_window_seconds`, bumps the existing item's timestamp instead.
     /// Returns the id of the inserted or bumped row.
@@ -329,7 +426,7 @@ impl Database {
     /// Get the most recent items, pinned first.
     pub fn get_recent(&self, limit: usize) -> SqlResult<Vec<ClipboardItem>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, content_hash, content, mime_type, content_type, timestamp, pinned, starred, source_app, sensitive, plain_text
+            "SELECT id, content_hash, content, mime_type, content_type, timestamp, pinned, starred, source_app, sensitive, plain_text, encrypted, encryption_version, redacted_preview
              FROM clipboard_items
              ORDER BY pinned DESC, timestamp DESC
              LIMIT ?1",
@@ -344,7 +441,7 @@ impl Database {
     /// `Ok(None)` when the history is empty.
     pub fn get_most_recent(&self) -> SqlResult<Option<ClipboardItem>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, content_hash, content, mime_type, content_type, timestamp, pinned, starred, source_app, sensitive, plain_text
+            "SELECT id, content_hash, content, mime_type, content_type, timestamp, pinned, starred, source_app, sensitive, plain_text, encrypted, encryption_version, redacted_preview
              FROM clipboard_items
              ORDER BY timestamp DESC
              LIMIT 1",
@@ -357,7 +454,7 @@ impl Database {
     pub fn search(&self, query: &str, limit: usize) -> SqlResult<Vec<ClipboardItem>> {
         // Try FTS5 first for better performance
         let fts_result = self.conn.prepare(
-            "SELECT ci.id, ci.content_hash, ci.content, ci.mime_type, ci.content_type, ci.timestamp, ci.pinned, ci.starred, ci.source_app, ci.sensitive, ci.plain_text
+            "SELECT ci.id, ci.content_hash, ci.content, ci.mime_type, ci.content_type, ci.timestamp, ci.pinned, ci.starred, ci.source_app, ci.sensitive, ci.plain_text, ci.encrypted, ci.encryption_version, ci.redacted_preview
              FROM clipboard_fts fts
              JOIN clipboard_items ci ON ci.id = fts.rowid
              WHERE clipboard_fts MATCH ?1
@@ -382,7 +479,7 @@ impl Database {
         // Fallback: LIKE search
         let pattern = format!("%{query}%");
         let mut stmt = self.conn.prepare(
-            "SELECT id, content_hash, content, mime_type, content_type, timestamp, pinned, starred, source_app, sensitive, plain_text
+            "SELECT id, content_hash, content, mime_type, content_type, timestamp, pinned, starred, source_app, sensitive, plain_text, encrypted, encryption_version, redacted_preview
              FROM clipboard_items
              WHERE (content LIKE ?1 OR plain_text LIKE ?1)
              ORDER BY pinned DESC, timestamp DESC
@@ -394,7 +491,7 @@ impl Database {
     /// Get a single item by id.
     pub fn get_by_id(&self, id: i64) -> SqlResult<Option<ClipboardItem>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, content_hash, content, mime_type, content_type, timestamp, pinned, starred, source_app, sensitive, plain_text
+            "SELECT id, content_hash, content, mime_type, content_type, timestamp, pinned, starred, source_app, sensitive, plain_text, encrypted, encryption_version, redacted_preview
              FROM clipboard_items WHERE id = ?1",
         )?;
         let mut items = stmt.query_map([id], Self::row_to_item)?;
@@ -664,6 +761,13 @@ impl Database {
 
     // ── Helpers ────────────────────────────────────────────────────────
 
+    /// Whether the given item is stored as ciphertext in the
+    /// `content` (and `plain_text`, if any) columns. The
+    /// EncryptionManager must be used to read these fields.
+    pub fn is_item_encrypted(item: &crate::types::ClipboardItem) -> bool {
+        item.encrypted
+    }
+
     /// Re-derive the `sensitive` flag for an item being imported,
     /// using the same detection rules as the constructors. This is
     /// the *only* way an item's sensitive flag is allowed to enter
@@ -699,6 +803,9 @@ impl Database {
             source_app: row.get(8)?,
             sensitive: row.get::<_, i32>(9).unwrap_or(0) != 0,
             plain_text: row.get(10).ok(),
+            encrypted: row.get::<_, i32>(11).unwrap_or(0) != 0,
+            encryption_version: row.get(12).ok(),
+            redacted_preview: row.get(13).ok(),
         })
     }
 
@@ -864,7 +971,7 @@ impl Database {
     /// Get all items in a collection, ordered by `added_at` DESC.
     pub fn get_collection_items(&self, collection_id: &str) -> SqlResult<Vec<ClipboardItem>> {
         let mut stmt = self.conn.prepare(
-            "SELECT ci.id, ci.content_hash, ci.content, ci.mime_type, ci.content_type, ci.timestamp, ci.pinned, ci.starred, ci.source_app, ci.sensitive, ci.plain_text
+            "SELECT ci.id, ci.content_hash, ci.content, ci.mime_type, ci.content_type, ci.timestamp, ci.pinned, ci.starred, ci.source_app, ci.sensitive, ci.plain_text, ci.encrypted, ci.encryption_version, ci.redacted_preview
              FROM clipboard_items ci
              JOIN collection_memberships cm ON ci.id = cm.item_id
              WHERE cm.collection_id = ?1
