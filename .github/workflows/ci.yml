@@ -70,10 +70,12 @@ jobs:
             wl-clipboard sqlite libxkbcommon wayland gtk4 git
           # gtk4-layer-shell may not be in official repos, build from AUR if missing
           if ! pacman -Qs gtk4-layer-shell > /dev/null 2>&1; then
+            useradd -m builder
             cd /tmp
             git clone https://aur.archlinux.org/gtk4-layer-shell.git
+            chown -R builder:builder gtk4-layer-shell
             cd gtk4-layer-shell
-            makepkg --noconfirm --skippgpcheck
+            su builder -c 'makepkg --noconfirm --skippgpcheck'
             pacman --noconfirm --upgrade gtk4-layer-shell-*.pkg.tar.zst
           fi
 
