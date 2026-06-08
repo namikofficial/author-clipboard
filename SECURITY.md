@@ -1,11 +1,24 @@
 # Security Policy
 
+## Branch status (read first)
+
+> The `dev` branch is **pre-release** and is **not** eligible for security
+> support. The most recent **released** version is `v0.3.1`. Anything
+> on `dev` (currently targeting `0.6.0`) is subject to change without
+> notice, may not have all sensitive-detection paths enforced, and
+> should not be relied on in production.
+
 ## Supported Versions
 
-| Version | Supported |
-|---------|-----------|
-| 0.3.x   | ✅ Yes    |
-| < 0.3   | ❌ No     |
+| Version | Branch | Supported | Notes |
+|---------|--------|-----------|-------|
+| `v0.3.x` | `main` | ✅ Yes | Latest released; use this. |
+| `dev` (targeting `0.6.0`) | `dev` | ❌ No (pre-release) | Pre-release work; security fixes land on `main` and are backported only at maintainer discretion. |
+| `< 0.3` | — | ❌ No | EOL. |
+
+A release is "supported" only after it is tagged `v<version>` on
+`main` and the corresponding GitHub release is published. Until
+then, the version is **pre-release** and unsupported.
 
 ## Reporting Vulnerabilities
 
@@ -93,3 +106,5 @@ Security-relevant dependencies:
 | Date | Scope | Findings | Status |
 |------|-------|----------|--------|
 | 2025 | Full repo audit | URI credential detection gap, IPC `/tmp` fallback | ✅ Fixed in v0.3.1 |
+| 2026-06 | Dev branch metadata audit | `<release>` entries in metainfo claimed 0.4.0 / 0.5.0 were released when no git tag or GitHub release existed. | ✅ Fixed — metainfo now lists only released versions, `SECURITY.md` clearly marks `dev` as unsupported pre-release. |
+| 2026-06 | Sensitive-detection path audit (in progress) | `new_html()` and `new_files()` did not run sensitive detection. `encrypt_sensitive` is opt-in and is not enforced on every code path. | ⏳ Tracked in `specs/features/022-hardening-pass/`, Phases 2–3. |
