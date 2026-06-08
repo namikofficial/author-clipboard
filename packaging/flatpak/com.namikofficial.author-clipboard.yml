@@ -58,7 +58,7 @@ modules:
     sources:
       - type: git
         url: https://github.com/namikofficial/author-clipboard
-        tag: v0.5.0
+        tag: v0.6.0
         # When the upstream tag moves, the maintainer updates this file
         # AND .SRCINFO / PKGBUILD / flake.nix version pins in lockstep.
 

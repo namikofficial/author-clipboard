@@ -11,7 +11,7 @@
   # To enter a development shell with all build deps available:
   #   nix develop github:namikofficial/author-clipboard
   #
-  # The flake pins the upstream tag to the workspace version (currently 0.5.0).
+  # The flake pins the upstream tag to the workspace version (currently 0.6.0).
   # When cutting a release, update the `src.tag` below and the `version` arg
   # in lockstep with Cargo.toml.
 
@@ -38,7 +38,7 @@
 
         # Version pinned in lockstep with workspace.version. CI verifies
         # that this matches the tag used in `src`.
-        version = "0.5.0";
+        version = "0.6.0";
       in
       {
         packages.default = pkgs.rustPlatform.buildRustPackage {
