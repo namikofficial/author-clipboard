@@ -1538,16 +1538,22 @@ mod tests {
         let mgr1 = crate::encryption::EncryptionManager::new(tmp.path()).unwrap();
         let db = make_db();
         let item = ClipboardItem::new_text("hunter2-not-sensitive".to_string());
-        let _ = db.insert_with_encryption(&item, &mgr1, true).unwrap();
+        // Force the test fixture to be sensitive so the
+        // encrypt_sensitive=true path is actually exercised.
+        let mut sensitive_item = item.clone();
+        sensitive_item.sensitive = true;
+        let _ = db
+            .insert_with_encryption(&sensitive_item, &mgr1, true)
+            .unwrap();
 
         // Simulate restart.
         let mgr2 = crate::encryption::EncryptionManager::new(tmp.path()).unwrap();
         let items = db.get_recent(10).unwrap();
         assert_eq!(items.len(), 1);
-        // Non-sensitive item must not have been encrypted.
-        assert!(!items[0].encrypted);
+        // Sensitive + encrypt_sensitive=true item must be encrypted.
+        assert!(items[0].encrypted);
         let decrypted = db.decrypt_item(&items[0], &mgr2).unwrap();
-        assert_eq!(decrypted.content, item.content);
+        assert_eq!(decrypted.content, sensitive_item.content);
     }
 
     #[test]
