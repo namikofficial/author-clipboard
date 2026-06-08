@@ -317,12 +317,12 @@ impl Database {
             if item.sensitive && encrypt_sensitive {
                 let ciphertext = manager
                     .encrypt(&item.content)
-                    .map_err(|e| rusqlite::Error::InvalidQuery)?;
+                    .map_err(|_e| rusqlite::Error::InvalidQuery)?;
                 let plain_text_ciphertext = match &item.plain_text {
                     Some(plain) if !plain.is_empty() => Some(
                         manager
                             .encrypt(plain)
-                            .map_err(|e| rusqlite::Error::InvalidQuery)?,
+                            .map_err(|_e| rusqlite::Error::InvalidQuery)?,
                     ),
                     _ => None,
                 };
