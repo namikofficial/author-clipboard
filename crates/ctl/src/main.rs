@@ -3,7 +3,7 @@ use author_clipboard_shared::clipboard;
 use author_clipboard_shared::compositor::{detect_display_server, probe_wayland_protocols};
 use author_clipboard_shared::config::Config;
 use author_clipboard_shared::db::Database;
-use author_clipboard_shared::ipc::{IpcClient, IpcMessage};
+use author_clipboard_shared::ipc::{CopyMode, IpcClient, IpcCommand, IpcMessage};
 use author_clipboard_shared::picker::{self, PickerAction, PickerOptions, PickerSource};
 use clap::{Parser, Subcommand, ValueEnum};
 use std::process::{Command as ProcessCommand, Stdio};
@@ -38,12 +38,25 @@ enum Command {
     /// Check if daemon is running
     Ping,
     /// Get daemon status
-    Status,
+    Status {
+        /// Output as JSON (for status bars / scripts)
+        #[arg(long, default_value = "false")]
+        json: bool,
+        /// Pretty-print JSON output
+        #[arg(long, default_value = "false")]
+        pretty: bool,
+    },
     /// List recent clipboard items
     History {
         /// Number of items to show (default: 10)
         #[arg(short, long, default_value = "10")]
         count: usize,
+        /// Output as JSON
+        #[arg(long, default_value = "false")]
+        json: bool,
+        /// Pretty-print JSON output
+        #[arg(long, default_value = "false")]
+        pretty: bool,
     },
     /// Clear all unpinned clipboard items
     Clear,
@@ -134,7 +147,12 @@ impl From<ActionArg> for PickerAction {
     }
 }
 
-#[allow(clippy::too_many_lines)]
+#[allow(
+    clippy::too_many_lines,
+    clippy::single_match_else,
+    clippy::redundant_closure_for_method_calls,
+    clippy::uninlined_format_args
+)]
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
@@ -143,8 +161,9 @@ fn main() -> Result<()> {
         Command::Hide => kill_applet()?,
         Command::ShowAt { x, y } => send_ipc(&IpcMessage::ShowAt { x, y })?,
         Command::Ping => {
-            match send_ipc(&IpcMessage::Ping) {
-                Ok(()) => println!("Daemon is running"),
+            let client = IpcClient::new();
+            match client.send(&IpcMessage::Ping) {
+                Ok(_) => println!("Daemon is running"),
                 Err(e) => {
                     eprintln!("Daemon is not running: {e}");
                     std::process::exit(1);
@@ -152,52 +171,149 @@ fn main() -> Result<()> {
             }
             return Ok(());
         }
-        Command::Status => {
-            let config = Config::load();
-            let db = Database::open(&config.db_path()).context("Failed to open database")?;
-            let stats = db.get_stats().context("Failed to get stats")?;
-            println!("Items: {}", stats.total_items);
-            println!("Pinned: {}", stats.pinned_items);
-            #[allow(clippy::cast_precision_loss)]
-            let size_kb = stats.total_size_bytes as f64 / 1024.0;
-            println!("Size: {size_kb:.1} KB");
-            println!("Database: {}", config.db_path().display());
-            let client = IpcClient::new();
-            match client.send(&IpcMessage::Ping) {
-                Ok(_) => println!("Daemon: running"),
-                Err(_) => println!("Daemon: not running"),
+        Command::Status { json, pretty } => {
+            if json || pretty {
+                let payload = build_status_json_payload()?;
+                let rendered = if pretty {
+                    serde_json::to_string_pretty(&payload).context("Failed to format JSON")?
+                } else {
+                    serde_json::to_string(&payload).context("Failed to serialize JSON")?
+                };
+                println!("{rendered}");
+            } else {
+                let client = IpcClient::new();
+                match client.send_command(&IpcCommand::Status) {
+                    Ok(resp) => {
+                        if let Some(data) = resp.data {
+                            println!(
+                                "Items: {}",
+                                data.get("item_count").unwrap_or(&serde_json::Value::Null)
+                            );
+                            println!(
+                                "Pinned: {}",
+                                data.get("pinned_count").unwrap_or(&serde_json::Value::Null)
+                            );
+                            if let Some(size) = data
+                                .get("database_size_bytes")
+                                .and_then(serde_json::Value::as_u64)
+                            {
+                                #[allow(clippy::cast_precision_loss)]
+                                let size_kb = size as f64 / 1024.0;
+                                println!("Size: {size_kb:.1} KB");
+                            }
+                            println!("Daemon: running");
+                        }
+                    }
+                    Err(_) => {
+                        // Fallback to direct DB access if daemon is not running
+                        println!("Daemon: not running (using direct DB access)");
+                        let config = Config::load();
+                        if let Ok(db) = Database::open(&config.db_path()) {
+                            if let Ok(stats) = db.get_stats() {
+                                println!("Items: {}", stats.total_items);
+                                println!("Pinned: {}", stats.pinned_items);
+                                #[allow(clippy::cast_precision_loss)]
+                                let size_kb = stats.total_size_bytes as f64 / 1024.0;
+                                println!("Size: {size_kb:.1} KB");
+                            }
+                        }
+                    }
+                }
             }
         }
-        Command::History { count } => {
-            let config = Config::load();
-            let db = Database::open(&config.db_path()).context("Failed to open database")?;
-            let items = db.get_recent(count).context("Failed to get items")?;
-            if items.is_empty() {
-                println!("No clipboard items.");
-            } else {
-                for item in &items {
-                    let preview = if item.content.len() > 80 {
-                        format!("{}...", &item.content[..80])
+        Command::History {
+            count,
+            json,
+            pretty,
+        } => {
+            let client = IpcClient::new();
+            match client.send_command(&IpcCommand::History {
+                limit: count,
+                offset: None,
+                filters: None,
+            }) {
+                Ok(resp) => {
+                    if json || pretty {
+                        print_json(&resp, pretty)?;
+                    } else if let Some(data) = resp.data {
+                        let items = data
+                            .get("items")
+                            .and_then(|v| v.as_array())
+                            .cloned()
+                            .unwrap_or_default();
+                        if items.is_empty() {
+                            println!("No clipboard items.");
+                        } else {
+                            for item in items {
+                                let id = item.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
+                                let preview =
+                                    item.get("preview").and_then(|v| v.as_str()).unwrap_or("");
+                                let pinned = item
+                                    .get("pinned")
+                                    .and_then(|v| v.as_bool())
+                                    .unwrap_or(false);
+                                let content_type = item
+                                    .get("content_type")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("text");
+                                let pinned_str = if pinned { " [pinned]" } else { "" };
+                                println!("[{}] {}{} ({})", id, preview, pinned_str, content_type);
+                            }
+                        }
+                    }
+                }
+                Err(_) => {
+                    // Fallback to direct DB access
+                    eprintln!("Daemon not running, using direct DB access (warning: bypasses daemon policy)");
+                    let config = Config::load();
+                    let db =
+                        Database::open(&config.db_path()).context("Failed to open database")?;
+                    let items = db.get_recent(count).context("Failed to get items")?;
+                    if items.is_empty() {
+                        println!("No clipboard items.");
                     } else {
-                        item.content.clone()
-                    };
-                    let preview = preview.replace('\n', " ");
-                    let pinned = if item.pinned { " [pinned]" } else { "" };
-                    println!(
-                        "[{}] {}{} ({})",
-                        item.id,
-                        preview,
-                        pinned,
-                        item.content_type.as_str()
-                    );
+                        for item in &items {
+                            let preview = if item.content.len() > 80 {
+                                format!("{}...", &item.content[..80])
+                            } else {
+                                item.content.clone()
+                            };
+                            let preview = preview.replace('\n', " ");
+                            let pinned = if item.pinned { " [pinned]" } else { "" };
+                            println!(
+                                "[{}] {}{} ({})",
+                                item.id,
+                                preview,
+                                pinned,
+                                item.content_type.as_str()
+                            );
+                        }
+                    }
                 }
             }
         }
         Command::Clear => {
-            let config = Config::load();
-            let db = Database::open(&config.db_path()).context("Failed to open database")?;
-            let count = db.clear_unpinned().context("Failed to clear items")?;
-            println!("Cleared {count} unpinned items.");
+            let client = IpcClient::new();
+            match client.send_command(&IpcCommand::ClearUnpinned) {
+                Ok(resp) => {
+                    if let Some(data) = resp.data {
+                        let count = data
+                            .get("deleted_count")
+                            .and_then(serde_json::Value::as_u64)
+                            .unwrap_or(0);
+                        println!("Cleared {count} unpinned items.");
+                    }
+                }
+                Err(_) => {
+                    // Fallback to direct DB access
+                    eprintln!("Daemon not running, using direct DB access (warning: bypasses daemon policy)");
+                    let config = Config::load();
+                    let db =
+                        Database::open(&config.db_path()).context("Failed to open database")?;
+                    let count = db.clear_unpinned().context("Failed to clear items")?;
+                    println!("Cleared {count} unpinned items.");
+                }
+            }
         }
         Command::Export { output } => {
             let config = Config::load();
@@ -222,10 +338,8 @@ fn main() -> Result<()> {
             println!("clear_on_lock: {}", config.clear_on_lock);
             println!("dedup_window_seconds: {}", config.dedup_window_seconds);
             println!("mime_denylist: {:?}", config.mime_denylist);
-            println!(
-                "content_regex_denylist: {:?}",
-                config.content_regex_denylist
-            );
+            println!("content_denylist: {:?}", config.content_denylist);
+            println!("content_pattern_mode: {:?}", config.content_pattern_mode);
             println!("picker.default_source: {}", config.picker.default_source);
             println!("picker.default_mode: {}", config.picker.default_mode);
             println!("picker.max_results: {}", config.picker.max_results);
@@ -259,6 +373,99 @@ fn main() -> Result<()> {
         Command::HyprlandConfig => print_hyprland_config(),
     }
     Ok(())
+}
+
+impl Command {
+    /// Returns `true` when a subcommand that supports `--json` was
+    /// invoked with that flag. Kept for forward compatibility (and
+    /// potential shared tests) — the actual dispatch is in the
+    /// `match cli.command` arm.
+    #[allow(dead_code)]
+    fn is_json(&self) -> bool {
+        match self {
+            Command::History { json, .. } | Command::Status { json, .. } => *json,
+            _ => false,
+        }
+    }
+}
+
+fn print_json(resp: &author_clipboard_shared::ipc::IpcResponse, pretty: bool) -> Result<()> {
+    let json = if pretty {
+        serde_json::to_string_pretty(&resp).context("Failed to format JSON")?
+    } else {
+        serde_json::to_string(&resp).context("Failed to serialize JSON")?
+    };
+    println!("{json}");
+    Ok(())
+}
+
+/// Build the structured status payload for `--json` output.
+///
+/// Always reads from the local `SQLite` database so the payload is
+/// available even when the daemon is down (graceful degradation for
+/// the Waybar / Wayle module). The `running` and `daemon_pid` fields
+/// reflect the live IPC ping.
+fn build_status_json_payload() -> Result<serde_json::Value> {
+    let client = IpcClient::new();
+    let (running, daemon_pid) = match client.send_command(&IpcCommand::Ping) {
+        Ok(resp) => {
+            let pid = resp
+                .data
+                .as_ref()
+                .and_then(|d| d.get("daemon_pid"))
+                .and_then(serde_json::Value::as_u64)
+                .and_then(|p| u32::try_from(p).ok());
+            (true, pid)
+        }
+        _ => (false, None),
+    };
+
+    let config = Config::load();
+    let db = Database::open(&config.db_path()).context("Failed to open database")?;
+
+    let stats = db.get_stats().context("Failed to read stats")?;
+    let most_recent = db.get_most_recent().context("Failed to read most recent")?;
+
+    let (last_type, last_preview, last_timestamp, sensitive_last) = match most_recent {
+        Some(item) => {
+            let preview = if item.sensitive {
+                "Sensitive item".to_string()
+            } else {
+                preview_text(&item)
+            };
+            (
+                item.content_type.as_str().to_string(),
+                preview,
+                Some(item.timestamp.timestamp()),
+                item.sensitive,
+            )
+        }
+        None => ("text".to_string(), String::new(), None, false),
+    };
+
+    Ok(serde_json::json!({
+        "running": running,
+        "daemon_pid": daemon_pid,
+        "total": stats.total_items,
+        "pinned": stats.pinned_items,
+        "last_type": last_type,
+        "last_preview": last_preview,
+        "last_timestamp": last_timestamp,
+        "sensitive_last": sensitive_last,
+    }))
+}
+
+/// Truncate the most recent item to a single-line preview suitable for
+/// the Waybar tooltip. Strips newlines and limits the length.
+fn preview_text(item: &author_clipboard_shared::ClipboardItem) -> String {
+    let raw = item.plain_text.as_deref().unwrap_or(&item.content);
+    let single_line: String = raw.chars().filter(|c| *c != '\n' && *c != '\r').collect();
+    if single_line.chars().count() > 60 {
+        let truncated: String = single_line.chars().take(57).collect();
+        format!("{truncated}…")
+    } else {
+        single_line
+    }
 }
 
 fn run_doctor() {
@@ -302,17 +509,41 @@ fn run_doctor() {
     );
 }
 
+#[allow(clippy::single_match_else)]
 fn copy_item_by_id(id: i64) -> Result<()> {
-    let config = Config::load();
-    let db = Database::open(&config.db_path()).context("Failed to open database")?;
-    let item = db
-        .get_by_id(id)
-        .context("Failed to read clipboard item")?
-        .with_context(|| format!("No clipboard item with id {id}"))?;
-    let result = clipboard::set_clipboard_item(&item, &config.data_dir)
-        .with_context(|| format!("Failed to copy item {id}"))?;
-    println!("Copied item {id} as {}", result.mime_type);
-    Ok(())
+    // Try IPC first
+    let client = IpcClient::new();
+    match client.send_command(&IpcCommand::Copy {
+        id,
+        mode: CopyMode::Copy,
+    }) {
+        Ok(resp) => {
+            if let Some(data) = resp.data {
+                let mime_type = data
+                    .get("mime_type")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("text/plain");
+                println!("Copied item {id} as {mime_type}");
+            }
+            Ok(())
+        }
+        Err(_) => {
+            // Fallback to direct DB access
+            eprintln!(
+                "Daemon not running, using direct DB access (warning: bypasses daemon policy)"
+            );
+            let config = Config::load();
+            let db = Database::open(&config.db_path()).context("Failed to open database")?;
+            let item = db
+                .get_by_id(id)
+                .context("Failed to read clipboard item")?
+                .with_context(|| format!("No clipboard item with id {id}"))?;
+            let result = clipboard::set_clipboard_item(&item, &config.data_dir)
+                .with_context(|| format!("Failed to copy item {id}"))?;
+            println!("Copied item {id} as {}", result.mime_type);
+            Ok(())
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Author Clipboard
+GenericName=Clipboard Manager
+Comment=Native COSMIC clipboard manager with wlroots compositor support
+Exec=AppRun
+Icon=author-clipboard
+Terminal=false
+Categories=Utility;
+Keywords=clipboard;paste;copy;history;
+StartupNotify=true
+X-GNOME-UsesNotifications=false

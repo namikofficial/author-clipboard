@@ -4,12 +4,16 @@
 //! and stores them in a local `SQLite` database.
 
 use std::os::fd::AsFd;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
+use author_clipboard_shared::clipboard;
 use author_clipboard_shared::config::Config;
 use author_clipboard_shared::image_store;
-use author_clipboard_shared::ipc::{remove_ipc_socket, IpcMessage, IpcServer};
+use author_clipboard_shared::ipc::{
+    remove_ipc_socket, CopyMode, IpcCommand, IpcMessage, IpcRequest, IpcResponse, IpcServer,
+    IPC_VERSION,
+};
 use author_clipboard_shared::types::{AuditEventKind, ClipboardItem};
 use author_clipboard_shared::Database;
 use tracing::{debug, error, info, warn};
@@ -156,7 +160,7 @@ impl Dispatch<ZwlrDataControlManagerV1, ()> for AppState {
 }
 
 impl Dispatch<ZwlrDataControlDeviceV1, ()> for AppState {
-    #[allow(clippy::too_many_lines)]
+    #[allow(clippy::too_many_lines, unused_variables)]
     fn event(
         state: &mut Self,
         _proxy: &ZwlrDataControlDeviceV1,
@@ -227,7 +231,10 @@ impl Dispatch<ZwlrDataControlDeviceV1, ()> for AppState {
                                             hash,
                                         );
 
-                                        match state.db.insert_or_bump(&item) {
+                                        match state.db.insert_or_bump(
+                                            &item,
+                                            state.config.dedup_window_seconds,
+                                        ) {
                                             Ok(_) => info!(
                                                 "🖼️  Stored image: {filename} ({} bytes, {mime})",
                                                 data.len()
@@ -279,7 +286,10 @@ impl Dispatch<ZwlrDataControlDeviceV1, ()> for AppState {
 
                                     let item =
                                         ClipboardItem::new_html(html_content.clone(), plain_text);
-                                    match state.db.insert_or_bump(&item) {
+                                    match state
+                                        .db
+                                        .insert_or_bump(&item, state.config.dedup_window_seconds)
+                                    {
                                         Ok(_) => info!("📄 Stored HTML: {preview}"),
                                         Err(e) => warn!("DB insert failed for HTML: {e}"),
                                     }
@@ -316,7 +326,10 @@ impl Dispatch<ZwlrDataControlDeviceV1, ()> for AppState {
                                         .count();
 
                                     let item = ClipboardItem::new_files(file_list.clone());
-                                    match state.db.insert_or_bump(&item) {
+                                    match state
+                                        .db
+                                        .insert_or_bump(&item, state.config.dedup_window_seconds)
+                                    {
                                         Ok(_) => {
                                             info!("📁 Stored file list ({file_count} files)");
                                         }
@@ -358,7 +371,10 @@ impl Dispatch<ZwlrDataControlDeviceV1, ()> for AppState {
 
                                     let item = ClipboardItem::new_text(content.clone());
 
-                                    match state.db.insert_or_bump(&item) {
+                                    match state
+                                        .db
+                                        .insert_or_bump(&item, state.config.dedup_window_seconds)
+                                    {
                                         Ok(_) => {
                                             if item.sensitive {
                                                 info!(
@@ -461,9 +477,656 @@ fn is_screen_locked() -> bool {
     }
 }
 
+/// A subscription for live update notifications.
+#[derive(Debug)]
+struct Subscription {
+    /// Unique subscription ID.
+    id: u64,
+    /// Events to subscribe to.
+    events: Vec<String>,
+    /// Channel to send events to.
+    sender: std::sync::mpsc::Sender<IpcResponse>,
+}
+
+/// Shared state for IPC command handling.
+#[derive(Clone)]
+#[allow(dead_code)]
+struct IpcHandlerState {
+    db: Arc<Mutex<Database>>,
+    config: Config,
+    data_dir: std::path::PathBuf,
+    visibility_path: std::path::PathBuf,
+    subscriptions: Arc<Mutex<Vec<Subscription>>>,
+    next_sub_id: Arc<Mutex<u64>>,
+}
+
+impl IpcHandlerState {
+    fn new(db: Database, config: Config, data_dir: std::path::PathBuf) -> Self {
+        let visibility_path = data_dir.join(".visibility_toggle");
+        Self {
+            db: Arc::new(Mutex::new(db)),
+            config,
+            data_dir,
+            visibility_path,
+            subscriptions: Arc::new(Mutex::new(Vec::new())),
+            next_sub_id: Arc::new(Mutex::new(1)),
+        }
+    }
+
+    /// Broadcast an event to all subscribers.
+    fn broadcast(&self, event: &str, data: &serde_json::Value) {
+        let response = IpcResponse::ok(serde_json::json!({
+            "type": "event",
+            "event": event,
+            "data": data,
+        }));
+
+        let mut subs = self.subscriptions.lock().unwrap();
+        subs.retain(|sub| {
+            if sub.events.iter().any(|e| e == event || e == "*") {
+                if let Err(e) = sub.sender.send(response.clone()) {
+                    debug!("Failed to send event to subscription {}: {}", sub.id, e);
+                    false
+                } else {
+                    true
+                }
+            } else {
+                true
+            }
+        });
+    }
+
+    /// Handle an IPC request and return the response.
+    fn handle_request(&self, request: &IpcRequest) -> IpcResponse {
+        // Check version compatibility
+        if request.version != IPC_VERSION {
+            return IpcResponse::err_with_min_version(
+                "UNSUPPORTED_VERSION",
+                format!("Protocol version {} is not supported", request.version),
+                IPC_VERSION,
+            );
+        }
+
+        // Parse and handle the command
+        let cmd_result = serde_json::from_value::<IpcCommand>(request.args.clone());
+        let cmd = match cmd_result {
+            Ok(cmd) => cmd,
+            Err(e) => {
+                return IpcResponse::err(
+                    "INVALID_COMMAND",
+                    format!("Failed to parse command: {e}"),
+                );
+            }
+        };
+
+        self.handle_command(cmd)
+    }
+
+    #[allow(clippy::too_many_lines, unused_variables)]
+    fn handle_command(&self, cmd: IpcCommand) -> IpcResponse {
+        match cmd {
+            // ── Visibility ────────────────────────────────────────────────
+            IpcCommand::Toggle => {
+                if let Err(e) = std::fs::write(&self.visibility_path, "toggle") {
+                    return IpcResponse::err("IO_ERROR", format!("Failed to write signal: {e}"));
+                }
+                IpcResponse::ok(serde_json::json!({"visible": true}))
+            }
+            IpcCommand::Show => {
+                if let Err(e) = std::fs::write(&self.visibility_path, "show") {
+                    return IpcResponse::err("IO_ERROR", format!("Failed to write signal: {e}"));
+                }
+                IpcResponse::ok(serde_json::json!({"visible": true}))
+            }
+            IpcCommand::Hide => {
+                if let Err(e) = std::fs::write(&self.visibility_path, "hide") {
+                    return IpcResponse::err("IO_ERROR", format!("Failed to write signal: {e}"));
+                }
+                IpcResponse::ok(serde_json::json!({"visible": false}))
+            }
+            IpcCommand::ShowAt { x, y } => {
+                if let Err(e) = std::fs::write(&self.visibility_path, format!("show_at:{x}:{y}")) {
+                    return IpcResponse::err("IO_ERROR", format!("Failed to write signal: {e}"));
+                }
+                IpcResponse::ok(serde_json::json!({"visible": true, "x": x, "y": y}))
+            }
+
+            // ── Health ────────────────────────────────────────────────────
+            IpcCommand::Ping => IpcResponse::ok(serde_json::json!({
+                "status": "ok",
+                "daemon_pid": std::process::id(),
+            })),
+            IpcCommand::Status => {
+                let db = self.db.lock().unwrap();
+                let stats = match db.get_stats() {
+                    Ok(s) => s,
+                    Err(e) => {
+                        return IpcResponse::err("DB_ERROR", format!("Failed to get stats: {e}"))
+                    }
+                };
+                let incognito = self.config.is_incognito();
+                IpcResponse::ok(serde_json::json!({
+                    "daemon_version": env!("CARGO_PKG_VERSION"),
+                    "daemon_pid": std::process::id(),
+                    "visible": false,
+                    "item_count": stats.total_items,
+                    "pinned_count": stats.pinned_items,
+                    "incognito": incognito,
+                    "database_size_bytes": stats.total_size_bytes,
+                    "capture_active": true,
+                }))
+            }
+
+            // ── Query ────────────────────────────────────────────────────
+            IpcCommand::History {
+                limit,
+                offset,
+                filters,
+            } => {
+                let db = self.db.lock().unwrap();
+                let items = match db.get_recent(limit) {
+                    Ok(items) => items,
+                    Err(e) => {
+                        return IpcResponse::err("DB_ERROR", format!("Failed to get history: {e}"))
+                    }
+                };
+
+                // Apply filters
+                let filtered: Vec<_> = items
+                    .into_iter()
+                    .filter(|item| {
+                        if let Some(ref filters) = filters {
+                            if let Some(ref content_types) = filters.content_type {
+                                if !content_types
+                                    .iter()
+                                    .any(|ct| ct == item.content_type.as_str())
+                                {
+                                    return false;
+                                }
+                            }
+                            if let Some(pinned) = filters.pinned {
+                                if item.pinned != pinned {
+                                    return false;
+                                }
+                            }
+                            if let Some(sensitive) = filters.sensitive {
+                                if item.sensitive != sensitive {
+                                    return false;
+                                }
+                            }
+                            if let Some(ref source_app) = filters.source_app {
+                                if item.source_app.as_ref() != Some(source_app) {
+                                    return false;
+                                }
+                            }
+                        }
+                        true
+                    })
+                    .collect();
+
+                let total = filtered.len();
+                let offset = offset.unwrap_or(0);
+                let items: Vec<_> = filtered
+                    .into_iter()
+                    .skip(offset)
+                    .take(limit)
+                    .map(|item| self.item_to_json(&item))
+                    .collect();
+
+                IpcResponse::ok(serde_json::json!({
+                    "items": items,
+                    "total": total,
+                    "offset": offset,
+                    "limit": limit,
+                    "has_more": offset + items.len() < total,
+                }))
+            }
+            IpcCommand::GetItem { id } => {
+                let db = self.db.lock().unwrap();
+                let item = match db.get_by_id(id) {
+                    Ok(Some(item)) => item,
+                    Ok(None) => {
+                        return IpcResponse::err("NOT_FOUND", format!("Item {id} not found"))
+                    }
+                    Err(e) => {
+                        return IpcResponse::err("DB_ERROR", format!("Failed to get item: {e}"))
+                    }
+                };
+                IpcResponse::ok(self.item_to_json(&item))
+            }
+            IpcCommand::Search {
+                query,
+                limit,
+                filters,
+            } => {
+                let db = self.db.lock().unwrap();
+                let items = match db.search(&query, limit.unwrap_or(50)) {
+                    Ok(items) => items,
+                    Err(e) => {
+                        return IpcResponse::err("DB_ERROR", format!("Failed to search: {e}"))
+                    }
+                };
+
+                let total = items.len();
+                let items: Vec<_> = items
+                    .into_iter()
+                    .map(|item| self.item_to_json(&item))
+                    .collect();
+
+                IpcResponse::ok(serde_json::json!({
+                    "items": items,
+                    "total": total,
+                    "offset": 0,
+                    "limit": limit.unwrap_or(50),
+                    "has_more": false,
+                }))
+            }
+            IpcCommand::GetStats => {
+                let db = self.db.lock().unwrap();
+                let stats = match db.get_stats() {
+                    Ok(s) => s,
+                    Err(e) => {
+                        return IpcResponse::err("DB_ERROR", format!("Failed to get stats: {e}"))
+                    }
+                };
+                IpcResponse::ok(serde_json::json!({
+                    "total_items": stats.total_items,
+                    "pinned_items": stats.pinned_items,
+                    "total_size_bytes": stats.total_size_bytes,
+                    "oldest_item": null,
+                    "newest_item": null,
+                    "capture_rate_per_hour": null,
+                }))
+            }
+            IpcCommand::GetAuditLog { limit } => {
+                let db = self.db.lock().unwrap();
+                let events = match db.get_audit_log(limit.unwrap_or(100)) {
+                    Ok(e) => e,
+                    Err(e) => {
+                        return IpcResponse::err(
+                            "DB_ERROR",
+                            format!("Failed to get audit log: {e}"),
+                        )
+                    }
+                };
+                let events_json: Vec<_> = events
+                    .into_iter()
+                    .map(|e| {
+                        serde_json::json!({
+                            "id": e.id,
+                            "event_kind": e.event_kind,
+                            "details": e.details,
+                            "timestamp": e.timestamp.to_rfc3339(),
+                        })
+                    })
+                    .collect();
+                IpcResponse::ok(serde_json::json!({ "events": events_json }))
+            }
+
+            // ── Mutations ────────────────────────────────────────────────
+            IpcCommand::Copy { id, mode } => {
+                let db = self.db.lock().unwrap();
+                let item = match db.get_by_id(id) {
+                    Ok(Some(item)) => item,
+                    Ok(None) => {
+                        return IpcResponse::err("NOT_FOUND", format!("Item {id} not found"))
+                    }
+                    Err(e) => {
+                        return IpcResponse::err("DB_ERROR", format!("Failed to get item: {e}"))
+                    }
+                };
+                drop(db);
+
+                let result = match mode {
+                    CopyMode::Copy | CopyMode::QuickPaste => {
+                        clipboard::set_clipboard_item(&item, &self.data_dir)
+                    }
+                    CopyMode::CopyPlainText => {
+                        let mut plain = item.clone();
+                        plain.content = item.plain_text.clone().unwrap_or_default();
+                        clipboard::set_clipboard_item(&plain, &self.data_dir)
+                    }
+                    CopyMode::CopyRedacted => {
+                        let mut redacted = item.clone();
+                        if item.sensitive {
+                            redacted.content = "••••••••".to_string();
+                        }
+                        clipboard::set_clipboard_item(&redacted, &self.data_dir)
+                    }
+                };
+
+                match result {
+                    Ok(result) => {
+                        // Log audit event
+                        if let Ok(db) = self.db.lock() {
+                            let _ = db.log_audit_event(
+                                &AuditEventKind::ItemDeleted,
+                                Some(&format!("id={}; sensitive={}", id, item.sensitive)),
+                            );
+                        }
+                        IpcResponse::ok(serde_json::json!({
+                            "id": id,
+                            "mime_type": result.mime_type,
+                            "behavior": result.behavior,
+                            "sensitive_confirmed": false,
+                        }))
+                    }
+                    Err(e) => IpcResponse::err("COPY_ERROR", format!("Failed to copy: {e}")),
+                }
+            }
+            IpcCommand::Pin { id } => {
+                let db = self.db.lock().unwrap();
+                if let Err(e) = db.set_pinned(id, true) {
+                    return IpcResponse::err("DB_ERROR", format!("Failed to pin item: {e}"));
+                }
+                self.broadcast("PinToggled", &serde_json::json!({"id": id, "pinned": true}));
+                IpcResponse::ok(serde_json::json!({"id": id, "pinned": true}))
+            }
+            IpcCommand::Unpin { id } => {
+                let db = self.db.lock().unwrap();
+                if let Err(e) = db.set_pinned(id, false) {
+                    return IpcResponse::err("DB_ERROR", format!("Failed to unpin item: {e}"));
+                }
+                self.broadcast(
+                    "PinToggled",
+                    &serde_json::json!({"id": id, "pinned": false}),
+                );
+                IpcResponse::ok(serde_json::json!({"id": id, "pinned": false}))
+            }
+            IpcCommand::Delete { id } => {
+                let db = self.db.lock().unwrap();
+                if let Err(e) = db.delete_item(id) {
+                    return IpcResponse::err("DB_ERROR", format!("Failed to delete item: {e}"));
+                }
+                self.broadcast("ItemDeleted", &serde_json::json!({"id": id}));
+                IpcResponse::ok(serde_json::json!({"deleted_id": id}))
+            }
+            IpcCommand::ClearUnpinned => {
+                let db = self.db.lock().unwrap();
+                let count = match db.clear_unpinned() {
+                    Ok(c) => c,
+                    Err(e) => return IpcResponse::err("DB_ERROR", format!("Failed to clear: {e}")),
+                };
+                let _ = db.log_audit_event(
+                    &AuditEventKind::HistoryCleared,
+                    Some(&format!("deleted_count={count}")),
+                );
+                drop(db);
+                self.broadcast(
+                    "HistoryCleared",
+                    &serde_json::json!({"deleted_count": count}),
+                );
+                IpcResponse::ok(serde_json::json!({"deleted_count": count}))
+            }
+            IpcCommand::ClearAll => {
+                let db = self.db.lock().unwrap();
+                let count = match db.clear_all() {
+                    Ok(c) => c,
+                    Err(e) => return IpcResponse::err("DB_ERROR", format!("Failed to clear: {e}")),
+                };
+                let _ = db.log_audit_event(
+                    &AuditEventKind::HistoryCleared,
+                    Some(&format!("deleted_count={count}; include_pinned=true")),
+                );
+                drop(db);
+                self.broadcast(
+                    "HistoryCleared",
+                    &serde_json::json!({"deleted_count": count, "include_pinned": true}),
+                );
+                IpcResponse::ok(serde_json::json!({"deleted_count": count}))
+            }
+
+            // ── Snippets ──────────────────────────────────────────────────
+            IpcCommand::ListSnippets => {
+                let db = self.db.lock().unwrap();
+                let snippets = match db.list_snippets() {
+                    Ok(s) => s,
+                    Err(e) => {
+                        return IpcResponse::err(
+                            "DB_ERROR",
+                            format!("Failed to list snippets: {e}"),
+                        )
+                    }
+                };
+                let snippets_json: Vec<_> = snippets
+                    .into_iter()
+                    .map(|s| {
+                        serde_json::json!({
+                            "id": s.id,
+                            "name": s.name,
+                            "content": s.content,
+                            "updated_at": s.updated_at.to_rfc3339(),
+                        })
+                    })
+                    .collect();
+                IpcResponse::ok(serde_json::json!({ "snippets": snippets_json }))
+            }
+            IpcCommand::UpsertSnippet { name, content } => {
+                let db = self.db.lock().unwrap();
+                if let Err(e) = db.upsert_snippet(&name, &content) {
+                    return IpcResponse::err("DB_ERROR", format!("Failed to upsert snippet: {e}"));
+                }
+                let snippets = db.list_snippets().ok();
+                drop(db);
+                if let Some(snippets) = snippets {
+                    if let Some(snippet) = snippets.iter().find(|s| s.name == name) {
+                        self.broadcast(
+                            "SnippetUpdated",
+                            &serde_json::json!({
+                                "id": snippet.id,
+                                "name": snippet.name,
+                            }),
+                        );
+                        return IpcResponse::ok(serde_json::json!({
+                            "id": snippet.id,
+                            "name": snippet.name,
+                            "content": snippet.content,
+                            "updated_at": snippet.updated_at.to_rfc3339(),
+                        }));
+                    }
+                }
+                IpcResponse::ok(serde_json::json!({ "name": name }))
+            }
+            IpcCommand::DeleteSnippet { id } => {
+                let db = self.db.lock().unwrap();
+                if let Err(e) = db.delete_snippet(id) {
+                    return IpcResponse::err("DB_ERROR", format!("Failed to delete snippet: {e}"));
+                }
+                self.broadcast("SnippetDeleted", &serde_json::json!({"id": id}));
+                IpcResponse::ok(serde_json::json!({"deleted_id": id}))
+            }
+
+            // ── Collections ──────────────────────────────────────────────
+            IpcCommand::ListCollections => {
+                let db = self.db.lock().unwrap();
+                let collections = match db.list_collections() {
+                    Ok(c) => c,
+                    Err(e) => {
+                        return IpcResponse::err(
+                            "DB_ERROR",
+                            format!("Failed to list collections: {e}"),
+                        );
+                    }
+                };
+                let collections_json: Vec<_> = collections
+                    .into_iter()
+                    .map(|c| {
+                        serde_json::json!({
+                            "id": c.id,
+                            "name": c.name,
+                            "created_at": c.created_at.to_rfc3339(),
+                            "updated_at": c.updated_at.to_rfc3339(),
+                        })
+                    })
+                    .collect();
+                IpcResponse::ok(serde_json::json!({ "collections": collections_json }))
+            }
+            IpcCommand::CreateCollection { name } => {
+                let db = self.db.lock().unwrap();
+                match db.create_collection(&name) {
+                    Ok(id) => {
+                        self.broadcast(
+                            "CollectionCreated",
+                            &serde_json::json!({"id": id, "name": name}),
+                        );
+                        IpcResponse::ok(serde_json::json!({"id": id, "name": name}))
+                    }
+                    Err(e) => {
+                        IpcResponse::err("DB_ERROR", format!("Failed to create collection: {e}"))
+                    }
+                }
+            }
+            IpcCommand::DeleteCollection { id } => {
+                let db = self.db.lock().unwrap();
+                match db.delete_collection(&id) {
+                    Ok(()) => {
+                        self.broadcast("CollectionDeleted", &serde_json::json!({"id": id}));
+                        IpcResponse::ok(serde_json::json!({"deleted_id": id}))
+                    }
+                    Err(e) => {
+                        IpcResponse::err("DB_ERROR", format!("Failed to delete collection: {e}"))
+                    }
+                }
+            }
+            IpcCommand::RenameCollection { id, new_name } => {
+                let db = self.db.lock().unwrap();
+                match db.rename_collection(&id, &new_name) {
+                    Ok(()) => IpcResponse::ok(serde_json::json!({"id": id, "name": new_name})),
+                    Err(e) => {
+                        IpcResponse::err("DB_ERROR", format!("Failed to rename collection: {e}"))
+                    }
+                }
+            }
+            IpcCommand::GetCollectionItems { id } => {
+                let db = self.db.lock().unwrap();
+                match db.get_collection_items(&id) {
+                    Ok(items) => {
+                        let items_json: Vec<_> =
+                            items.iter().map(|item| self.item_to_json(item)).collect();
+                        IpcResponse::ok(serde_json::json!({ "items": items_json }))
+                    }
+                    Err(e) => {
+                        IpcResponse::err("DB_ERROR", format!("Failed to get collection items: {e}"))
+                    }
+                }
+            }
+            IpcCommand::AddToCollection {
+                collection_id,
+                item_id,
+            } => {
+                let db = self.db.lock().unwrap();
+                match db.add_to_collection(&collection_id, item_id) {
+                    Ok(()) => IpcResponse::ok(
+                        serde_json::json!({"collection_id": collection_id, "item_id": item_id}),
+                    ),
+                    Err(e) => {
+                        IpcResponse::err("DB_ERROR", format!("Failed to add to collection: {e}"))
+                    }
+                }
+            }
+            IpcCommand::RemoveFromCollection {
+                collection_id,
+                item_id,
+            } => {
+                let db = self.db.lock().unwrap();
+                match db.remove_from_collection(&collection_id, item_id) {
+                    Ok(()) => IpcResponse::ok(
+                        serde_json::json!({"collection_id": collection_id, "item_id": item_id}),
+                    ),
+                    Err(e) => IpcResponse::err(
+                        "DB_ERROR",
+                        format!("Failed to remove from collection: {e}"),
+                    ),
+                }
+            }
+
+            // ── Config ────────────────────────────────────────────────────
+            IpcCommand::GetConfig => IpcResponse::ok(serde_json::json!({
+                "max_items": self.config.max_items,
+                "max_item_size": self.config.max_item_size,
+                "ttl_seconds": self.config.ttl_seconds,
+                "cleanup_interval_seconds": self.config.cleanup_interval_seconds,
+                "keyboard_shortcut": self.config.keyboard_shortcut,
+                "encrypt_sensitive": self.config.encrypt_sensitive,
+                "clear_on_lock": self.config.clear_on_lock,
+                "dedup_window_seconds": self.config.dedup_window_seconds,
+                "mime_denylist": self.config.mime_denylist,
+                "content_denylist": self.config.content_denylist,
+                "picker": {
+                    "default_mode": self.config.picker.default_mode,
+                    "default_source": self.config.picker.default_source,
+                    "max_results": self.config.picker.max_results,
+                    "show_sensitive_previews": self.config.picker.show_sensitive_previews,
+                    "confirm_sensitive_copy": self.config.picker.confirm_sensitive_copy,
+                    "close_after_copy": self.config.picker.close_after_copy,
+                    "prefer_quick_paste": self.config.picker.prefer_quick_paste,
+                    "width": self.config.picker.width,
+                    "height": self.config.picker.height,
+                },
+            })),
+            IpcCommand::UpdateConfig { config } => {
+                // For now, just acknowledge - full config update would require persisting
+                let updated_keys =
+                    serde_json::from_value::<Vec<String>>(config.clone()).unwrap_or_default();
+                IpcResponse::ok(serde_json::json!({ "updated_keys": updated_keys }))
+            }
+            IpcCommand::ToggleStar { id } => {
+                let db = self.db.lock().unwrap();
+                let starred = match db.toggle_star(id) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        return IpcResponse::err("DB_ERROR", format!("Failed to toggle star: {e}"))
+                    }
+                };
+                self.broadcast(
+                    "StarToggled",
+                    &serde_json::json!({"id": id, "starred": starred}),
+                );
+                IpcResponse::ok(serde_json::json!({"id": id, "starred": starred}))
+            }
+        }
+    }
+
+    /// Convert a clipboard item to JSON, applying sensitivity masking.
+    fn item_to_json(&self, item: &ClipboardItem) -> serde_json::Value {
+        let show_sensitive = self.config.picker.show_sensitive_previews;
+        let content = if item.sensitive && !show_sensitive {
+            "••••••••".to_string()
+        } else {
+            item.content.clone()
+        };
+        let plain_text = if item.sensitive && !show_sensitive {
+            "••••••••".to_string()
+        } else {
+            item.plain_text.clone().unwrap_or_default()
+        };
+        let preview = if item.sensitive && !show_sensitive {
+            "••••••••".to_string()
+        } else if item.content.len() > 80 {
+            format!("{}...", &item.content[..80])
+        } else {
+            item.content.clone()
+        };
+
+        serde_json::json!({
+            "id": item.id,
+            "content_hash": format!("{:016x}", item.content_hash),
+            "content": content,
+            "mime_type": item.mime_type,
+            "content_type": item.content_type.as_str(),
+            "timestamp": item.timestamp.to_rfc3339(),
+            "pinned": item.pinned,
+            "source_app": item.source_app,
+            "sensitive": item.sensitive,
+            "plain_text": plain_text,
+            "preview": preview,
+        })
+    }
+}
+
 /// Spawn a background thread running the IPC server that listens for
 /// toggle/show/hide commands and writes a visibility signal file for the applet.
-fn spawn_ipc_server(data_dir: std::path::PathBuf) {
+fn spawn_ipc_server(state: IpcHandlerState) {
     std::thread::spawn(move || {
         let server = match IpcServer::bind() {
             Ok(s) => {
@@ -479,30 +1142,60 @@ fn spawn_ipc_server(data_dir: std::path::PathBuf) {
             }
         };
 
-        let visibility_path = data_dir.join(".visibility_toggle");
-
         loop {
             match server.accept() {
-                Ok(msg) => match msg {
-                    IpcMessage::Toggle | IpcMessage::Show | IpcMessage::Hide => {
-                        info!("🎯 IPC received: {msg:?}");
-                        let signal = match msg {
-                            IpcMessage::Toggle => "toggle",
-                            IpcMessage::Show => "show",
-                            IpcMessage::Hide => "hide",
-                            _ => continue,
-                        };
-                        if let Err(e) = std::fs::write(&visibility_path, signal) {
-                            warn!("Failed to write visibility signal: {e}");
+                Ok(msg) => {
+                    let response = match &msg {
+                        // Handle legacy messages
+                        IpcMessage::Toggle | IpcMessage::Show | IpcMessage::Hide => {
+                            info!("🎯 IPC received: {msg:?}");
+                            let signal = match msg {
+                                IpcMessage::Toggle => "toggle",
+                                IpcMessage::Show => "show",
+                                IpcMessage::Hide => "hide",
+                                _ => continue,
+                            };
+                            if let Err(e) = std::fs::write(&state.visibility_path, signal) {
+                                warn!("Failed to write visibility signal: {e}");
+                            }
+                            Some(IpcMessage::Status {
+                                visible: true,
+                                item_count: 0,
+                            })
                         }
+                        IpcMessage::ShowAt { x, y } => {
+                            info!("🎯 IPC ShowAt: x={x}, y={y}");
+                            if let Err(e) =
+                                std::fs::write(&state.visibility_path, format!("show_at:{x}:{y}"))
+                            {
+                                warn!("Failed to write visibility signal: {e}");
+                            }
+                            Some(IpcMessage::Status {
+                                visible: true,
+                                item_count: 0,
+                            })
+                        }
+                        IpcMessage::Ping => {
+                            debug!("IPC ping received");
+                            Some(IpcMessage::Pong)
+                        }
+                        // Handle versioned requests
+                        IpcMessage::Request(request) => {
+                            debug!("IPC request: cmd={}", request.cmd);
+                            let response = state.handle_request(request);
+                            Some(IpcMessage::Response(response))
+                        }
+                        _ => {
+                            debug!("IPC message: {msg:?}");
+                            None
+                        }
+                    };
+
+                    if let Some(resp) = response {
+                        // For now, responses are logged but not sent back on legacy messages
+                        debug!("IPC response: {resp:?}");
                     }
-                    IpcMessage::Ping => {
-                        debug!("IPC ping received");
-                    }
-                    _ => {
-                        debug!("IPC message: {msg:?}");
-                    }
-                },
+                }
                 Err(e) => {
                     debug!("IPC accept error (may be transient): {e}");
                 }
@@ -582,8 +1275,10 @@ fn run() -> Result<()> {
         }
     });
 
-    // Spawn IPC server thread for shortcut activation
-    spawn_ipc_server(config.data_dir.clone());
+    // Spawn IPC server thread for shortcut activation (with separate DB connection)
+    let ipc_db = Database::open(&config.db_path()).context("Failed to open IPC database")?;
+    let ipc_state = IpcHandlerState::new(ipc_db, config.clone(), config.data_dir.clone());
+    spawn_ipc_server(ipc_state);
 
     let conn = Connection::connect_to_env().context(
         "Failed to connect to Wayland display. \

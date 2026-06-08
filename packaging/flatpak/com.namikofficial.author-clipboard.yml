@@ -1,0 +1,75 @@
+---
+# Flatpak manifest for author-clipboard.
+#
+# Build with:
+#   flatpak-builder --user --force-clean build-dir \
+#     packaging/flatpak/com.namikofficial.author-clipboard.yml
+#
+# Or, for a sandboxed dry-run that does NOT require a host install:
+#   flatpak-builder --user --sandbox --force-clean build-dir \
+#     packaging/flatpak/com.namikofficial.author-clipboard.yml
+#
+# See docs/FLATPAK.md for caveats around Wayland clipboard portals and
+# the build environment.
+app-id: com.namikofficial.author-clipboard
+runtime: org.freedesktop.Platform
+runtime-version: "23.08"
+sdk: org.freedesktop.Sdk
+# Rust toolchain via the official Flatpak extension.
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: author-clipboard
+# Pin to the upstream workspace version. Bump on each release.
+# This manifest is intentionally pinned to a release tag; CI verifies the
+# tag exists before building (see .github/workflows/ci.yml's deb job for
+# the same checkout pattern).
+
+finish-args:
+  # Wayland access — required for wlr-data-control clipboard monitoring.
+  - --socket=wayland
+  # X11 fallback. We don't use it, but many compositors (and tests) still
+  # route through it; granting it avoids "Wayland-only" surprises.
+  - --socket=fallback-x11
+  # Read-write access to the XDG data dir for the clipboard db & images.
+  - --filesystem=xdg-data/author-clipboard:create
+  # Read-only access to XDG_CONFIG_HOME for the user config.
+  - --filesystem=xdg-config/author-clipboard:ro
+  # PipeWire / PulseAudio for any future "preview sound" features.
+  - --socket=pulseaudio
+  # Notifications (used by the applet for sensitive-content warnings).
+  - --talk-name=org.freedesktop.Notifications
+  # Allow registering with the system tray / status notifier.
+  - --talk-name=org.kde.StatusNotifierWatcher
+  # Network is offline-only; we do not require --share=network.
+
+modules:
+  - name: author-clipboard
+    buildsystem: simple
+    builddir: true
+    build-commands:
+      - |
+        cargo build --release --workspace --locked \
+          && install -Dm755 target/release/author-clipboard /app/bin/author-clipboard \
+          && install -Dm755 target/release/author-clipboard-daemon /app/bin/author-clipboard-daemon \
+          && install -Dm755 target/release/author-clipboard-ctl /app/bin/author-clipboard-ctl \
+          && install -Dm755 target/release/author-clipboard-hypr-picker /app/bin/author-clipboard-hypr-picker \
+          && install -Dm644 com.namikofficial.author-clipboard.desktop /app/share/applications/com.namikofficial.author-clipboard.desktop \
+          && install -Dm644 com.namikofficial.author-clipboard.svg /app/share/icons/hicolor/scalable/apps/com.namikofficial.author-clipboard.svg
+    sources:
+      - type: git
+        url: https://github.com/namikofficial/author-clipboard
+        tag: v0.5.0
+        # When the upstream tag moves, the maintainer updates this file
+        # AND .SRCINFO / PKGBUILD / flake.nix version pins in lockstep.
+
+      - type: file
+        path: ../../data/com.namikofficial.author-clipboard.desktop
+        # flatpak-builder will look for this file relative to the manifest,
+        # then copy it into the build dir; the install command above picks
+        # it up from the working directory.
+
+      - type: file
+        path: ../../resources/icons/com.namikofficial.author-clipboard.svg
+
+# cargo's build artifacts are reusable across builds; keep them cached.
+cache-dir: target

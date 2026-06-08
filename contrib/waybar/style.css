@@ -1,0 +1,36 @@
+/* Waybar clipboard module — example styles
+ *
+ * Add these to your waybar style.css.  The module uses four class values
+ * emitted by clipboard.sh so you can style each state:
+ *
+ *   .clipboard-module.running    — daemon is up (default)
+ *   .clipboard-module.down        — daemon is not running
+ *   .clipboard-module.image      — last item was an image
+ *   .clipboard-module.text       — last item was text / html
+ *   .clipboard-module.sensitive  — last item was sensitive (masked)
+ */
+
+#custom-clipboard {
+    padding: 0 8px;
+    font-size: 14px;
+}
+
+/* Default state */
+#custom-clipboard.running {
+    color: #cdd6f4;
+}
+
+/* Daemon down — use a muted colour so it's obvious */
+#custom-clipboard.down {
+    color: #6c7086;
+}
+
+/* Sensitive item — highlight in amber */
+#custom-clipboard.sensitive {
+    color: #fab387;
+}
+
+/* Image type — use a distinct icon colour */
+#custom-clipboard.image {
+    color: #89b4fa;
+}

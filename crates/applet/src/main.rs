@@ -1091,15 +1091,15 @@ impl cosmic::Application for App {
             Message::SettingContentDenylistAdd(rule) => {
                 let trimmed = rule.trim();
                 if !trimmed.is_empty() {
-                    self.config.content_regex_denylist.push(trimmed.to_string());
+                    self.config.content_denylist.push(trimmed.to_string());
                     let _ = self.config.save();
                     self.content_denylist_input.clear();
                 }
             }
 
             Message::SettingContentDenylistRemove(idx) => {
-                if idx < self.config.content_regex_denylist.len() {
-                    self.config.content_regex_denylist.remove(idx);
+                if idx < self.config.content_denylist.len() {
+                    self.config.content_denylist.remove(idx);
                     let _ = self.config.save();
                 }
             }
@@ -2564,7 +2564,7 @@ impl App {
             )
             .push(add_content_rule_btn);
         content = content.push(content_rule_row);
-        for (i, rule) in self.config.content_regex_denylist.iter().enumerate() {
+        for (i, rule) in self.config.content_denylist.iter().enumerate() {
             let entry_row = row()
                 .spacing(8)
                 .align_y(iced::Alignment::Center)

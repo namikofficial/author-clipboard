@@ -58,6 +58,25 @@ Compute SHA-256 hash of content. If a hash exists within `dedup_window_seconds`,
 
 ---
 
+## D003b: SHA-256 Implementation (Bug Fix)
+
+**Date**: Phase 1 Bug Fix (018-dedup-fix)
+**Status**: Accepted
+
+**Context**:
+The original implementation used `DefaultHasher` instead of SHA-256, despite SHA-256 being specified in D003. Additionally, `insert_or_bump` was bumping items regardless of the dedup window, causing identical content copied after the window to create separate entries instead of being treated as new entries.
+
+**Decision**:
+1. Changed `hash_content` and `hash_bytes` to use SHA-256 via the `sha2` crate
+2. Changed `insert_or_bump` to check `has_recent_duplicate` before bumping, ensuring the dedup window is enforced
+
+**Consequences**:
+- Positive: Implementation now matches architecture decision D003
+- Positive: Dedup window is properly enforced
+- Negative: SHA-256 is slightly slower than DefaultHasher (negligible for clipboard content sizes)
+
+---
+
 ## D004: Per-Item TTL
 
 **Date**: Phase 1
@@ -76,4 +95,4 @@ Each item has an optional `expires_at` timestamp. Cleanup task checks and delete
 
 ---
 
-**Last Updated**: Phase 1 Complete
+**Last Updated**: Phase 1 Bug Fix (018-dedup-fix)

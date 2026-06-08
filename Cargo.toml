@@ -6,6 +6,7 @@ members = [
     "crates/shared",
     "crates/ctl",
     "crates/hypr-picker",
+    "crates/mcp-server",
 ]
 
 [workspace.package]
@@ -85,3 +86,14 @@ clap = { version = "4", features = ["derive"] }
 aes-gcm = "0.10"
 rand = "0.8"
 base64 = "0.22"
+
+# Hashing
+sha2 = "0.10"
+
+# Utilities
+uuid = { version = "1", features = ["v4"] }
+
+# MCP
+mcp-spec = "0.1"
+mcp-server = "0.1"
+tower = "0.4"
