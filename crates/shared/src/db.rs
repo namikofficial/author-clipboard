@@ -219,6 +219,35 @@ impl Database {
             self.set_schema_version(8)?;
         }
 
+        if version < 9 {
+            // v9: Encryption-at-rest metadata for sensitive items.
+            //
+            // - encrypted: 1 if the `content` column is ciphertext,
+            //   0 (the default) if it is plaintext. Non-sensitive
+            //   items are never encrypted.
+            // - encryption_version: scheme version of the ciphertext.
+            //   Currently always 1 (AES-256-GCM, base64(nonce || ct)).
+            //   Bumping this value invalidates all previously
+            //   encrypted rows and forces a re-encrypt on next read.
+            // - redacted_preview: a fixed-length redacted form of
+            //   the sensitive content, used by UIs and exports so
+            //   they never have to decrypt the item just to display
+            //   "••••••••" or a one-line hint. NULL for non-sensitive
+            //   items.
+            let has_encrypted = self
+                .conn
+                .prepare("SELECT encrypted FROM clipboard_items LIMIT 0")
+                .is_ok();
+            if !has_encrypted {
+                self.conn.execute_batch(
+                    "ALTER TABLE clipboard_items ADD COLUMN encrypted INTEGER NOT NULL DEFAULT 0;
+                     ALTER TABLE clipboard_items ADD COLUMN encryption_version INTEGER DEFAULT NULL;
+                     ALTER TABLE clipboard_items ADD COLUMN redacted_preview TEXT DEFAULT NULL;",
+                )?;
+            }
+            self.set_schema_version(9)?;
+        }
+
         Ok(())
     }
 
@@ -1097,9 +1126,9 @@ mod tests {
     #[test]
     fn test_schema_version() {
         let db = make_db();
-        // After init, version should be 8 (latest)
+        // After init, version should be 9 (latest)
         let version = db.get_schema_version();
-        assert_eq!(version, 8);
+        assert_eq!(version, 9);
     }
 
     #[test]

@@ -214,6 +214,41 @@ impl ClipboardItem {
         }
     }
 
+    /// Build a redacted preview string suitable for sensitive items.
+    ///
+    /// Used for:
+    /// - the `redacted_preview` DB column (set at insert time when
+    ///   the item is encrypted at rest),
+    /// - UIs that want to display a placeholder without decrypting,
+    /// - exports that must never include sensitive plaintext by
+    ///   default.
+    ///
+    /// The shape is `••••••••••••••••` for text / html / files, and
+    /// `Image (redacted)` / `Files (redacted)` for image / file-list
+    /// items, so the caller can show a small badge of the content
+    /// type without ever touching the plaintext.
+    pub fn redacted_preview(&self) -> String {
+        match self.content_type {
+            ContentType::Image => "Image (redacted)".to_string(),
+            ContentType::Files => "File list (redacted)".to_string(),
+            ContentType::Html | ContentType::Text => {
+                if self.sensitive {
+                    "•••••••••••••••• Sensitive item — reveal to copy".to_string()
+                } else {
+                    // Non-sensitive: caller should not normally be
+                    // calling this, but we still produce a safe
+                    // preview (first 80 chars) for accidental calls.
+                    let trimmed = self.content.trim();
+                    if trimmed.len() > 80 {
+                        format!("{}…", &trimmed[..80])
+                    } else {
+                        trimmed.to_string()
+                    }
+                }
+            }
+        }
+    }
+
     /// Get the thumbnail path given the data directory.
     pub fn thumbnail_path(&self, data_dir: &std::path::Path) -> Option<PathBuf> {
         if self.is_image() {
