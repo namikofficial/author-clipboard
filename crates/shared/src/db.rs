@@ -592,13 +592,23 @@ impl Database {
     }
 
     /// Import clipboard items from JSON string. Returns count of imported items.
+    ///
+    /// The `sensitive` flag is **always re-derived** from the content
+    /// before insert, not trusted from the source JSON. This defends
+    /// against a tampered export that marks a credential as
+    /// `sensitive: false` to bypass the policy. If the re-derived
+    /// flag says sensitive, the imported item is treated as sensitive
+    /// regardless of what the source said; if the re-derived flag
+    /// says not sensitive, the source flag is also cleared so a
+    /// stale "sensitive" mark on a sanitized payload is removed.
     pub fn import_items(&self, json: &str) -> Result<usize, String> {
         let items: Vec<crate::types::ClipboardItem> =
             serde_json::from_str(json).map_err(|e| format!("Invalid JSON: {e}"))?;
 
         let mut count = 0;
-        for item in &items {
-            match self.insert_or_bump(item, 0) {
+        for mut item in items {
+            item.sensitive = Self::derive_sensitive_for_import(&item);
+            match self.insert_or_bump(&item, 0) {
                 Ok(_) => count += 1,
                 Err(e) => {
                     tracing::warn!("Failed to import item: {e}");
@@ -624,6 +634,24 @@ impl Database {
     }
 
     // ── Helpers ────────────────────────────────────────────────────────
+
+    /// Re-derive the `sensitive` flag for an item being imported,
+    /// using the same detection rules as the constructors. This is
+    /// the *only* way an item's sensitive flag is allowed to enter
+    /// the database on import; the source JSON is never trusted.
+    pub fn derive_sensitive_for_import(item: &crate::types::ClipboardItem) -> bool {
+        use crate::types::ContentType;
+        match item.content_type {
+            ContentType::Text | ContentType::Files => {
+                crate::sensitive::check_sensitivity(&item.content).is_sensitive
+            }
+            ContentType::Html => {
+                let plain = item.plain_text.as_deref().unwrap_or("");
+                crate::sensitive::check_sensitive_html(&item.content, plain).is_sensitive
+            }
+            ContentType::Image => false,
+        }
+    }
 
     fn row_to_item(row: &rusqlite::Row<'_>) -> SqlResult<ClipboardItem> {
         Ok(ClipboardItem {
@@ -1170,5 +1198,121 @@ mod tests {
 
         // Clear custom TTL
         db.set_item_ttl(id, None).unwrap();
+    }
+
+    #[test]
+    fn import_redisovers_sensitive_flag_on_text() {
+        // Craft a JSON payload that lies about the sensitive flag.
+        // The import path must NOT trust it.
+        let json = r#"[
+            {
+                "id": 0,
+                "content_hash": 0,
+                "content": "ghp_1234567890abcdefghij",
+                "mime_type": "text/plain",
+                "content_type": "Text",
+                "timestamp": "2026-01-01T00:00:00Z",
+                "pinned": false,
+                "starred": false,
+                "source_app": null,
+                "sensitive": false,
+                "plain_text": null
+            }
+        ]"#;
+        let db = make_db();
+        let count = db.import_items(json).unwrap();
+        assert_eq!(count, 1);
+        let items = db.get_recent(10).unwrap();
+        assert_eq!(items.len(), 1);
+        assert!(
+            items[0].sensitive,
+            "import must re-derive sensitive=true even when source says false"
+        );
+    }
+
+    #[test]
+    fn import_redisovers_sensitive_flag_on_html() {
+        // HTML with a secret in an attribute; tampered JSON claims
+        // sensitive=false. The import path must re-derive it.
+        let html = r#"<form><input type="password" value="MyP@ssw0rd!" /></form>"#;
+        let json = format!(
+            r#"[
+                {{
+                    "id": 0,
+                    "content_hash": 0,
+                    "content": {:?},
+                    "mime_type": "text/html",
+                    "content_type": "Html",
+                    "timestamp": "2026-01-01T00:00:00Z",
+                    "pinned": false,
+                    "starred": false,
+                    "source_app": null,
+                    "sensitive": false,
+                    "plain_text": ""
+                }}
+            ]"#,
+            html
+        );
+        let db = make_db();
+        db.import_items(&json).unwrap();
+        let items = db.get_recent(10).unwrap();
+        assert!(items[0].sensitive, "HTML import must re-derive sensitive");
+    }
+
+    #[test]
+    fn import_redisovers_sensitive_flag_on_files() {
+        // URI list with an embedded credential; tampered JSON says
+        // sensitive=false. The import path must re-derive it.
+        let list = "file:///tmp/a\npostgresql://admin:secret@db.example.com/x";
+        let json = format!(
+            r#"[
+                {{
+                    "id": 0,
+                    "content_hash": 0,
+                    "content": {:?},
+                    "mime_type": "text/uri-list",
+                    "content_type": "Files",
+                    "timestamp": "2026-01-01T00:00:00Z",
+                    "pinned": false,
+                    "starred": false,
+                    "source_app": null,
+                    "sensitive": false,
+                    "plain_text": null
+                }}
+            ]"#,
+            list
+        );
+        let db = make_db();
+        db.import_items(&json).unwrap();
+        let items = db.get_recent(10).unwrap();
+        assert!(items[0].sensitive, "files import must re-derive sensitive");
+    }
+
+    #[test]
+    fn import_drops_stale_sensitive_flag_on_safe_content() {
+        // JSON claims sensitive=true for plain text that is actually
+        // safe. The import path must clear the stale flag.
+        let json = r#"[
+            {
+                "id": 0,
+                "content_hash": 0,
+                "content": "Hello world",
+                "mime_type": "text/plain",
+                "content_type": "Text",
+                "timestamp": "2026-01-01T00:00:00Z",
+                "pinned": false,
+                "starred": false,
+                "source_app": null,
+                "sensitive": true,
+                "plain_text": null
+            }
+        ]"#;
+        let db = make_db();
+        db.import_items(json).unwrap();
+        let items = db.get_recent(10).unwrap();
+        assert!(
+            !items[0].sensitive,
+            "stale sensitive=true on safe content must be cleared"
+        );
     }
 }

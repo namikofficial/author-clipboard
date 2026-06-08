@@ -228,7 +228,7 @@ fn drop_block(input: &str, block_tag: &str) -> String {
         let open_abs = cursor + open_rel;
         let after_tag = open_abs + open.len();
         let next_char = lower.as_bytes().get(after_tag).copied();
-        let is_tag_start = matches!(next_char, Some(b' ') | Some(b'>') | Some(b'/'));
+        let is_tag_start = matches!(next_char, Some(b' ' | b'>' | b'/'));
         if !is_tag_start {
             cursor = open_abs + 1;
             continue;
