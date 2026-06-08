@@ -59,8 +59,7 @@ fn tool_exists(name: &str) -> bool {
     Command::new("which")
         .arg(name)
         .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+        .is_ok_and(|o| o.status.success())
 }
 
 /// Detect the best available quick paste backend.
