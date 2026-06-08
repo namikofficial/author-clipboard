@@ -138,6 +138,138 @@ pub struct PickerEntry {
     pub timestamp: Option<DateTime<Utc>>,
 }
 
+// ── UI-Facing Models ─────────────────────────────────────────────
+
+/// Unified error type for clipboard UI operations.
+/// This provides a clear, user-friendly error hierarchy that all
+/// UI components (applet, picker, CLI) can use.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ClipboardUiError {
+    /// Database operation failed.
+    Database(String),
+    /// Clipboard restore operation failed.
+    Clipboard(String),
+    /// Item requires explicit user confirmation before copy (sensitive item).
+    SensitiveConfirmationRequired { id: i64 },
+    /// Permission denied (e.g., quick-paste requires setup).
+    PermissionRequired(String),
+    /// Daemon is not running or IPC is unavailable.
+    DaemonUnavailable,
+    /// Item is encrypted and decryption failed or is not available.
+    EncryptedContentUnavailable { id: i64 },
+    /// Item not found.
+    NotFound { id: i64 },
+    /// I/O error (file read/write, etc.).
+    Io(String),
+    /// Invalid configuration.
+    Config(String),
+}
+
+impl std::fmt::Display for ClipboardUiError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Database(msg) => write!(f, "Database error: {msg}"),
+            Self::Clipboard(msg) => write!(f, "Clipboard error: {msg}"),
+            Self::SensitiveConfirmationRequired { id } => {
+                write!(f, "Sensitive item {id} requires confirmation")
+            }
+            Self::PermissionRequired(msg) => write!(f, "Permission required: {msg}"),
+            Self::DaemonUnavailable => write!(f, "Clipboard daemon is not running"),
+            Self::EncryptedContentUnavailable { id } => {
+                write!(f, "Cannot access encrypted item {id}")
+            }
+            Self::NotFound { id } => write!(f, "Item {id} not found"),
+            Self::Io(msg) => write!(f, "I/O error: {msg}"),
+            Self::Config(msg) => write!(f, "Configuration error: {msg}"),
+        }
+    }
+}
+
+impl std::error::Error for ClipboardUiError {}
+
+impl From<rusqlite::Error> for ClipboardUiError {
+    fn from(e: rusqlite::Error) -> Self {
+        Self::Database(e.to_string())
+    }
+}
+
+impl From<clipboard::ClipboardSetError> for ClipboardUiError {
+    fn from(e: clipboard::ClipboardSetError) -> Self {
+        Self::Clipboard(e.to_string())
+    }
+}
+
+/// State of an action for UI feedback.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum ActionState {
+    /// No action in progress.
+    #[default]
+    Idle,
+    /// Action is currently executing.
+    Loading { message: Option<String> },
+    /// Action completed successfully.
+    Success { message: Option<String> },
+    /// Action failed.
+    Failed { error: ClipboardUiError },
+    /// Action requires user confirmation (e.g., sensitive item copy).
+    AwaitingConfirmation { id: i64, action: String },
+    /// Daemon is not available.
+    DaemonUnavailable,
+}
+
+/// Filter options for clipboard history queries.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ClipboardFilterState {
+    /// Filter by content type.
+    pub content_types: Option<Vec<ContentType>>,
+    /// Filter by pinned status (Some(true) = pinned only, Some(false) = unpinned only).
+    pub pinned: Option<bool>,
+    /// Filter by sensitive flag.
+    pub sensitive: Option<bool>,
+    /// Filter by source application.
+    pub source_app: Option<String>,
+}
+
+impl ClipboardFilterState {
+    /// Returns true if no filters are active (show all items).
+    pub fn is_empty(&self) -> bool {
+        self.content_types.is_none()
+            && self.pinned.is_none()
+            && self.sensitive.is_none()
+            && self.source_app.is_none()
+    }
+}
+
+/// Search options with pagination.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ClipboardSearchState {
+    /// The search query string.
+    pub query: String,
+    /// Additional filters to apply.
+    pub filters: ClipboardFilterState,
+    /// Number of items to skip (for pagination).
+    pub offset: usize,
+    /// Maximum number of items to return.
+    pub limit: usize,
+}
+
+impl ClipboardSearchState {
+    /// Create a new search state with default pagination.
+    pub fn new(query: impl Into<String>) -> Self {
+        Self {
+            query: query.into(),
+            filters: ClipboardFilterState::default(),
+            offset: 0,
+            limit: 50,
+        }
+    }
+
+    /// Returns true if this is an empty search (show recent items).
+    pub fn is_empty(&self) -> bool {
+        self.query.is_empty() && self.filters.is_empty()
+    }
+}
+
 // ── Content-type icon helpers ─────────────────────────────────────
 
 /// Return a short icon string for the content type (for external menus).
@@ -451,6 +583,34 @@ pub fn restore_entry(
         return Err(PickerError::SensitiveConfirmationRequired);
     }
 
+    // Try IPC first for proper encryption/decryption handling.
+    // This ensures encrypted items are properly decrypted before clipboard restore.
+    if let Some(id) = entry.id {
+        let copy_mode = match action {
+            PickerAction::Copy => crate::ipc::CopyMode::Copy,
+            PickerAction::QuickPaste => crate::ipc::CopyMode::QuickPaste,
+        };
+        let client = crate::ipc::IpcClient::new();
+        if let Ok(response) = client.send_command(&crate::ipc::IpcCommand::Copy { id, mode: copy_mode }) {
+            if response.ok {
+                // IPC succeeded - parse the result
+                if let Some(data) = response.data {
+                    let mime_type = data.get("mime_type")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("text/plain")
+                        .to_string();
+                    return Ok(clipboard::ClipboardSetResult {
+                        mime_type,
+                        behavior: if matches!(action, PickerAction::QuickPaste) { "quick-paste" } else { "copy" },
+                    });
+                }
+            }
+            // IPC failed with error - fall through to fallback
+        }
+        // IPC unavailable or failed - fall through to direct access
+    }
+
+    // Fallback: direct clipboard access (may not work for encrypted items)
     match action {
         PickerAction::Copy => {
             if let Some(id) = entry.id {

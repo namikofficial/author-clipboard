@@ -151,17 +151,13 @@ mod tests {
     #[test]
     fn new_html_runs_sensitive_detection() {
         // Plain HTML with no secrets is not sensitive.
-        let safe = ClipboardItem::new_html(
-            "<p>Hello world</p>".to_string(),
-            "Hello world".to_string(),
-        );
+        let safe =
+            ClipboardItem::new_html("<p>Hello world</p>".to_string(), "Hello world".to_string());
         assert!(!safe.sensitive, "innocent HTML must not be flagged");
 
         // Secret in the plain-text companion.
-        let in_plain = ClipboardItem::new_html(
-            "<p>Copy me</p>".to_string(),
-            "sk-abc123xyz".to_string(),
-        );
+        let in_plain =
+            ClipboardItem::new_html("<p>Copy me</p>".to_string(), "sk-abc123xyz".to_string());
         assert!(
             in_plain.sensitive,
             "secret in text/plain companion must trigger"

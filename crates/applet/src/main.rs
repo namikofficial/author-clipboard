@@ -15,6 +15,7 @@ use author_clipboard_shared::clipboard;
 use author_clipboard_shared::config::Config;
 use author_clipboard_shared::file_handler;
 use author_clipboard_shared::image_store;
+use author_clipboard_shared::ipc::{CopyMode, IpcClient};
 use author_clipboard_shared::quick_paste::{self, PasteBackend};
 use author_clipboard_shared::types::{AuditEventKind, ClipboardItem, Snippet};
 use author_clipboard_shared::Database;
@@ -398,10 +399,39 @@ impl cosmic::Application for App {
             }
 
             Message::CopyItem(id) => {
+                // Try IPC first for proper encryption/decryption handling.
+                // If daemon is unavailable, fall back to direct clipboard access.
+                let client = IpcClient::new();
+                match client.send_command(&shared::ipc::IpcCommand::Copy {
+                    id,
+                    mode: CopyMode::Copy,
+                }) {
+                    Ok(response) => {
+                        if response.ok {
+                            info!("Copied item {} via daemon IPC", id);
+                            std::process::exit(0);
+                        } else if let Some(ref err) = response.error {
+                            warn!(
+                                "Copy via IPC failed (code {}): {}",
+                                err.code,
+                                err.message
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        // Daemon unavailable, fall back to direct clipboard access
+                        warn!("IPC copy failed, falling back to direct access: {e}");
+                    }
+                }
+
+                // Fallback: direct clipboard access (may not work for encrypted items)
                 if let Some(item) = self.items.iter().find(|i| i.id == id) {
                     match clipboard::set_clipboard_item(item, &self.config.data_dir) {
                         Ok(result) => {
-                            info!("Copied item {} to clipboard as {}", id, result.mime_type);
+                            info!(
+                                "Copied item {} to clipboard as {} (direct access)",
+                                id, result.mime_type
+                            );
                             std::process::exit(0);
                         }
                         Err(e) => warn!("Failed to set clipboard: {e}"),
@@ -434,37 +464,67 @@ impl cosmic::Application for App {
             }
 
             Message::TogglePin(id) => {
-                if let Some(db) = &self.db {
-                    if let Err(e) = db.toggle_pin(id) {
-                        warn!("Failed to toggle pin: {e}");
+                // Try IPC first for proper daemon coordination.
+                let client = IpcClient::new();
+                let ipc_ok = client
+                    .send_command(&shared::ipc::IpcCommand::Pin { id })
+                    .map(|r| r.ok)
+                    .unwrap_or(false);
+
+                // Fallback to direct DB access
+                if !ipc_ok {
+                    if let Some(db) = &self.db {
+                        if let Err(e) = db.toggle_pin(id) {
+                            warn!("Failed to toggle pin: {e}");
+                        }
                     }
-                    self.refresh_items();
                 }
+                self.refresh_items();
             }
 
             Message::DeleteItem(id) => {
-                if let Some(db) = &self.db {
-                    if let Err(e) = db.delete_item(id) {
-                        warn!("Failed to delete item: {e}");
-                    } else {
-                        let _ = db.log_audit_event(
-                            &AuditEventKind::ItemDeleted,
-                            Some(&format!("Item {id} deleted")),
-                        );
+                // Try IPC first for proper daemon coordination and audit logging.
+                let client = IpcClient::new();
+                let ipc_ok = client
+                    .send_command(&shared::ipc::IpcCommand::Delete { id })
+                    .map(|r| r.ok)
+                    .unwrap_or(false);
+
+                // Fallback to direct DB access
+                if !ipc_ok {
+                    if let Some(db) = &self.db {
+                        if let Err(e) = db.delete_item(id) {
+                            warn!("Failed to delete item: {e}");
+                        } else {
+                            let _ = db.log_audit_event(
+                                &AuditEventKind::ItemDeleted,
+                                Some(&format!("Item {id} deleted")),
+                            );
+                        }
                     }
-                    self.refresh_items();
                 }
+                self.refresh_items();
             }
 
             Message::ClearAll => {
-                if let Some(db) = &self.db {
-                    if let Err(e) = db.clear_unpinned() {
-                        warn!("Failed to clear items: {e}");
-                    } else {
-                        let _ = db.log_audit_event(&AuditEventKind::HistoryCleared, None);
+                // Try IPC first for proper daemon coordination and audit logging.
+                let client = IpcClient::new();
+                let ipc_ok = client
+                    .send_command(&shared::ipc::IpcCommand::ClearUnpinned)
+                    .map(|r| r.ok)
+                    .unwrap_or(false);
+
+                // Fallback to direct DB access
+                if !ipc_ok {
+                    if let Some(db) = &self.db {
+                        if let Err(e) = db.clear_unpinned() {
+                            warn!("Failed to clear items: {e}");
+                        } else {
+                            let _ = db.log_audit_event(&AuditEventKind::HistoryCleared, None);
+                        }
                     }
-                    self.refresh_items();
                 }
+                self.refresh_items();
             }
 
             Message::MoveDown => {

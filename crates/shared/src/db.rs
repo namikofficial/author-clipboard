@@ -327,7 +327,13 @@ impl Database {
                     _ => None,
                 };
                 let redacted = item.redacted_preview();
-                (ciphertext, plain_text_ciphertext, 1_i32, Some(1_i32), Some(redacted))
+                (
+                    ciphertext,
+                    plain_text_ciphertext,
+                    1_i32,
+                    Some(1_i32),
+                    Some(redacted),
+                )
             } else {
                 (
                     item.content.clone(),
@@ -712,7 +718,22 @@ impl Database {
     /// Export all clipboard items as JSON string.
     pub fn export_items(&self) -> SqlResult<String> {
         let items = self.get_recent(i32::MAX as usize)?;
-        let json = serde_json::to_string_pretty(&items)
+        // For encrypted items, replace ciphertext content with redacted_preview
+        // to avoid leaking encrypted content in exports.
+        let items_for_export: Vec<crate::types::ClipboardItem> = items
+            .into_iter()
+            .map(|mut item| {
+                if item.encrypted {
+                    item.content = item
+                        .redacted_preview
+                        .clone()
+                        .unwrap_or_else(|| "••••••••".to_string());
+                    item.plain_text = None;
+                }
+                item
+            })
+            .collect();
+        let json = serde_json::to_string_pretty(&items_for_export)
             .unwrap_or_else(|e| format!("{{\"error\": \"{e}\"}}"));
         Ok(json)
     }
@@ -1367,6 +1388,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::uninlined_format_args)]
     fn import_redisovers_sensitive_flag_on_html() {
         // HTML with a secret in an attribute; tampered JSON claims
         // sensitive=false. The import path must re-derive it.
@@ -1396,6 +1418,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::uninlined_format_args)]
     fn import_redisovers_sensitive_flag_on_files() {
         // URI list with an embedded credential; tampered JSON says
         // sensitive=false. The import path must re-derive it.
@@ -1604,7 +1627,10 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(stored, "sk-abc123xyz", "plaintext must be stored when opt-out");
+        assert_eq!(
+            stored, "sk-abc123xyz",
+            "plaintext must be stored when opt-out"
+        );
 
         let (encrypted, redacted): (i32, Option<String>) = db
             .conn
@@ -1628,5 +1654,81 @@ mod tests {
         assert!(!preview.contains("MyP"));
         assert!(!preview.contains("hunter"));
         assert!(preview.contains("Sensitive"));
+    }
+
+    #[test]
+    fn export_items_redacts_encrypted_content() {
+        // When exporting, encrypted items must not leak ciphertext.
+        // The export must use redacted_preview instead of content.
+        let tmp = tmp_data_dir();
+        let mgr = crate::encryption::EncryptionManager::new(tmp.path()).unwrap();
+        let db = make_db();
+
+        // Insert an encrypted sensitive item
+        let item = ClipboardItem::new_text("ghp_secretToken123456".to_string());
+        assert!(item.sensitive);
+        db.insert_with_encryption(&item, &mgr, true)
+            .expect("insert encrypted");
+
+        // Export and verify the ciphertext is not in the JSON
+        let json = db.export_items().unwrap();
+
+        // The plaintext must not appear in the export
+        assert!(
+            !json.contains("ghp_secretToken123456"),
+            "export must not contain plaintext of encrypted item"
+        );
+
+        // The ciphertext (base64) must not appear either
+        let stored_item = db.get_recent(1).unwrap().pop().unwrap();
+        assert!(stored_item.encrypted);
+        // The ciphertext is base64 encoded, so it should be longer than plaintext
+        // and contain chars like +/= that plaintext wouldn't have
+        assert!(
+            !json.contains(&stored_item.content),
+            "export must not contain ciphertext of encrypted item"
+        );
+
+        // The redacted marker should be present
+        assert!(json.contains("Sensitive item") || json.contains("••••"));
+    }
+
+    #[test]
+    fn search_results_mask_encrypted_content() {
+        // Encrypted content is NOT searchable (by design). This test
+        // verifies that:
+        // 1. An encrypted item's original plaintext is NOT found via search
+        // 2. The item's encrypted flag is correctly set
+        // 3. If we retrieve the item directly, it's properly encrypted
+        let tmp = tmp_data_dir();
+        let mgr = crate::encryption::EncryptionManager::new(tmp.path()).unwrap();
+        let db = make_db();
+
+        // Insert an encrypted sensitive item
+        let item = ClipboardItem::new_text("AKIAIOSFODNN7EXAMPLE".to_string());
+        assert!(item.sensitive);
+        db.insert_with_encryption(&item, &mgr, true)
+            .expect("insert encrypted");
+
+        // Search for part of the original plaintext - should NOT find it
+        // because encrypted content is not indexed
+        let results = db.search("AKIA", 10).unwrap();
+        assert_eq!(
+            results.len(),
+            0,
+            "encrypted content must not be searchable (plaintext not indexed)"
+        );
+
+        // But the item exists and is retrievable
+        let all_items = db.get_recent(10).unwrap();
+        assert_eq!(all_items.len(), 1);
+        assert!(all_items[0].encrypted, "item must be marked as encrypted");
+
+        // And we can decrypt it back to original plaintext
+        let decrypted = db.decrypt_item(&all_items[0], &mgr).unwrap();
+        assert_eq!(
+            decrypted.content, "AKIAIOSFODNN7EXAMPLE",
+            "decrypted content must match original plaintext"
+        );
     }
 }
