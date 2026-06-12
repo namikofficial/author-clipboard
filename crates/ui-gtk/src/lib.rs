@@ -32,10 +32,8 @@ pub mod window;
 pub struct PopupConfig {
     /// Initial source for the picker.
     pub source: PickerSource,
-    /// Initial filter chip. The real `PickerFilter` lives in
-    /// `author_clipboard_shared::picker` and is added in T019; for
-    /// now this is `String` so the skeleton compiles.
-    pub filter: String,
+    /// Initial filter chip.
+    pub filter: PickerFilter,
     /// Pre-fill search query.
     pub query: Option<String>,
     /// Action on Enter.
@@ -50,7 +48,7 @@ impl Default for PopupConfig {
     fn default() -> Self {
         Self {
             source: PickerSource::History,
-            filter: "all".to_string(),
+            filter: PickerFilter::All,
             query: None,
             action: PickerAction::Copy,
             count: 50,
@@ -83,6 +81,5 @@ pub fn run_manager(config: ManagerConfig) -> anyhow::Result<()> {
 }
 
 // Re-export shared types so binary crates don't need to depend on
-// `shared` directly. `PickerFilter` is added in T019; until then it
-// lives in the `shared` crate under the same path.
-pub use author_clipboard_shared::picker::{PickerAction, PickerSource};
+// `shared` directly.
+pub use author_clipboard_shared::picker::{PickerAction, PickerFilter, PickerSource};

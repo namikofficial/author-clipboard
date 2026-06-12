@@ -10,7 +10,7 @@
 //! * US-003: CLI launch opens a real AdwApplicationWindow.
 
 use clap::{Parser, ValueEnum};
-use ui_gtk::{ManagerConfig, PickerAction, PickerSource, PopupConfig};
+use ui_gtk::{ManagerConfig, PickerAction, PickerFilter, PickerSource, PopupConfig};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum Mode {
@@ -111,13 +111,15 @@ fn main() -> anyhow::Result<()> {
         }
     });
 
-    tracing::info!(?mode, "author-clipboard starting");
+    let filter: PickerFilter = args.filter.parse().unwrap_or_default();
+
+    tracing::info!(?mode, ?filter, "author-clipboard starting");
 
     match mode {
         Mode::Popup => {
             let cfg = PopupConfig {
                 source: args.source.into(),
-                filter: args.filter,
+                filter,
                 query: args.query,
                 action: args.action.into(),
                 count: args.count,

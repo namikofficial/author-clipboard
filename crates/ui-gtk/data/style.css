@@ -1,1 +1,181 @@
-/* Placeholder. Real stylesheet is created in T005. */
+/* author-clipboard UI stylesheet
+ *
+ * Compiled into the GResource bundle at build time and loaded
+ * automatically on app startup. Defines the 14 design tokens
+ * (colors, radii, shadows, motion) and the cute pill / chip /
+ * item-row visual language.
+ */
+
+:root {
+  /* ── Colors (mirror libadwaita) ─────────────────────────── */
+  --accent:        @accent_bg_color;
+  --accent-fg:     @accent_fg_color;
+  --surface-0:     @window_bg_color;
+  --surface-1:     @card_bg_color;
+  --surface-2:     @view_bg_color;
+  --text-0:        @window_fg_color;
+  --text-1:        @view_fg_color;
+  --text-2:        @dim_label_fg_color;
+  --border:        @borders_color;
+  --danger:        @error_bg_color;
+  --success:       @success_bg_color;
+  --warning:       @warning_bg_color;
+
+  /* ── Radii ──────────────────────────────────────────────── */
+  --radius-sm:     6px;
+  --radius-md:     12px;
+  --radius-lg:     16px;
+  --radius-pill:   999px;
+
+  /* ── Shadows ────────────────────────────────────────────── */
+  --shadow-sm:     0 1px 2px rgba(0, 0, 0, 0.06);
+  --shadow-md:     0 4px 12px rgba(0, 0, 0, 0.10);
+
+  /* ── Motion ─────────────────────────────────────────────── */
+  --motion-fast:   120ms;
+  --motion-base:   200ms;
+  --motion-slow:   320ms;
+  --ease-out:      cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring:   cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* ── Global transitions ───────────────────────────────────── */
+* {
+  transition:
+    background-color var(--motion-fast) var(--ease-out),
+    border-color    var(--motion-fast) var(--ease-out),
+    box-shadow      var(--motion-base) var(--ease-out);
+}
+
+/* ── Custom scrollbar ─────────────────────────────────────── */
+scrollbar {
+  background: transparent;
+}
+scrollbar slider {
+  background: alpha(currentColor, 0.25);
+  border-radius: var(--radius-pill);
+  min-width: 8px;
+  min-height: 8px;
+}
+scrollbar slider:hover {
+  background: alpha(currentColor, 0.4);
+}
+
+/* ── Item rows (the cute pill-shaped card) ─────────────────── */
+.item-row {
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
+  margin: 2px 0;
+  background: transparent;
+}
+.item-row:hover {
+  background: alpha(@accent_bg_color, 0.08);
+}
+.item-row.selected {
+  background: alpha(@accent_bg_color, 0.18);
+  box-shadow: var(--shadow-sm);
+}
+/* Sensitive red left border — set via JS in item_row.rs */
+.item-row.sensitive {
+  border-left: 3px solid var(--danger);
+}
+
+.item-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-0);
+}
+.item-subtitle {
+  font-size: 11px;
+  color: var(--text-2);
+}
+
+/* ── Chips (pills) ────────────────────────────────────────── */
+.chip {
+  border-radius: var(--radius-pill);
+  padding: 4px 12px;
+  font-size: 11px;
+  font-weight: 500;
+  background: alpha(@accent_bg_color, 0.12);
+  color: @accent_fg_color;
+  border: 1px solid transparent;
+  min-height: 22px;
+  min-width: 0;
+}
+.chip:hover {
+  background: alpha(@accent_bg_color, 0.20);
+}
+.chip-active {
+  background: @accent_bg_color;
+  color: @accent_fg_color;
+  box-shadow: var(--shadow-sm);
+}
+.chip-label {
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.chip-default { background: alpha(@accent_bg_color, 0.12); color: @accent_fg_color; }
+.chip-danger  { background: alpha(@error_bg_color, 0.15);  color: @error_fg_color;  }
+.chip-success { background: alpha(@success_bg_color, 0.15); color: @success_fg_color; }
+.chip-warning { background: alpha(@warning_bg_color, 0.15); color: @warning_fg_color; }
+.chip-muted   { background: alpha(currentColor, 0.08);     color: @dim_label_fg_color; }
+
+/* ── Search entry ─────────────────────────────────────────── */
+.search-entry {
+  border-radius: var(--radius-pill);
+  padding: 4px 14px;
+  background: @view_bg_color;
+  border: 1px solid @borders_color;
+  min-height: 32px;
+}
+.search-entry:focus-within {
+  border-color: @accent_bg_color;
+  box-shadow: 0 0 0 2px alpha(@accent_bg_color, 0.15);
+}
+
+/* ── Suggested / Destructive buttons ──────────────────────── */
+button.suggested-action {
+  border-radius: var(--radius-md);
+  font-weight: 600;
+  padding: 6px 16px;
+}
+button.destructive-action {
+  border-radius: var(--radius-md);
+  font-weight: 600;
+  padding: 6px 16px;
+}
+
+/* ── Picker grid (emoji / symbol / kaomoji cells) ─────────── */
+.picker-grid > flowboxchild {
+  border-radius: var(--radius-md);
+}
+.emoji-cell,
+.symbol-cell,
+.kaomoji-cell {
+  border-radius: var(--radius-md);
+  font-size: 16px;
+  padding: 6px 8px;
+}
+.emoji-cell:hover,
+.symbol-cell:hover,
+.kaomoji-cell:hover {
+  background: alpha(@accent_bg_color, 0.15);
+}
+
+/* ── List boxes ───────────────────────────────────────────── */
+.clipboard-list,
+.snippet-list {
+  background: transparent;
+}
+.clipboard-list > row {
+  border-radius: var(--radius-md);
+  margin: 2px 0;
+  padding: 0;
+}
+.clipboard-list > row:hover {
+  background: alpha(@accent_bg_color, 0.06);
+}
+.clipboard-list > row:selected {
+  background: alpha(@accent_bg_color, 0.18);
+}

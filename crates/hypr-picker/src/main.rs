@@ -5,7 +5,7 @@
 //! lives in the `ui-gtk` crate.
 
 use clap::{Parser, ValueEnum};
-use ui_gtk::{PickerAction, PickerSource, PopupConfig};
+use ui_gtk::{PickerAction, PickerFilter, PickerSource, PopupConfig};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -86,7 +86,7 @@ fn main() -> anyhow::Result<()> {
 
     let cfg = PopupConfig {
         source: args.source.into(),
-        filter: "all".to_string(),
+        filter: PickerFilter::All,
         query: args.query,
         action: args.action.into(),
         count: args.count,

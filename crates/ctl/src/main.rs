@@ -95,6 +95,9 @@ enum Command {
         /// Action on selection: copy or quick-paste
         #[arg(short, long, default_value = "copy")]
         action: ActionArg,
+        /// Filter chip: all / text / images / files / pinned / starred / sensitive
+        #[arg(long, default_value = "all")]
+        filter: String,
     },
     /// Print recommended Hyprland config for keybinds and window rules
     HyprlandConfig,
@@ -369,7 +372,8 @@ fn main() -> Result<()> {
             prompt,
             include_sensitive,
             action,
-        } => run_external_picker(menu, source, count, &prompt, include_sensitive, action)?,
+            filter,
+        } => run_external_picker(menu, source, count, &prompt, include_sensitive, action, filter)?,
         Command::HyprlandConfig => print_hyprland_config(),
     }
     Ok(())
@@ -554,6 +558,7 @@ fn run_external_picker(
     prompt: &str,
     include_sensitive: bool,
     action: ActionArg,
+    filter: String,
 ) -> Result<()> {
     let backend = resolve_menu_backend(menu)
         .context("No picker backend found. Install wofi, rofi, or fuzzel.")?;
@@ -571,6 +576,11 @@ fn run_external_picker(
 
     let entries =
         picker::load_entries(&db, &config, &options).context("Failed to load picker entries")?;
+
+    // Parse the filter arg, fall back to All on unknown.
+    let filter_enum: author_clipboard_shared::picker::PickerFilter =
+        filter.parse().unwrap_or_default();
+    let entries = picker::apply_filter(&entries, filter_enum);
 
     if entries.is_empty() {
         println!("No items found.");

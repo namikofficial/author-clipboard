@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-  <title>empty-pin</title>
-  <circle cx="12" cy="12" r="9"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+  <title>empty pin</title>
+  <path d="M24 8 L16 22 L19 27 L10 32 L16 38 L21 36 L24 42 L27 36 L32 38 L38 32 L29 27 L32 22 Z" opacity="0.6"/>
+  <circle cx="24" cy="20" r="2" fill="currentColor" opacity="0.4"/>
 </svg>
