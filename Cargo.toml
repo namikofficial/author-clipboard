@@ -7,6 +7,7 @@ members = [
     "crates/ctl",
     "crates/hypr-picker",
     "crates/mcp-server",
+    "crates/ui-gtk",
 ]
 
 [workspace.package]
@@ -75,6 +76,19 @@ libcosmic = { git = "https://github.com/pop-os/libcosmic.git", default-features 
     "wgpu",
     "tokio",
 ] }
+
+# GTK4 UI stack (used by ui-gtk crate)
+# Versions must match those used by `hypr-picker` (gtk4 0.11,
+# gtk4-layer-shell 0.8) to avoid the `gtk-4` `links` conflict in cargo.
+gtk4 = { version = "0.11", features = ["v4_10"] }
+libadwaita = { version = "0.9", features = ["v1_4"] }
+gtk4-layer-shell = "0.8"
+glib = "0.20"
+gio = "0.20"
+gdk-pixbuf = "0.20"
+sourceview5 = "0.11"
+webkit6 = "0.5"
+glib-build-tools = "0.20"
 
 # Image processing
 image = "0.25"

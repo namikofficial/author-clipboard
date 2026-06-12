@@ -6,8 +6,8 @@ pkgdesc='Native COSMIC clipboard manager with wlroots compositor support'
 arch=('x86_64')
 url='https://github.com/namikofficial/author-clipboard'
 license=('GPL-3.0-or-later')
-depends=('wayland' 'wl-clipboard' 'sqlite' 'libxkbcommon')
-makedepends=('rust' 'cargo' 'pkgconf' 'wayland-protocols' 'gtk4')
+depends=('wayland' 'wl-clipboard' 'sqlite' 'libxkbcommon' 'gtk4' 'libadwaita')
+makedepends=('rust' 'cargo' 'pkgconf' 'wayland-protocols' 'gtk4' 'glib2-devel')
 optdepends=(
   'wtype: preferred quick paste backend on Wayland'
   'ydotool: optional input automation backend'

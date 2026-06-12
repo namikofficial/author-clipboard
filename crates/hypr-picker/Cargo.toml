@@ -2,18 +2,24 @@
 name = "author-clipboard-hypr-picker"
 version.workspace = true
 edition.workspace = true
-description = "First-party Hyprland/wlroots clipboard picker"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description.workspace = true
+homepage.workspace = true
 
 [[bin]]
 name = "author-clipboard-hypr-picker"
 path = "src/main.rs"
 
-[lints]
-workspace = true
-
 [dependencies]
+author-clipboard-ui-gtk = { path = "../ui-gtk" }
 author-clipboard-shared = { path = "../shared" }
 anyhow.workspace = true
 clap.workspace = true
-gtk4 = { version = "0.11", features = ["v4_12"] }
-gtk4-layer-shell = "0.8"
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[lints]
+workspace = true

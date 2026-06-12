@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gresources>
+  <gresource prefix="/com/namikofficial/author-clipboard">
+    <file>style.css</file>
+    <file alias="icons/clipboard.svg">icons/clipboard.svg</file>
+    <file alias="icons/pin.svg">icons/pin.svg</file>
+    <file alias="icons/star.svg">icons/star.svg</file>
+    <file alias="icons/lock.svg">icons/lock.svg</file>
+    <file alias="icons/search.svg">icons/search.svg</file>
+    <file alias="icons/trash.svg">icons/trash.svg</file>
+    <file alias="icons/image.svg">icons/image.svg</file>
+    <file alias="icons/code.svg">icons/code.svg</file>
+    <file alias="icons/files.svg">icons/files.svg</file>
+    <file alias="icons/link.svg">icons/link.svg</file>
+    <file alias="icons/emoji.svg">icons/emoji.svg</file>
+    <file alias="icons/kaomoji.svg">icons/kaomoji.svg</file>
+    <file alias="icons/symbol.svg">icons/symbol.svg</file>
+    <file alias="icons/snippet.svg">icons/snippet.svg</file>
+    <file alias="icons/gear.svg">icons/gear.svg</file>
+    <file alias="icons/chevron-down.svg">icons/chevron-down.svg</file>
+    <file alias="icons/x.svg">icons/x.svg</file>
+    <file alias="icons/plus.svg">icons/plus.svg</file>
+    <file alias="icons/copy.svg">icons/copy.svg</file>
+    <file alias="icons/empty-clipboard.svg">icons/empty-clipboard.svg</file>
+    <file alias="icons/empty-search.svg">icons/empty-search.svg</file>
+    <file alias="icons/empty-warning.svg">icons/empty-warning.svg</file>
+    <file alias="icons/empty-pin.svg">icons/empty-pin.svg</file>
+  </gresource>
+</gresources>

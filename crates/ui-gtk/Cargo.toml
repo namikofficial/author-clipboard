@@ -1,0 +1,41 @@
+[package]
+name = "author-clipboard-ui-gtk"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Unified GTK4 + libadwaita UI for author-clipboard"
+homepage.workspace = true
+
+[lib]
+name = "ui_gtk"
+path = "src/lib.rs"
+
+[dependencies]
+author-clipboard-shared = { path = "../shared" }
+libadwaita.workspace = true
+gtk4.workspace = true
+gtk4-layer-shell.workspace = true
+glib.workspace = true
+gio.workspace = true
+gdk-pixbuf.workspace = true
+sourceview5.workspace = true
+# webkit6 is optional — used only by the HTML preview pane (T012).
+# Comment back in once `webkitgtk-6.0-dev` is installed on the dev box.
+# webkit6.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+chrono.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[build-dependencies]
+glib-build-tools.workspace = true
+
+[lints]
+workspace = true

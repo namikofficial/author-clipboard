@@ -68,9 +68,9 @@
           # We don't run the test suite from the flake; CI does that.
           doCheck = false;
 
-          # Build deps. Runtime deps (gtk4, gtk4-layer-shell) are needed to
-          # build the hypr-picker. COSMIC_DATA_CONTROL_ENABLED is set at
-          # runtime by the user; we don't bake it into the wrapper.
+          # Build deps. Runtime deps (gtk4, gtk4-layer-shell, libadwaita)
+          # are needed to build the ui-gtk crate. COSMIC_DATA_CONTROL_ENABLED
+          # is set at runtime by the user; we don't bake it into the wrapper.
           buildInputs = with pkgs; [
             wayland
             libxkbcommon
@@ -79,6 +79,8 @@
             wayland-protocols
             gtk4
             gtk4-layer-shell
+            libadwaita
+            glib
           ];
 
           # No postInstall patching needed: the binaries are static enough
@@ -104,6 +106,10 @@
             gtk4
             # gtk4-layer-shell is in nixpkgs as `gtk4-layer-shell`.
             gtk4-layer-shell
+            libadwaita
+            glib
+            gobject-introspection
+            python3Packages.pygobject3
             cargo
             rustc
             rustfmt
@@ -113,7 +119,7 @@
 
           RUSTFLAGS = "-D warnings";
           LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath (
-            (with pkgs; [ wayland libxkbcommon sqlite gtk4 gtk4-layer-shell ])
+            (with pkgs; [ wayland libxkbcommon sqlite gtk4 gtk4-layer-shell libadwaita glib ])
           );
         };
 
