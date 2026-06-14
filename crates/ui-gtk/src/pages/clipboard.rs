@@ -222,21 +222,16 @@ fn load_entries_for(
         include_sensitive: matches!(filter, PickerFilter::Sensitive),
         action: author_clipboard_shared::picker::PickerAction::Copy,
     };
-    let mut entries = match picker::load_entries(&db, config, &opts) {
+    let entries = match picker::load_entries(&db, config, &opts) {
         Ok(entries) => entries,
         Err(e) => {
             tracing::warn!("failed to load entries: {e}");
             return Vec::new();
         }
     };
-    // Apply the text query (the DB-layer `Search` does the heavy
-    // lifting when `query` is set, but the picker module's
-    // `filter_entries` does the in-memory pass when we already
-    // loaded history).
-    if !query.is_empty() {
-        entries = picker::filter_entries(&entries, query);
-    }
-    picker::apply_filter(&entries, filter)
+    // Apply filter + query in one pass via filter_and_query so we don't
+    // double-filter (filter_and_query applies filter first, then query).
+    picker::filter_and_query(&entries, query, filter)
 }
 
 /// Rebuild the list with the given entries. Reuses existing

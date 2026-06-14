@@ -589,14 +589,13 @@ fn run_external_picker(
     // Parse the filter arg, fall back to All on unknown.
     let filter_enum: author_clipboard_shared::picker::PickerFilter =
         filter.parse().unwrap_or_default();
-    let entries = picker::apply_filter(&entries, filter_enum);
 
     if entries.is_empty() {
         println!("No items found.");
         return Ok(());
     }
 
-    let rows = picker::build_external_rows(&entries, true);
+    let (entries, rows) = picker::build_external_rows(&entries, filter_enum, true);
     let labels: Vec<String> = rows.iter().map(|row| row.label.clone()).collect();
 
     let selected = run_menu_backend(backend, prompt, &labels)?;

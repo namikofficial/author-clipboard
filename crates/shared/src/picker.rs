@@ -795,11 +795,18 @@ pub struct ExternalPickerRow {
 }
 
 /// Build stable-key external rows so UI labels can stay human-readable.
+/// The `filter` is applied internally so callers do not need to pre-filter.
+///
+/// Returns `(filtered_entries, rows)` where `rows[i].key` is the index into
+/// `filtered_entries`. Callers should use the returned `filtered_entries`
+/// for item lookup after user selection.
 pub fn build_external_rows(
     entries: &[PickerEntry],
+    filter: PickerFilter,
     include_key_prefix: bool,
-) -> Vec<ExternalPickerRow> {
-    entries
+) -> (Vec<PickerEntry>, Vec<ExternalPickerRow>) {
+    let filtered = apply_filter(entries, filter);
+    let rows = filtered
         .iter()
         .enumerate()
         .map(|(index, entry)| {
@@ -809,7 +816,8 @@ pub fn build_external_rows(
             }
             ExternalPickerRow { key: index, label }
         })
-        .collect()
+        .collect();
+    (filtered, rows)
 }
 
 /// Parse a selected menu row and resolve back to the original entry index.
@@ -831,15 +839,32 @@ pub fn parse_external_row_selection(
 }
 
 /// Filter entries by a search query (case-insensitive substring match on title + content).
+/// This is a thin wrapper around [`filter_and_query`] with [`PickerFilter::All`].
 pub fn filter_entries(entries: &[PickerEntry], query: &str) -> Vec<PickerEntry> {
-    if query.is_empty() {
+    filter_and_query(entries, query, PickerFilter::All)
+}
+
+/// Filter and query entries: apply [`PickerFilter`] first, then do a
+/// case-insensitive substring match on title + content.
+///
+/// Returns `entries.to_vec()` (identity) when `query.is_empty()` and
+/// `filter == PickerFilter::All`, so the common no-op path is fast.
+pub fn filter_and_query(
+    entries: &[PickerEntry],
+    query: &str,
+    filter: PickerFilter,
+) -> Vec<PickerEntry> {
+    if query.is_empty() && filter == PickerFilter::All {
         return entries.to_vec();
     }
+    let filtered = apply_filter(entries, filter);
+    if query.is_empty() {
+        return filtered;
+    }
     let q = query.to_lowercase();
-    entries
-        .iter()
+    filtered
+        .into_iter()
         .filter(|e| e.title.to_lowercase().contains(&q) || e.content.to_lowercase().contains(&q))
-        .cloned()
         .collect()
 }
 
@@ -981,7 +1006,7 @@ mod tests {
             starred: false,
             timestamp: None,
         }];
-        let rows = build_external_rows(&entries, true);
+        let (_filtered, rows) = build_external_rows(&entries, PickerFilter::All, true);
         let selected = rows[0].label.clone();
         assert_eq!(
             parse_external_row_selection(&selected, &rows, true),
@@ -1159,5 +1184,265 @@ mod tests {
     #[test]
     fn from_str_rejects_unknown() {
         assert!("unknown".parse::<PickerFilter>().is_err());
+    }
+
+    // ── filter_and_query tests ─────────────────────────────────────
+
+    fn text_entry(title: &str, content: &str) -> PickerEntry {
+        PickerEntry {
+            id: Some(0),
+            source: PickerSource::History,
+            content_type: Some(ContentType::Text),
+            title: title.to_string(),
+            subtitle: None,
+            content: content.to_string(),
+            mime_type: None,
+            sensitive: false,
+            pinned: false,
+            starred: false,
+            timestamp: None,
+        }
+    }
+
+    fn image_entry(title: &str) -> PickerEntry {
+        PickerEntry {
+            id: Some(0),
+            source: PickerSource::History,
+            content_type: Some(ContentType::Image),
+            title: title.to_string(),
+            subtitle: None,
+            content: String::new(),
+            mime_type: None,
+            sensitive: false,
+            pinned: false,
+            starred: false,
+            timestamp: None,
+        }
+    }
+
+    fn pinned_text_entry(title: &str) -> PickerEntry {
+        PickerEntry {
+            id: Some(0),
+            source: PickerSource::History,
+            content_type: Some(ContentType::Text),
+            title: title.to_string(),
+            subtitle: None,
+            content: "pinned content".to_string(),
+            mime_type: None,
+            sensitive: false,
+            pinned: true,
+            starred: false,
+            timestamp: None,
+        }
+    }
+
+    fn starred_text_entry(title: &str) -> PickerEntry {
+        PickerEntry {
+            id: Some(0),
+            source: PickerSource::History,
+            content_type: Some(ContentType::Text),
+            title: title.to_string(),
+            subtitle: None,
+            content: "starred content".to_string(),
+            mime_type: None,
+            sensitive: false,
+            pinned: false,
+            starred: true,
+            timestamp: None,
+        }
+    }
+
+    fn sensitive_text_entry(title: &str) -> PickerEntry {
+        PickerEntry {
+            id: Some(0),
+            source: PickerSource::History,
+            content_type: Some(ContentType::Text),
+            title: title.to_string(),
+            subtitle: None,
+            content: "sensitive content".to_string(),
+            mime_type: None,
+            sensitive: true,
+            pinned: false,
+            starred: false,
+            timestamp: None,
+        }
+    }
+
+    fn file_entry(title: &str) -> PickerEntry {
+        PickerEntry {
+            id: Some(0),
+            source: PickerSource::History,
+            content_type: Some(ContentType::Files),
+            title: title.to_string(),
+            subtitle: None,
+            content: "/path/to/file".to_string(),
+            mime_type: None,
+            sensitive: false,
+            pinned: false,
+            starred: false,
+            timestamp: None,
+        }
+    }
+
+    // Test 1: identity case — empty query + All filter returns all entries
+    #[test]
+    fn filter_and_query_identity_empty_query_all() {
+        let entries = vec![
+            text_entry("foo", "bar"),
+            text_entry("baz", "qux"),
+            image_entry("an image"),
+        ];
+        let result = filter_and_query(&entries, "", PickerFilter::All);
+        assert_eq!(result.len(), 3);
+    }
+
+    // Test 2–8: every filter with matching query
+    #[test]
+    fn filter_and_query_all_with_matching_query() {
+        let entries = vec![text_entry("hello world", "some content")];
+        let result = filter_and_query(&entries, "hello", PickerFilter::All);
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn filter_and_query_text_with_matching_query() {
+        let entries = vec![text_entry("hello", "world"), image_entry("an image")];
+        let result = filter_and_query(&entries, "hello", PickerFilter::Text);
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn filter_and_query_images_with_matching_query() {
+        let entries = vec![image_entry("screenshot.png"), text_entry("hello", "world")];
+        let result = filter_and_query(&entries, "screenshot", PickerFilter::Images);
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn filter_and_query_files_with_matching_query() {
+        let entries = vec![file_entry("document.pdf"), text_entry("hello", "world")];
+        let result = filter_and_query(&entries, "document", PickerFilter::Files);
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn filter_and_query_pinned_with_matching_query() {
+        let entries = vec![
+            pinned_text_entry("important note"),
+            text_entry("hello", "world"),
+        ];
+        let result = filter_and_query(&entries, "important", PickerFilter::Pinned);
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn filter_and_query_starred_with_matching_query() {
+        let entries = vec![
+            starred_text_entry("favorite quote"),
+            text_entry("hello", "world"),
+        ];
+        let result = filter_and_query(&entries, "favorite", PickerFilter::Starred);
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn filter_and_query_sensitive_with_matching_query() {
+        let entries = vec![
+            sensitive_text_entry("secret password"),
+            text_entry("hello", "world"),
+        ];
+        let result = filter_and_query(&entries, "secret", PickerFilter::Sensitive);
+        assert_eq!(result.len(), 1);
+    }
+
+    // Test 9–15: every filter with non-matching query
+    #[test]
+    fn filter_and_query_all_with_non_matching_query() {
+        let entries = vec![text_entry("hello", "world")];
+        let result = filter_and_query(&entries, "xyz", PickerFilter::All);
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn filter_and_query_text_with_non_matching_query() {
+        let entries = vec![text_entry("hello", "world"), image_entry("an image")];
+        let result = filter_and_query(&entries, "xyz", PickerFilter::Text);
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn filter_and_query_images_with_non_matching_query() {
+        let entries = vec![image_entry("screenshot.png"), text_entry("hello", "world")];
+        let result = filter_and_query(&entries, "xyz", PickerFilter::Images);
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn filter_and_query_files_with_non_matching_query() {
+        let entries = vec![file_entry("document.pdf"), text_entry("hello", "world")];
+        let result = filter_and_query(&entries, "xyz", PickerFilter::Files);
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn filter_and_query_pinned_with_non_matching_query() {
+        let entries = vec![
+            pinned_text_entry("important note"),
+            text_entry("hello", "world"),
+        ];
+        let result = filter_and_query(&entries, "xyz", PickerFilter::Pinned);
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn filter_and_query_starred_with_non_matching_query() {
+        let entries = vec![
+            starred_text_entry("favorite quote"),
+            text_entry("hello", "world"),
+        ];
+        let result = filter_and_query(&entries, "xyz", PickerFilter::Starred);
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn filter_and_query_sensitive_with_non_matching_query() {
+        let entries = vec![
+            sensitive_text_entry("secret password"),
+            text_entry("hello", "world"),
+        ];
+        let result = filter_and_query(&entries, "xyz", PickerFilter::Sensitive);
+        assert_eq!(result.len(), 0);
+    }
+
+    // Test 16: query that matches nothing across multiple entries
+    #[test]
+    fn filter_and_query_query_matches_nothing() {
+        let entries = vec![
+            text_entry("foo bar", "baz qux"),
+            text_entry("hello world", "goodbye"),
+            image_entry("an image"),
+        ];
+        let result = filter_and_query(&entries, "zzzzz", PickerFilter::All);
+        assert_eq!(result.len(), 0);
+    }
+
+    // Test 17: empty query + specific filter returns only filtered entries
+    #[test]
+    fn filter_and_query_empty_query_text_filter() {
+        let entries = vec![text_entry("hello", "world"), image_entry("photo.png")];
+        let result = filter_and_query(&entries, "", PickerFilter::Text);
+        assert_eq!(result.len(), 1);
+    }
+
+    // Test 18: content substring match (not just title)
+    #[test]
+    fn filter_and_query_content_substring_match() {
+        let entries = vec![
+            text_entry("title here", "secret content"),
+            text_entry("other title", "other content"),
+        ];
+        let result = filter_and_query(&entries, "secret", PickerFilter::All);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].title, "title here");
     }
 }

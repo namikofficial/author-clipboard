@@ -535,7 +535,7 @@ grep -c "docs/UI" README.md   # ≥ 2
 | T015 | ✅ (PR 1) | manager.rs uses `ClipboardPageProps::default()`; typed callback |
 | T016 | | |
 | T017 | | |
-| T018 | | |
+| T018 | ✅ (PR 2) | `filter_and_query` + `build_external_rows` takes `PickerFilter`; `ctl picker` uses new API |
 | T019 | | |
 | T020 | | |
 
