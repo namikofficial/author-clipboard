@@ -1,11 +1,9 @@
-//! Layer-shell popup. Real implementation in T014.
-//!
-//! For the bug-fix slice (T016-T018) we ship a functional popup
-//! that uses the real `pages::clipboard` widget (data from IPC),
-//! the `controller::focus` Esc handler (US-001), and `/` to focus
-//! the search entry (US-002).
+//! Layer-shell popup. Uses the global key controller from PR 4
+//! instead of inline `EventControllerKey` handlers for Esc and `/`.
+//! Popup size persisted via `GSettings`.
 
-use crate::controller::focus::{resolve_escape, EscOutcome, FocusTarget};
+use crate::controller::focus::FocusTarget;
+use crate::settings::Settings;
 use crate::PopupConfig;
 use gtk4::gdk;
 use gtk4::glib;
@@ -34,16 +32,17 @@ pub fn run(config: PopupConfig) -> anyhow::Result<()> {
     Ok(())
 }
 
-// The function never returns Err today; the `Result` signature is kept
-// for future expansion (e.g. resource loading errors).
 #[allow(clippy::unnecessary_wraps, clippy::too_many_lines)]
 fn build_popup(app: &adw::Application, config: &PopupConfig) -> anyhow::Result<()> {
+    let settings = Settings::new();
+    let (default_w, default_h) = settings.as_ref().map_or((720, 520), Settings::popup_size);
+
     let window = adw::Window::builder()
         .application(app)
         .title("Clipboard")
-        .default_width(720)
-        .default_height(520)
-        .resizable(false)
+        .default_width(default_w)
+        .default_height(default_h)
+        .resizable(true)
         .build();
 
     // ── Layer-shell init ─────────────────────────────────────
@@ -57,6 +56,13 @@ fn build_popup(app: &adw::Application, config: &PopupConfig) -> anyhow::Result<(
     } else {
         tracing::warn!("layer-shell not supported; popup will use XDG window");
     }
+
+    // ── Shared state ─────────────────────────────────────────
+    let state: std::rc::Rc<std::cell::RefCell<crate::app::AppState>> =
+        std::rc::Rc::new(std::cell::RefCell::new(crate::app::AppState {
+            mode: crate::app::AppMode::Popup,
+            ..Default::default()
+        }));
 
     // ── Real clipboard page (data via IPC) ────────────────────
     let props = crate::pages::clipboard::ClipboardPageProps {
@@ -87,85 +93,60 @@ fn build_popup(app: &adw::Application, config: &PopupConfig) -> anyhow::Result<(
 
     window.set_content(Some(&content));
 
-    // ── US-001: global Esc handler in Capture phase ──────────
-    let focus_state: std::rc::Rc<std::cell::RefCell<FocusTarget>> =
-        std::rc::Rc::new(std::cell::RefCell::new(FocusTarget::List));
-    let content_for_esc: gtk4::Widget = content.clone().upcast();
-    let focus_state_for_esc = focus_state.clone();
-    let esc_controller = gtk4::EventControllerKey::new();
-    esc_controller.set_propagation_phase(gtk4::PropagationPhase::Capture);
-    esc_controller.connect_key_pressed(move |_, key, _, _| {
-        if key != gdk::Key::Escape {
-            return glib::Propagation::Proceed;
-        }
-        let search = find_search_entry(&content_for_esc);
-        let list = find_list_box(&content_for_esc);
-        let query_empty = search.as_ref().is_none_or(|s| s.text().is_empty());
-        let focus = *focus_state_for_esc.borrow();
-        let outcome = resolve_escape(focus, query_empty);
-        match outcome {
-            EscOutcome::ClearSearch => {
-                if let Some(s) = &search {
-                    s.set_text("");
-                }
-                if let Some(l) = &list {
-                    l.grab_focus();
-                }
-            }
-            EscOutcome::BlurSearch => {
-                if let Some(l) = &list {
-                    l.grab_focus();
-                }
-            }
-            EscOutcome::Close => {
-                if let Some(w) = find_window(&content_for_esc) {
-                    w.close();
-                }
-            }
-            EscOutcome::Proceed => {}
-        }
-        glib::Propagation::Stop
-    });
-    window.add_controller(esc_controller);
+    // ── US-001/US-002: Global key controller ─────────────────
+    let (tx, rx) = std::sync::mpsc::channel::<crate::Effect>();
+    crate::controller::key::install(&window, &state, &tx);
 
-    // ── `/` focuses the search entry ──────────────────────────
-    let content_for_slash: gtk4::Widget = content.clone().upcast();
-    let slash = gtk4::EventControllerKey::new();
-    slash.set_propagation_phase(gtk4::PropagationPhase::Capture);
-    slash.connect_key_pressed(move |_, key, _, _| {
-        if key == gdk::Key::slash {
-            if let Some(s) = find_search_entry(&content_for_slash) {
-                if !s.has_focus() {
-                    s.grab_focus();
-                    return glib::Propagation::Stop;
+    // Handle effects from the channel on the GTK thread.
+    // Esc close and search focus are handled by the key controller
+    // via the reducer + effect channel.
+    let window_for_effects = window.clone();
+    glib::idle_add_local(move || {
+        while let Ok(eff) = rx.try_recv() {
+            match eff {
+                crate::Effect::Quit => {
+                    window_for_effects.close();
                 }
+                crate::Effect::AddToast(ref msg) => {
+                    tracing::info!(%msg, "popup toast");
+                }
+                _ => {}
             }
         }
-        glib::Propagation::Proceed
+        glib::ControlFlow::Continue
     });
-    window.add_controller(slash);
 
-    // ── Track focus changes (for the focus_state tracker) ─────
-    let focus_state_for_search = focus_state.clone();
-    let content_for_search_tracker: gtk4::Widget = content.clone().upcast();
-    if let Some(search) = find_search_entry(&content_for_search_tracker) {
+    // ── Track focus changes in AppState for Esc resolution ───
+    let state_for_focus = state.clone();
+    let content_for_focus: gtk4::Widget = content.clone().upcast();
+    if let Some(search) = find_search_entry(&content_for_focus) {
+        let s = state_for_focus.clone();
         search.connect_has_focus_notify(move |entry| {
-            if entry.has_focus() {
-                *focus_state_for_search.borrow_mut() = FocusTarget::Search;
+            s.borrow_mut().focus = if entry.has_focus() {
+                FocusTarget::Search
             } else {
-                *focus_state_for_search.borrow_mut() = FocusTarget::List;
-            }
+                FocusTarget::List
+            };
         });
     }
-    let focus_state_for_list = focus_state.clone();
-    let content_for_list_tracker: gtk4::Widget = content.clone().upcast();
-    if let Some(list) = find_list_box(&content_for_list_tracker) {
+    if let Some(list) = find_list_box(&content_for_focus) {
         list.connect_row_selected(move |_, _| {
-            *focus_state_for_list.borrow_mut() = FocusTarget::List;
+            state_for_focus.borrow_mut().focus = FocusTarget::List;
         });
     }
 
-    // ── US-002: open with the list focused ───────────────────
+    // ── Size persistence (debounced) ─────────────────────────
+    let settings_for_size = settings.clone();
+    let window_for_size = window.clone();
+    glib::timeout_add_local(std::time::Duration::from_millis(500), move || {
+        if let Some(ref s) = settings_for_size {
+            let (w, h) = (window_for_size.width(), window_for_size.height());
+            s.set_popup_size(w, h);
+        }
+        glib::ControlFlow::Continue
+    });
+
+    // ── Open with the list focused ────────────────────────────
     let content_for_focus: gtk4::Widget = content.clone().upcast();
     window.connect_map(move |_| {
         if let Some(list) = find_list_box(&content_for_focus) {
@@ -198,20 +179,6 @@ fn find_list_box(widget: &gtk4::Widget) -> Option<gtk4::ListBox> {
     let mut child = widget.first_child();
     while let Some(c) = child {
         if let Some(found) = find_list_box(&c) {
-            return Some(found);
-        }
-        child = c.next_sibling();
-    }
-    None
-}
-
-fn find_window(widget: &gtk4::Widget) -> Option<adw::Window> {
-    if let Ok(w) = widget.clone().downcast::<adw::Window>() {
-        return Some(w);
-    }
-    let mut child = widget.first_child();
-    while let Some(c) = child {
-        if let Some(found) = find_window(&c) {
             return Some(found);
         }
         child = c.next_sibling();

@@ -16,6 +16,7 @@ use gio::prelude::*;
 pub const SCHEMA_ID: &str = "com.namikofficial.author-clipboard.state";
 
 /// One-stop accessor for the runtime's `GSettings`.
+#[derive(Clone)]
 pub struct Settings {
     inner: gio::Settings,
 }

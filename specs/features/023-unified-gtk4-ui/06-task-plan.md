@@ -536,8 +536,8 @@ grep -c "docs/UI" README.md   # ≥ 2
 | T011 | ✅ (PR 1) | `ClipboardPageProps` + `ClipboardCopyRequest`; `copy_via_ipc` always `CopyMode::Copy` + `mime`; image → PlainText branch dropped |
 | T012 | ✅ (PR 1) | Page skeletons exist: `emoji.rs` (61), `kaomoji.rs` (49), `symbols.rs` (49), `snippets.rs` (100) |
 | T013 | ✅ (PR 5) | Settings page exists (`pages/settings.rs`, 247 lines) |
-| T014 | ✅ (PR 1 + PR 4) | popup.rs (220 lines); layer-shell popup; global key controller from PR 4 |
-| T015 | ✅ (PR 5) | manager.rs (132 lines); `AdwApplicationWindow` skeleton; `AdwNavigationView` wiring pending |
+| T014 | ✅ (PR 1 + PR 4 + PR 6) | popup.rs (210 lines); layer-shell popup; global key controller from PR 4; GSettings size persistence; no inline Esc// handlers |
+| T015 | ✅ (PR 6) | manager.rs (355 lines); `AdwOverlaySplitView` + sidebar + `AdwNavigationView`; GSettings size persistence; status bar; toast overlay; global key controller |
 | T016 | ✅ (PR 1) | applet/main.rs slimmed to 154 lines (dispatches to `ui_gtk::run_popup`/`run_manager`) |
 | T017 | ✅ (PR 1) | hypr-picker/main.rs 92 lines (dispatches to `ui_gtk::run_popup`) |
 | T018 | ✅ (PR 2) | `filter_and_query` + `build_external_rows` takes `PickerFilter`; `ctl picker` uses new API |
