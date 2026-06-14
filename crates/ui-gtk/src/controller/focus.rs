@@ -3,21 +3,11 @@
 //! This module implements the US-001 bug fix: Esc always closes the
 //! popup (or clears search first, then closes).
 
-#![allow(dead_code, unused_imports)]
-
 use gtk4::prelude::*;
 
-/// Where keyboard focus is currently directed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum FocusTarget {
-    /// The main item list has focus. Enter = copy. Esc = close.
-    #[default]
-    List,
-    /// The search entry has focus. Esc clears or blurs, not closes.
-    Search,
-    /// A modal dialog (shortcuts overlay, error) has focus.
-    Modal,
-}
+/// Re-exported from the app state machine so the controller module
+/// can use it without its own definition.
+pub use crate::app::FocusTarget;
 
 /// What to do when Esc is pressed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,7 +27,7 @@ pub fn resolve_escape(focus: FocusTarget, search_query_empty: bool) -> EscOutcom
     match focus {
         FocusTarget::Search if !search_query_empty => EscOutcome::ClearSearch,
         FocusTarget::Search => EscOutcome::BlurSearch,
-        FocusTarget::Modal => EscOutcome::Proceed,
+        FocusTarget::Modal | FocusTarget::None => EscOutcome::Proceed,
         FocusTarget::List => EscOutcome::Close,
     }
 }
@@ -72,6 +62,16 @@ mod tests {
     fn esc_in_modal_proceeds() {
         assert_eq!(
             resolve_escape(FocusTarget::Modal, true),
+            EscOutcome::Proceed
+        );
+    }
+
+    #[test]
+    fn esc_with_no_focus_proceeds() {
+        // When no widget has focus yet (e.g. before window maps), Esc is a no-op.
+        assert_eq!(resolve_escape(FocusTarget::None, true), EscOutcome::Proceed);
+        assert_eq!(
+            resolve_escape(FocusTarget::None, false),
             EscOutcome::Proceed
         );
     }

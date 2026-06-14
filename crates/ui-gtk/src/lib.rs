@@ -28,7 +28,7 @@ pub mod widgets;
 pub mod window;
 
 /// Configuration passed to [`run_popup`].
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PopupConfig {
     /// Initial source for the picker.
     pub source: PickerSource,
@@ -58,7 +58,7 @@ impl Default for PopupConfig {
 }
 
 /// Configuration passed to [`run_manager`].
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct ManagerConfig {
     /// Optional deep-link to a specific page.
     pub initial_page: Option<PickerSource>,
@@ -83,3 +83,6 @@ pub fn run_manager(config: ManagerConfig) -> anyhow::Result<()> {
 // Re-export shared types so binary crates don't need to depend on
 // `shared` directly.
 pub use author_clipboard_shared::picker::{PickerAction, PickerFilter, PickerSource};
+
+// Re-export the state machine surface.
+pub use crate::app::{reduce, Action, AppMode, AppState, Effect, FocusTarget, PageId, SortOrder};
