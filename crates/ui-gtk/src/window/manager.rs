@@ -65,7 +65,8 @@ fn build_manager_window(app: &adw::Application) -> anyhow::Result<()> {
 
     // Page 1: Clipboard (real, with IPC)
     let shared_config = author_clipboard_shared::config::Config::load();
-    let clipboard_page = crate::pages::clipboard::build(&shared_config, |_id, _mime| {
+    let clipboard_props = crate::pages::clipboard::ClipboardPageProps::default();
+    let clipboard_page = crate::pages::clipboard::build(&clipboard_props, |_req| {
         // In manager mode, we don't close on copy — the user may
         // want to copy multiple items. Toast handling lives in the
         // toast overlay above the stack.

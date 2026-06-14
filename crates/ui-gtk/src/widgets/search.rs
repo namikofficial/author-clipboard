@@ -41,7 +41,7 @@ impl SearchEntry2 {
 
         inner.connect_search_changed(move |entry| {
             let query = entry.text().to_string();
-            *pending_query_for_change.borrow_mut() = query.clone();
+            pending_query_for_change.borrow_mut().clone_from(&query);
 
             // Cancel any existing debounce timer.
             if let Some(id) = debounce_source_for_change.take() {

@@ -134,6 +134,32 @@ right item" before the popup disappears.
 **Trade-off**: the popup stays 800ms longer, but in exchange
 the user gets visual feedback that the copy succeeded.
 
+## D11: UI always sends CopyMode::Copy; daemon decides restore path
+
+**Chosen**: `pages::clipboard::copy_via_ipc` always sends
+`CopyMode::Copy` and passes the row's MIME via the new `mime`
+field on `IpcCommand::Copy` (added with `#[serde(default)]` for
+backwards compatibility).
+
+**Why**: the previous code downgraded `image/*` to
+`CopyPlainText` because the popup had no way to tell the daemon
+which MIME to restore. The fix is to let the UI pass the MIME
+explicitly and let the daemon's existing `pick_copy_mode` logic
+decide the restore path. Old clients that don't send `mime` keep
+working — the daemon falls back to its mode-based behaviour.
+
+## D12: PageState defaults derived from ClipboardPageProps, not hard-coded
+
+**Chosen**: `PageState::default()` is removed. The page constructs
+its state from `ClipboardPageProps` via `PageState::from_props()`,
+which clamps `count` to `>= 1` so a refresh never loads zero items.
+
+**Why**: the previous `PageState::default()` had `count: 0`, which
+meant the first refresh of a freshly built page loaded 50 items
+(hard-coded), but every subsequent refresh — including the
+200 ms post-build refresh — loaded 0 items. The fix is to
+initialise the state once from the props and never let `count` be 0.
+
 ---
 
-**Last Updated**: 2026-06-12
+**Last Updated**: 2026-06-15

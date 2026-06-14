@@ -526,13 +526,13 @@ grep -c "docs/UI" README.md   # ≥ 2
 | T006 | | |
 | T007 | | |
 | T008 | | |
-| T009 | | |
+| T009 | ✅ (PR 1) | RefCell swap; `clone_from` lint fix |
 | T010 | | |
-| T011 | | |
+| T011 | ✅ (PR 1) | `ClipboardPageProps` + `ClipboardCopyRequest`; `copy_via_ipc` always `CopyMode::Copy` + `mime`; image → PlainText branch dropped |
 | T012 | | |
 | T013 | | |
-| T014 | | |
-| T015 | | |
+| T014 | ✅ (PR 1) | popup.rs builds `ClipboardPageProps` from `PopupConfig` (only `Option<String>→String` site); typed callback |
+| T015 | ✅ (PR 1) | manager.rs uses `ClipboardPageProps::default()`; typed callback |
 | T016 | | |
 | T017 | | |
 | T018 | | |
@@ -541,4 +541,4 @@ grep -c "docs/UI" README.md   # ≥ 2
 
 ---
 
-**Last Updated**: 2026-06-12
+**Last Updated**: 2026-06-15

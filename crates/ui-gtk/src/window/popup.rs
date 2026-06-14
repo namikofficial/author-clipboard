@@ -37,7 +37,7 @@ pub fn run(config: PopupConfig) -> anyhow::Result<()> {
 // The function never returns Err today; the `Result` signature is kept
 // for future expansion (e.g. resource loading errors).
 #[allow(clippy::unnecessary_wraps, clippy::too_many_lines)]
-fn build_popup(app: &adw::Application, _config: &PopupConfig) -> anyhow::Result<()> {
+fn build_popup(app: &adw::Application, config: &PopupConfig) -> anyhow::Result<()> {
     let window = adw::Window::builder()
         .application(app)
         .title("Clipboard")
@@ -46,7 +46,7 @@ fn build_popup(app: &adw::Application, _config: &PopupConfig) -> anyhow::Result<
         .resizable(false)
         .build();
 
-    // ── Layer-shell init ───────────────────────────────────────
+    // ── Layer-shell init ─────────────────────────────────────
     if gtk4_layer_shell::is_supported() {
         window.init_layer_shell();
         window.set_layer(gtk4_layer_shell::Layer::Overlay);
@@ -59,19 +59,20 @@ fn build_popup(app: &adw::Application, _config: &PopupConfig) -> anyhow::Result<
     }
 
     // ── Real clipboard page (data via IPC) ────────────────────
-    let shared_config = author_clipboard_shared::config::Config::load();
-    let page = crate::pages::clipboard::build(&shared_config, {
-        let window_for_copy = window.clone();
-        move |id, mime| {
-            tracing::info!(id, mime, "popup copy");
-            if let Err(e) = crate::pages::clipboard::copy_via_ipc(id, mime) {
-                tracing::warn!(?e, "popup copy failed");
-            }
-            // US-001: close after a successful copy (or failure —
-            // we'd rather lose the popup than keep it open if the
-            // user pressed Enter).
-            window_for_copy.close();
+    let props = crate::pages::clipboard::ClipboardPageProps {
+        initial_query: config.query.clone().unwrap_or_default(),
+        initial_filter: config.filter,
+        count: config.count,
+    };
+    let window_for_copy = window.clone();
+    let page = crate::pages::clipboard::build(&props, move |req| {
+        tracing::info!(id = req.id, mime = %req.mime, "popup copy");
+        if let Err(e) = crate::pages::clipboard::copy_via_ipc(req.id, &req.mime) {
+            tracing::warn!(?e, "popup copy failed");
         }
+        // US-001: close after a successful copy (or failure — we'd rather
+        // lose the popup than keep it open if the user pressed Enter).
+        window_for_copy.close();
     });
 
     let status = gtk4::Label::new(Some("↑↓ navigate · / search · Enter copy · Esc close"));
