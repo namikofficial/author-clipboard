@@ -527,19 +527,19 @@ grep -c "docs/UI" README.md   # ≥ 2
 | T002 | | |
 | T003 | | |
 | T004 | ✅ (PR 3A + PR 3B) | AppState (plain Rust), Action (29 variants), Effect (14 variants), reduce() with 42 unit tests. No glib::Properties, no GTK deps in tests. |
-| T005 | | |
-| T006 | | |
-| T007 | | |
-| T008 | | |
+| T005 | ✅ (PR 4) | `resolve_escape`, `install_esc_handler`, `FocusChain` in `controller/focus.rs` |
+| T006 | ✅ (PR 4) | GSettings schema + `SettingsBinding` in `settings.rs`; 7 keys bound |
+| T007 | ✅ (PR 5) | `ItemRow` widget in `widgets/item_row.rs` (271 lines) |
+| T008 | ✅ (PR 5) | `FilterBar` widget in `widgets/filter_bar.rs` (119 lines) |
 | T009 | ✅ (PR 1) | RefCell swap; `clone_from` lint fix |
-| T010 | ✅ (PR 5) | PreviewPane widget: text (sourceview), image (gdk-pixbuf), files (ActionRow), sensitive overlay. No WebKit — PR 5.5 adds WebView. |
+| T010 | ✅ (PR 5 + PR 5.5) | PreviewPane widget: text (sourceview), image (gdk-pixbuf), files (ActionRow), sensitive overlay. HTML preview via webkit6 behind `webview` feature (PR 5.5). |
 | T011 | ✅ (PR 1) | `ClipboardPageProps` + `ClipboardCopyRequest`; `copy_via_ipc` always `CopyMode::Copy` + `mime`; image → PlainText branch dropped |
-| T012 | | |
-| T013 | | |
-| T014 | ✅ (PR 1) | popup.rs builds `ClipboardPageProps` from `PopupConfig` (only `Option<String>→String` site); typed callback |
-| T015 | ✅ (PR 1) | manager.rs uses `ClipboardPageProps::default()`; typed callback |
-| T016 | | |
-| T017 | | |
+| T012 | ✅ (PR 1) | Page skeletons exist: `emoji.rs` (61), `kaomoji.rs` (49), `symbols.rs` (49), `snippets.rs` (100) |
+| T013 | ✅ (PR 5) | Settings page exists (`pages/settings.rs`, 247 lines) |
+| T014 | ✅ (PR 1 + PR 4) | popup.rs (220 lines); layer-shell popup; global key controller from PR 4 |
+| T015 | ✅ (PR 5) | manager.rs (132 lines); `AdwApplicationWindow` skeleton; `AdwNavigationView` wiring pending |
+| T016 | ✅ (PR 1) | applet/main.rs slimmed to 154 lines (dispatches to `ui_gtk::run_popup`/`run_manager`) |
+| T017 | ✅ (PR 1) | hypr-picker/main.rs 92 lines (dispatches to `ui_gtk::run_popup`) |
 | T018 | ✅ (PR 2) | `filter_and_query` + `build_external_rows` takes `PickerFilter`; `ctl picker` uses new API |
 | T019 | | |
 | T020 | | |

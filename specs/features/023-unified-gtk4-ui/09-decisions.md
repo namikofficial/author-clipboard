@@ -160,6 +160,17 @@ meant the first refresh of a freshly built page loaded 50 items
 200 ms post-build refresh — loaded 0 items. The fix is to
 initialise the state once from the props and never let `count` be 0.
 
+## D13: WebKit is feature-gated behind `webview` feature
+
+**Chosen**: The `webview` feature in `crates/ui-gtk/Cargo.toml` gates
+the `webkit6` dependency. Default build (`cargo build`) doesn't require
+`webkitgtk-6.0-dev`. The maintainer runs `cargo build --features webview`
+on their local box.
+
+**Confirmed by**: PR 5.5. The `render_html_with_webview` function is
+`#[cfg(feature = "webview")]`; the ContentType::Html arm falls through
+to `sourceview5::View` when the feature is off.
+
 ---
 
 **Last Updated**: 2026-06-15

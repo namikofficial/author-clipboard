@@ -21,9 +21,7 @@ glib.workspace = true
 gio.workspace = true
 gdk-pixbuf.workspace = true
 sourceview5.workspace = true
-# webkit6 is optional — used only by the HTML preview pane (T012).
-# Comment back in once `webkitgtk-6.0-dev` is installed on the dev box.
-# webkit6.workspace = true
+webkit6 = { workspace = true, optional = true }
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
@@ -33,6 +31,10 @@ chrono.workspace = true
 clap.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+base64.workspace = true
+
+[features]
+webview = ["dep:webkit6"]
 
 [build-dependencies]
 glib-build-tools.workspace = true

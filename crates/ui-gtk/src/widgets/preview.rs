@@ -4,7 +4,8 @@
 //! (gdk-pixbuf), or files (adw::ActionRow list). Sensitive items
 //! show a redaction overlay with a timed reveal button (5s).
 //!
-//! **No WebKit in this module.** HTML preview ships in PR 5.5.
+//! **WebKit**: feature-gated behind `webview` feature (PR 5.5). Default build
+//! uses `sourceview5::View` for HTML (same as text).
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -197,7 +198,8 @@ impl PreviewPane {
 
         // ── Content-type branch ───────────────────────────────────────
         match item.content_type {
-            ContentType::Text | ContentType::Html => self.show_text(&item),
+            ContentType::Text => self.show_text(&item),
+            ContentType::Html => self.show_html(&item),
             ContentType::Image => self.show_image(&item),
             ContentType::Files => self.show_files(&item),
         }
@@ -228,7 +230,21 @@ impl PreviewPane {
         }
     }
 
-    /// Show the text / HTML content.
+    /// Show the HTML content.
+    fn show_html(&self, item: &ClipboardItem) {
+        #[cfg(feature = "webview")]
+        {
+            if let Some(widget) = render_html_with_webview(&item.content) {
+                self.replace_content_widget(&widget);
+                return;
+            }
+        }
+        // Fallback: sourceview (used both for default build and as
+        // fallback when webkit6 rendering fails).
+        self.show_text(item);
+    }
+
+    /// Show the text content.
     fn show_text(&self, item: &ClipboardItem) {
         self.image_picture.set_visible(false);
         self.files_box.set_visible(false);
@@ -322,10 +338,47 @@ impl PreviewPane {
         self.empty_state.set_visible(true);
     }
 
+    /// Replace the content area with a single widget (used by webkit6).
+    fn replace_content_widget(&self, new_widget: &gtk4::Widget) {
+        // Hide all built-in content views.
+        self.text_view.set_visible(false);
+        self.image_picture.set_visible(false);
+        self.files_box.set_visible(false);
+        self.redacted_overlay.set_visible(false);
+        // Append the new widget (only once — if it's already a child,
+        // this is a no-op in GTK4).
+        if new_widget.parent().is_none() {
+            self.widget.append(new_widget);
+        }
+        new_widget.set_visible(true);
+    }
+
     /// Borrow the root widget for embedding in a parent container.
     pub fn widget(&self) -> &Widget {
         self.widget.upcast_ref()
     }
+}
+
+/// Build a WebView widget for HTML content, or return `None` if
+/// the feature is disabled or construction fails.
+#[cfg(feature = "webview")]
+fn render_html_with_webview(html: &str) -> Option<gtk4::Widget> {
+    use gtk4::prelude::*;
+    let context = webkit6::WebContext::default();
+    context.set_sandbox_enabled(true);
+    let webview = webkit6::WebView::with_context(&context);
+    let encoded = urlencoding(&html);
+    let uri = format!("data:text/html;base64,{encoded}");
+    webview.load_uri(&uri);
+    Some(webview.upcast::<gtk4::Widget>())
+}
+
+/// Base64-url-encode a string for use in `data:` URIs.
+#[cfg(feature = "webview")]
+fn urlencoding(s: &str) -> String {
+    use base64::Engine as _;
+    let engine = base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    engine.encode(s.as_bytes())
 }
 
 #[cfg(test)]

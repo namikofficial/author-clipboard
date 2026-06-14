@@ -33,13 +33,13 @@ fmt:
 fmt-check:
     cargo fmt --all -- --check
 
-# Run clippy linter
+# Run clippy linter (no --all-features — webview feature requires webkitgtk-6.0-dev)
 lint:
-    cargo clippy --all-targets --all-features -- -D warnings
+    cargo clippy --all-targets -- -D warnings
 
 # Run clippy with auto-fix
 lint-fix:
-    cargo clippy --all-targets --all-features --fix --allow-dirty --allow-staged
+    cargo clippy --all-targets --fix --allow-dirty --allow-staged
 
 # ── Testing ────────────────────────────────────────────────────────────
 
