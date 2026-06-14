@@ -46,7 +46,7 @@ impl std::str::FromStr for ContentType {
 
 /// Represents a single clipboard entry
 #[allow(clippy::struct_excessive_bools)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ClipboardItem {
     /// Unique identifier
     pub id: i64,
@@ -352,7 +352,7 @@ pub struct AuditEvent {
 }
 
 /// A user-defined text snippet for quick reuse
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Snippet {
     pub id: i64,
     pub name: String,

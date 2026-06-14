@@ -179,10 +179,32 @@ impl SortOrder {
     }
 }
 
+impl std::fmt::Display for SortOrder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NewestFirst => write!(f, "newest"),
+            Self::OldestFirst => write!(f, "oldest"),
+            Self::MostUsed => write!(f, "most-used"),
+        }
+    }
+}
+
+impl std::str::FromStr for SortOrder {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "newest" => Ok(Self::NewestFirst),
+            "oldest" => Ok(Self::OldestFirst),
+            "most-used" => Ok(Self::MostUsed),
+            other => Err(format!("unknown SortOrder: {other}")),
+        }
+    }
+}
+
 /// All possible state-machine actions.
 ///
 /// Variants added in PR 3B: pin/star/delete/reveal/window/settings/snippets/daemon.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Action {
     /// User typed in the search box.
     QueryChanged(String),

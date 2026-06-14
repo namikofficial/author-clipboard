@@ -3,10 +3,13 @@
 //! This module implements the US-001 bug fix: Esc always closes the
 //! popup (or clears search first, then closes).
 
-use gtk4::prelude::*;
+use gtk4::gdk;
+use gtk4::gdk::Key;
+use gtk4::gdk::ModifierType;
+use std::cell::RefCell;
+use std::rc::Rc;
 
-/// Re-exported from the app state machine so the controller module
-/// can use it without its own definition.
+pub use crate::app::FocusTarget as FocusTargetReexport;
 pub use crate::app::FocusTarget;
 
 /// What to do when Esc is pressed.
@@ -32,9 +35,55 @@ pub fn resolve_escape(focus: FocusTarget, search_query_empty: bool) -> EscOutcom
     }
 }
 
+/// Map a key + modifiers to an Action. Pure — no I/O, no GTK init required for tests.
+pub fn map_key_extended(key: Key, mods: ModifierType) -> Option<crate::app::Action> {
+    let ctrl = mods.contains(ModifierType::CONTROL_MASK);
+    let shift = mods.contains(ModifierType::SHIFT_MASK);
+
+    #[allow(clippy::match_same_arms)] // distinct keys map to the same action
+    match (key, ctrl, shift) {
+        // Navigation
+        (Key::Up, false, false) => Some(crate::app::Action::MoveBy(-1)),
+        (Key::Down, false, false) => Some(crate::app::Action::MoveBy(1)),
+        (Key::Home, false, false) => Some(crate::app::Action::MoveTo(0)),
+        (Key::End, false, false) => Some(crate::app::Action::MoveTo(usize::MAX)),
+        (Key::Page_Up, false, false) => Some(crate::app::Action::MovePage(-1)),
+        (Key::Page_Down, false, false) => Some(crate::app::Action::MovePage(1)),
+        // Focus
+        (Key::Escape, false, false) => Some(crate::app::Action::Focus(FocusTarget::List)),
+        (Key::slash | Key::KP_Delete, false, false) => {
+            Some(crate::app::Action::Focus(FocusTarget::Search))
+        }
+        // ? shortcut (Shift+/)
+        (Key::minus, false, true) => Some(crate::app::Action::Focus(FocusTarget::Search)), // ? is -/Shift on some layouts
+        // Shortcuts overlay
+        (Key::question | Key::F1, false, false) => {
+            Some(crate::app::Action::Focus(FocusTarget::Modal))
+        }
+        // Quick pick Ctrl+1..9
+        (Key::_1, true, false) => Some(crate::app::Action::MoveTo(0)),
+        (Key::_2, true, false) => Some(crate::app::Action::MoveTo(1)),
+        (Key::_3, true, false) => Some(crate::app::Action::MoveTo(2)),
+        (Key::_4, true, false) => Some(crate::app::Action::MoveTo(3)),
+        (Key::_5, true, false) => Some(crate::app::Action::MoveTo(4)),
+        (Key::_6, true, false) => Some(crate::app::Action::MoveTo(5)),
+        (Key::_7, true, false) => Some(crate::app::Action::MoveTo(6)),
+        (Key::_8, true, false) => Some(crate::app::Action::MoveTo(7)),
+        (Key::_9, true, false) => Some(crate::app::Action::MoveTo(8)),
+        // Page navigation
+        (Key::Tab, true, false) => Some(crate::app::Action::CyclePage(1)),
+        (Key::Tab, true, true) => Some(crate::app::Action::CyclePage(-1)),
+        // Actions (runtime decides copy vs quick-paste based on mode)
+        (Key::Return, false, false) => Some(crate::app::Action::Focus(FocusTarget::List)),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gtk4::gdk::Key;
+    use gtk4::gdk::ModifierType;
 
     #[test]
     fn esc_with_filled_search_clears() {
@@ -74,5 +123,10 @@ mod tests {
             resolve_escape(FocusTarget::None, false),
             EscOutcome::Proceed
         );
+    }
+
+    #[test]
+    fn map_key_extended_unknown_key_returns_none() {
+        assert_eq!(map_key_extended(Key::A, ModifierType::empty()), None);
     }
 }
