@@ -51,6 +51,18 @@ test:
 test-verbose:
     cargo test --all -- --nocapture
 
+# Validate GSettings schema compiles
+ui-check:
+    glib-compile-schemas crates/ui-gtk/data/ && cargo check -p author-clipboard-ui-gtk
+
+# Run smoke tests under Xvfb (manual, requires xvfb-run + xdotool)
+ui-smoke:
+    xvfb-run -a crates/ui-gtk/tests/smoke.sh
+
+# Run GTK unit tests under Xvfb (manual)
+ui-test:
+    cargo test -p author-clipboard-ui-gtk
+
 # ── Full Verification ──────────────────────────────────────────────────
 
 # Full development check (format, lint, test, build)

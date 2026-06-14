@@ -93,8 +93,9 @@ directly.
   search only when something else has focus.
 * **US-003 — CLI launches a real window:** `window::manager`
   builds an `AdwApplicationWindow` with `AdwHeaderBar`,
-  `AdwViewStack` of 6 pages, status bar, and toast overlay. No
-  more 520×700 libcosmic pane.
+  `AdwOverlaySplitView` (sidebar with 6 pages + `gtk::Stack`
+  content), status bar, and toast overlay. Size persisted via
+  `GSettings`. No more 520×700 libcosmic pane.
 
 ## Widget catalog
 
@@ -181,4 +182,4 @@ git revert e4b821b
 * Decisions: `specs/features/023-unified-gtk4-ui/09-decisions.md`
 * Source: `crates/ui-gtk/`
 * Old code: `crates/applet/` (was 2995 LOC, now 152) and
-  `crates/hypr-picker/` (was 737 LOC, now 97)
+  `crates/hypr-picker/` (was 737 LOC, now 94)

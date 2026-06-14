@@ -171,6 +171,15 @@ on their local box.
 `#[cfg(feature = "webview")]`; the ContentType::Html arm falls through
 to `sourceview5::View` when the feature is off.
 
+## D14: hypr-picker extended with `--filter`; `ui-check` / `ui-smoke` are manual-only
+
+**Chosen**: The hypr-picker now accepts `--filter <chip>` which parses
+via `PickerFilter::from_str` and falls back to `All`. The `just ui-check`
+and `just ui-smoke` recipes are added to the justfile but are not wired
+into `verify` — they require either `glib-compile-schemas` or `Xvfb`.
+
+**Confirmed by**: PR 7.
+
 ---
 
 **Last Updated**: 2026-06-15

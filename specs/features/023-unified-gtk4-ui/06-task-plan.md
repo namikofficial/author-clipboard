@@ -541,8 +541,8 @@ grep -c "docs/UI" README.md   # ≥ 2
 | T016 | ✅ (PR 1) | applet/main.rs slimmed to 154 lines (dispatches to `ui_gtk::run_popup`/`run_manager`) |
 | T017 | ✅ (PR 1) | hypr-picker/main.rs 92 lines (dispatches to `ui_gtk::run_popup`) |
 | T018 | ✅ (PR 2) | `filter_and_query` + `build_external_rows` takes `PickerFilter`; `ctl picker` uses new API |
-| T019 | | |
-| T020 | | |
+| T019 | ✅ (PR 7) | smoke.sh exists; just ui-smoke / just ui-check recipes; manual-only (no CI) |
+| T020 | ✅ (PR 7) | docs/UI.md extended; 6-page sidebar; PreviewPane ref; GSettings persistence doc'd |
 
 ---
 

@@ -5,6 +5,7 @@
 //! lives in the `ui-gtk` crate.
 
 use clap::{Parser, ValueEnum};
+use std::str::FromStr;
 use ui_gtk::{PickerAction, PickerFilter, PickerSource, PopupConfig};
 
 #[derive(Parser, Debug)]
@@ -28,6 +29,9 @@ struct Args {
     /// Pre-fill search.
     #[arg(short, long)]
     query: Option<String>,
+    /// Filter chip (all, text, images, files, pinned, starred, sensitive).
+    #[arg(short, long, default_value = "all")]
+    filter: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -79,9 +83,10 @@ fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     tracing::info!(?args, "hypr-picker starting");
 
+    let filter = PickerFilter::from_str(&args.filter).unwrap_or(PickerFilter::All);
     let cfg = PopupConfig {
         source: args.source.into(),
-        filter: PickerFilter::All,
+        filter,
         query: args.query,
         action: args.action.into(),
         count: args.count,
