@@ -521,7 +521,7 @@ grep -c "docs/UI" README.md   # ≥ 2
 | T001 | | |
 | T002 | | |
 | T003 | | |
-| T004 | 🟡 PR 3A foundation; PR 3B finishes it | AppState (plain Rust), Action (12 variants), Effect (2 variants), reduce() with 15 unit tests. No glib::Properties, no GTK deps in tests. |
+| T004 | ✅ (PR 3A + PR 3B) | AppState (plain Rust), Action (29 variants), Effect (14 variants), reduce() with 42 unit tests. No glib::Properties, no GTK deps in tests. |
 | T005 | | |
 | T006 | | |
 | T007 | | |

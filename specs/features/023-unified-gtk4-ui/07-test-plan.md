@@ -6,7 +6,7 @@
 
 | Module | Test | Method |
 |---|---|---|
-| `app::reduce` | All `Action` variants | 🟡 PR 3A foundation (12 tests); PR 3B finishes full coverage |
+| `app::reduce` | All `Action` variants | ✅ 42 tests — all 29 Action variants covered |
 | `controller::focus` | Esc with focus on search, list, button | mock `Focusable` trait |
 | `controller::focus` | Esc twice closes | state machine trace |
 | `controller::search` | Debounce timing, only latest query applied | mock clock |
