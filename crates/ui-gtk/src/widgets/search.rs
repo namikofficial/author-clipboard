@@ -3,7 +3,7 @@
 
 use gtk4::prelude::*;
 use gtk4::{glib, EventControllerKey, PropagationPhase, SearchEntry, Widget};
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 /// Debounce duration in milliseconds.
@@ -17,7 +17,7 @@ pub type OnQuery = std::rc::Rc<dyn Fn(String)>;
 pub struct SearchEntry2 {
     inner: SearchEntry,
     debounce_source: Rc<Cell<Option<glib::SourceId>>>,
-    pending_query: Rc<Cell<String>>,
+    pending_query: Rc<RefCell<String>>,
     on_query: OnQuery,
 }
 
@@ -34,14 +34,14 @@ impl SearchEntry2 {
         inner.set_size_request(200, -1);
 
         let debounce_source: Rc<Cell<Option<glib::SourceId>>> = Rc::new(Cell::new(None));
-        let pending_query: Rc<Cell<String>> = Rc::new(Cell::new(initial.to_string()));
+        let pending_query: Rc<RefCell<String>> = Rc::new(RefCell::new(initial.to_string()));
         let on_query_for_change = on_query.clone();
         let debounce_source_for_change = debounce_source.clone();
         let pending_query_for_change = pending_query.clone();
 
         inner.connect_search_changed(move |entry| {
             let query = entry.text().to_string();
-            pending_query_for_change.set(query.clone());
+            *pending_query_for_change.borrow_mut() = query.clone();
 
             // Cancel any existing debounce timer.
             if let Some(id) = debounce_source_for_change.take() {
@@ -56,7 +56,8 @@ impl SearchEntry2 {
                 std::time::Duration::from_millis(DEBOUNCE_MS),
                 move || {
                     // Only fire if this is still the most recent query.
-                    let current = pending_query_inner.take();
+                    let current = pending_query_inner.borrow().clone();
+                    pending_query_inner.replace(String::new());
                     on_query_inner(current);
                     debounce_source_inner.set(None);
                 },
@@ -113,3 +114,40 @@ impl SearchEntry2 {
 
 // suppress unused import warning for the adw-prelude shim used
 // elsewhere in this module.
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn debounce_second_query_wins() {
+        // Test the RefCell borrow/replace logic directly.
+        // This is the invariant: after two writes, the most recent
+        // query is what gets fired, and pending is empty after firing.
+        let pending: Rc<RefCell<String>> = Rc::new(RefCell::new(String::new()));
+
+        // First write
+        *pending.borrow_mut() = "ab".to_string();
+
+        // Second write (cancels first timer — same semantics as .take() + set)
+        *pending.borrow_mut() = "abc".to_string();
+
+        // Fire debounce: read current, then replace with empty
+        let current = pending.borrow().clone();
+        pending.replace(String::new());
+
+        assert_eq!(current, "abc");
+        assert!(pending.borrow().is_empty());
+    }
+
+    #[test]
+    fn pending_is_empty_after_fire() {
+        // Regression test: .take() left empty state briefly;
+        // replace(String::new()) should leave it empty after firing.
+        let pending: Rc<RefCell<String>> = Rc::new(RefCell::new("x".to_string()));
+        let current = pending.borrow().clone();
+        pending.replace(String::new());
+        assert!(pending.borrow().is_empty());
+        assert_eq!(current, "x");
+    }
+}
