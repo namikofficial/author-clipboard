@@ -782,7 +782,7 @@ impl IpcHandlerState {
             }
 
             // ── Mutations ────────────────────────────────────────────────
-            IpcCommand::Copy { id, mode } => {
+            IpcCommand::Copy { id, mode, mime } => {
                 let db = self.db.lock().unwrap();
                 let item = match db.get_by_id(id) {
                     Ok(Some(item)) => item,
@@ -847,7 +847,7 @@ impl IpcHandlerState {
                         }
                         IpcResponse::ok(serde_json::json!({
                             "id": id,
-                            "mime_type": result.mime_type,
+                            "mime_type": mime.unwrap_or(result.mime_type),
                             "behavior": result.behavior,
                             "sensitive_confirmed": false,
                         }))

@@ -662,6 +662,7 @@ pub fn restore_entry(
         if let Ok(response) = client.send_command(&crate::ipc::IpcCommand::Copy {
             id,
             mode: copy_mode,
+            mime: entry.mime_type.clone(),
         }) {
             if response.ok {
                 // IPC succeeded - parse the result

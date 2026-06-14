@@ -528,6 +528,7 @@ fn copy_item_by_id(id: i64) -> Result<()> {
     match client.send_command(&IpcCommand::Copy {
         id,
         mode: CopyMode::Copy,
+        mime: None,
     }) {
         Ok(resp) => {
             if let Some(data) = resp.data {

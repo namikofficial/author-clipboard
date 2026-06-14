@@ -230,6 +230,9 @@ pub enum IpcCommand {
         id: i64,
         /// Copy mode.
         mode: CopyMode,
+        /// Optional MIME type hint for the copy operation.
+        #[serde(default)]
+        mime: Option<String>,
     },
     /// Pin an item.
     Pin { id: i64 },
@@ -676,5 +679,41 @@ mod tests {
         assert!(filters.content_type.is_none());
         assert!(filters.pinned.is_none());
         assert!(filters.sensitive.is_none());
+    }
+
+    #[test]
+    fn test_copy_mime_defaults_to_none_when_omitted() {
+        // IpcCommand uses #[serde(tag = "cmd", content = "args")], so the
+        // on-wire shape is {"cmd":"Copy","args":{"id":1,"mode":"copy"}}.
+        // The #[serde(default)] on IpcCommand::Copy.mime is the invariant
+        // we defend; if anyone removes it, this test fails.
+        let json = r#"{"cmd":"Copy","args":{"id":1,"mode":"copy"}}"#;
+        let cmd: IpcCommand = serde_json::from_str(json).expect("old payload deserializes");
+        match cmd {
+            IpcCommand::Copy { id, mode, mime } => {
+                assert_eq!(id, 1);
+                assert!(matches!(mode, CopyMode::Copy));
+                assert!(mime.is_none(), "mime must default to None when omitted");
+            }
+            _ => panic!("expected Copy variant"),
+        }
+    }
+
+    #[test]
+    fn test_copy_with_mime_roundtrip() {
+        let cmd = IpcCommand::Copy {
+            id: 7,
+            mode: CopyMode::Copy,
+            mime: Some("image/png".to_string()),
+        };
+        let v = serde_json::to_value(&cmd).expect("serialize");
+        let parsed: IpcCommand = serde_json::from_value(v).expect("roundtrip");
+        match parsed {
+            IpcCommand::Copy { id, mime, .. } => {
+                assert_eq!(id, 7);
+                assert_eq!(mime.as_deref(), Some("image/png"));
+            }
+            _ => panic!("expected Copy variant"),
+        }
     }
 }
