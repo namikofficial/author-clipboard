@@ -248,8 +248,9 @@ cargo test -p author-clipboard-ui-gtk -- search
 
 **Goal**: Right pane in the manager showing the selected item. Uses
 `sourceview5::View` for text, scaled `gdk_pixbuf::Pixbuf` for images,
-`webkit6::WebView` (sandboxed) for HTML, file cards for files.
-Masked view for sensitive (Ctrl+Shift+R to reveal, 5s countdown).
+file cards for files. Masked view for sensitive (Ctrl+Shift+R to
+reveal, 5s countdown). **No WebKit in this PR** — HTML preview
+ships in PR 5.5.
 
 **Files**: `crates/ui-gtk/src/widgets/preview.rs`.
 
@@ -257,7 +258,11 @@ Masked view for sensitive (Ctrl+Shift+R to reveal, 5s countdown).
 - `PreviewPane::new(state: &AppState) -> Self`.
 - Subscribes to `state.model.selection-changed`.
 - Reveal countdown uses `glib::timeout_add_seconds`.
-- WebKit sandbox via `WebContext::set_sandbox_enabled(true)`.
+- Text/Html: `sourceview5::View` (read-only, no syntax highlight).
+- Images: `gdk_pixbuf::Pixbuf::from_file_at_scale` at 800×600.
+- Files: `adw::ActionRow` list, click-to-open via `gio::AppInfo`.
+- Sensitive: `adw::StatusPage` with lock icon + reveal button.
+- Empty state: `adw::StatusPage` with clipboard icon.
 
 **Verification**:
 ```bash
@@ -527,7 +532,7 @@ grep -c "docs/UI" README.md   # ≥ 2
 | T007 | | |
 | T008 | | |
 | T009 | ✅ (PR 1) | RefCell swap; `clone_from` lint fix |
-| T010 | | |
+| T010 | ✅ (PR 5) | PreviewPane widget: text (sourceview), image (gdk-pixbuf), files (ActionRow), sensitive overlay. No WebKit — PR 5.5 adds WebView. |
 | T011 | ✅ (PR 1) | `ClipboardPageProps` + `ClipboardCopyRequest`; `copy_via_ipc` always `CopyMode::Copy` + `mime`; image → PlainText branch dropped |
 | T012 | | |
 | T013 | | |
