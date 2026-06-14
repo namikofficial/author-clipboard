@@ -21,6 +21,7 @@ pub struct FilterBar {
 impl FilterBar {
     /// Build a new filter bar. The bar owns a single `on_change`
     /// callback that fires whenever a chip is clicked.
+    #[allow(clippy::needless_pass_by_value)] // OnChange is an Rc<dyn Fn>; cloning is cheap
     pub fn new(active: PickerFilter, on_change: OnChange) -> Self {
         let flow = FlowBox::builder()
             .orientation(gtk4::Orientation::Horizontal)
@@ -60,16 +61,14 @@ impl FilterBar {
 
         // Wire the on_change callback. We have to bridge from per-button
         // clicks to a single shared handler.
-        let buttons_for_handler: Vec<(PickerFilter, Button)> = buttons
-            .iter()
-            .map(|(f, b)| (*f, b.clone()))
-            .collect();
+        let buttons_for_handler: Vec<(PickerFilter, Button)> =
+            buttons.iter().map(|(f, b)| (*f, b.clone())).collect();
         let on_change_for_handler = on_change.clone();
         for (filter, btn) in &buttons_for_handler {
             let cb = on_change_for_handler.clone();
             let buttons_for_emit = buttons_for_handler.clone();
             let f = *filter;
-            btn.connect_clicked(move |clicked| {
+            btn.connect_clicked(move |_clicked| {
                 // Update visual state: clicked is now the only active chip.
                 for (other_filter, other_btn) in &buttons_for_emit {
                     if *other_filter == f {
@@ -91,7 +90,7 @@ impl FilterBar {
         }
     }
 
-    /// Mark a chip as the active one (used by GSettings binding to
+    /// Mark a chip as the active one (used by `GSettings` binding to
     /// sync the bar from external state without firing the callback).
     pub fn set_active(&self, filter: PickerFilter) {
         for (f, btn) in &self.buttons {

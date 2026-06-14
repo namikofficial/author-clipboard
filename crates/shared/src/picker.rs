@@ -869,13 +869,9 @@ pub fn apply_filter(entries: &[PickerEntry], filter: PickerFilter) -> Vec<Picker
 }
 
 /// Format a filter + query pair into a label for the external picker row.
-pub fn format_external_label_with_filter(
-    entry: &PickerEntry,
-    filter: PickerFilter,
-) -> String {
+pub fn format_external_label_with_filter(entry: &PickerEntry, filter: PickerFilter) -> String {
     let base = format_external_label(entry, false);
     let suffix = match filter {
-        PickerFilter::All => String::new(),
         PickerFilter::Pinned if entry.pinned => " 📌".to_string(),
         PickerFilter::Starred if entry.starred => " ⭐".to_string(),
         PickerFilter::Sensitive if entry.sensitive => " 🔒".to_string(),

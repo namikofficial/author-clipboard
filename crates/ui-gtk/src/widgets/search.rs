@@ -79,7 +79,7 @@ impl SearchEntry2 {
                     if let Some(id) = debounce_source_for_esc.take() {
                         id.remove();
                     }
-                    on_query_for_esc("".to_string());
+                    on_query_for_esc(String::new());
                 }
                 return glib::Propagation::Stop;
             }

@@ -3,15 +3,15 @@
 //! Persists UI state across popup/manager sessions. User preferences
 //! (max items, denylist, etc.) still live in the JSON [`Config`].
 
-#![allow(dead_code, unused_imports)]
+#![allow(dead_code, unused_imports, clippy::doc_markdown)]
 
 use gio::prelude::*;
 
-/// The GSettings schema ID, mirrored in
+/// The `GSettings` schema ID, mirrored in
 /// `data/com.namikofficial.author-clipboard.gschema.xml`.
 pub const SCHEMA_ID: &str = "com.namikofficial.author-clipboard.state";
 
-/// One-stop accessor for the runtime's GSettings.
+/// One-stop accessor for the runtime's `GSettings`.
 pub struct Settings {
     inner: gio::Settings,
 }
@@ -68,7 +68,10 @@ impl Settings {
 
     /// Popup window size.
     pub fn popup_size(&self) -> (i32, i32) {
-        (self.inner.int("popup-width"), self.inner.int("popup-height"))
+        (
+            self.inner.int("popup-width"),
+            self.inner.int("popup-height"),
+        )
     }
 
     /// Manager window size.

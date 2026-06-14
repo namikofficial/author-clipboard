@@ -14,12 +14,7 @@ use ui_gtk::{PickerAction, PickerFilter, PickerSource, PopupConfig};
 )]
 struct Args {
     /// Initial source.
-    #[arg(
-        short,
-        long,
-        default_value = "history",
-        value_enum
-    )]
+    #[arg(short, long, default_value = "history", value_enum)]
     source: SourceArg,
     /// Max items to load.
     #[arg(short, long, default_value_t = 50)]

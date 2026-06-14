@@ -70,6 +70,9 @@ mod tests {
 
     #[test]
     fn esc_in_modal_proceeds() {
-        assert_eq!(resolve_escape(FocusTarget::Modal, true), EscOutcome::Proceed);
+        assert_eq!(
+            resolve_escape(FocusTarget::Modal, true),
+            EscOutcome::Proceed
+        );
     }
 }

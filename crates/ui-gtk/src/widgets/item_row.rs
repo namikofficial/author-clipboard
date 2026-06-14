@@ -131,10 +131,10 @@ impl ItemRow {
                     if let Some(path) = item.content.strip_prefix("image:") {
                         format!(
                             "📷 {}",
-                            std::path::Path::new(path)
-                                .file_name()
-                                .map(|n| n.to_string_lossy().into_owned())
-                                .unwrap_or_else(|| path.to_string())
+                            std::path::Path::new(path).file_name().map_or_else(
+                                || path.to_string(),
+                                |n| n.to_string_lossy().into_owned()
+                            )
                         )
                     } else {
                         "📷 image".to_string()
@@ -147,11 +147,13 @@ impl ItemRow {
                     s
                 }
                 ContentType::Files => {
-                    let files = author_clipboard_shared::file_handler::parse_uri_list(&item.content);
+                    let files =
+                        author_clipboard_shared::file_handler::parse_uri_list(&item.content);
                     if files.is_empty() {
                         "📎 file(s)".to_string()
                     } else {
-                        let names: Vec<&str> = files.iter().take(3).map(|f| f.name.as_str()).collect();
+                        let names: Vec<&str> =
+                            files.iter().take(3).map(|f| f.name.as_str()).collect();
                         format!("📎 {}", names.join(", "))
                     }
                 }

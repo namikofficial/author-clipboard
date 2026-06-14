@@ -1,6 +1,6 @@
-//! Design tokens, AdwStyleManager. Populated in T005.
+//! Design tokens, `AdwStyleManager`. Populated in T005.
 
-#![allow(dead_code, unused_imports)]
+#![allow(dead_code, unused_imports, clippy::doc_markdown)]
 
 use libadwaita as adw;
 use libadwaita::prelude::*;

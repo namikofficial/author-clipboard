@@ -1,6 +1,6 @@
-//! Reusable widgets (ItemRow, FilterBar, SearchEntry, etc.).
+//! Reusable widgets (`ItemRow`, `FilterBar`, `SearchEntry`, etc.).
 
-#![allow(dead_code, unused_imports)]
+#![allow(clippy::doc_markdown, dead_code, unused_imports)]
 
 pub mod chip;
 pub mod empty;

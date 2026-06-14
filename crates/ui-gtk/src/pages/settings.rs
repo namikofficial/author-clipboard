@@ -14,6 +14,11 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 /// Build the settings page widget.
+//
+// Each preference row is wired in-place; refactoring into helpers
+// would obscure the read-through-to-Config story. The function is
+// intentionally linear.
+#[allow(clippy::too_many_lines)]
 pub fn build(config: &author_clipboard_shared::config::Config) -> Widget {
     let scrolled = gtk4::ScrolledWindow::builder()
         .vscrollbar_policy(gtk4::PolicyType::Automatic)
@@ -60,9 +65,9 @@ pub fn build(config: &author_clipboard_shared::config::Config) -> Widget {
         .active(config.is_incognito())
         .valign(gtk4::Align::Center)
         .build();
-    let config_for_inc = config.clone();
+    let incognito_cfg = config.clone();
     incognito_switch.connect_state_set(move |_, state| {
-        let _ = config_for_inc.set_incognito(state);
+        let _ = incognito_cfg.set_incognito(state);
         glib::Propagation::Proceed
     });
     incognito_row.add_suffix(&incognito_switch);
@@ -95,10 +100,10 @@ pub fn build(config: &author_clipboard_shared::config::Config) -> Widget {
         .active(config.encrypt_sensitive)
         .valign(gtk4::Align::Center)
         .build();
-    let config_for_enc = Rc::new(RefCell::new(config.clone()));
+    let encrypt_cfg = Rc::new(RefCell::new(config.clone()));
     encrypt_switch.connect_state_set(move |_, state| {
-        config_for_enc.borrow_mut().encrypt_sensitive = state;
-        let _ = config_for_enc.borrow().save();
+        encrypt_cfg.borrow_mut().encrypt_sensitive = state;
+        let _ = encrypt_cfg.borrow().save();
         glib::Propagation::Proceed
     });
     encrypt_row.add_suffix(&encrypt_switch);
@@ -118,7 +123,9 @@ pub fn build(config: &author_clipboard_shared::config::Config) -> Widget {
         .subtitle(format!("Currently: {}", config.max_items))
         .build();
     let max_items_adj = gtk4::Adjustment::builder()
-        .value(config.max_items as f64)
+        .value(f64::from(
+            u32::try_from(config.max_items).unwrap_or(u32::MAX),
+        ))
         .lower(10.0)
         .upper(10_000.0)
         .step_increment(10.0)
@@ -132,7 +139,9 @@ pub fn build(config: &author_clipboard_shared::config::Config) -> Widget {
     let config_for_max = Rc::new(RefCell::new(config.clone()));
     let max_items_row_for_handler = max_items_row.clone();
     max_items_spin.connect_value_changed(move |spin| {
-        let val = spin.value() as usize;
+        // User-controlled; always in [lower, upper] range; no sign loss possible.
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let val = spin.value().round().max(0.0) as usize;
         config_for_max.borrow_mut().max_items = val;
         let _ = config_for_max.borrow().save();
         max_items_row_for_handler.set_subtitle(&format!("Currently: {val}"));
@@ -156,7 +165,7 @@ pub fn build(config: &author_clipboard_shared::config::Config) -> Widget {
         })
         .build();
     let ttl_adj = gtk4::Adjustment::builder()
-        .value(days as f64)
+        .value(f64::from(u32::try_from(days).unwrap_or(u32::MAX)))
         .lower(0.0)
         .upper(365.0)
         .step_increment(1.0)
@@ -170,7 +179,9 @@ pub fn build(config: &author_clipboard_shared::config::Config) -> Widget {
     let config_for_ttl = Rc::new(RefCell::new(config.clone()));
     let ttl_row_for_handler = ttl_row.clone();
     ttl_spin.connect_value_changed(move |spin| {
-        let val = spin.value() as u64;
+        // User-controlled; always in [lower, upper] range; no sign loss possible.
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let val = spin.value().round().max(0.0) as u64;
         config_for_ttl.borrow_mut().ttl_seconds = val * 86400;
         let _ = config_for_ttl.borrow().save();
         if val == 0 {
@@ -213,12 +224,13 @@ pub fn build(config: &author_clipboard_shared::config::Config) -> Widget {
     prefs.add(&data_group);
 
     // ── About ─────────────────────────────────────────────────
-    let about_group = adw::PreferencesGroup::builder()
-        .title("About")
-        .build();
+    let about_group = adw::PreferencesGroup::builder().title("About").build();
     let about_row = adw::ActionRow::builder()
         .title("Author Clipboard")
-        .subtitle(format!("v{}  ·  GPL-3.0  ·  COSMIC + Hyprland", env!("CARGO_PKG_VERSION")))
+        .subtitle(format!(
+            "v{}  ·  GPL-3.0  ·  COSMIC + Hyprland",
+            env!("CARGO_PKG_VERSION")
+        ))
         .build();
     about_group.add(&about_row);
     prefs.add(&about_group);

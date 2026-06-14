@@ -5,9 +5,9 @@
 //!
 //! Bug fixes delivered here:
 //!
-//! * US-001: Esc always closes (in ui_gtk::controller::focus).
+//! * US-001: Esc always closes (in `ui_gtk::controller::focus`).
 //! * US-002: Popup opens with the list focused, not search.
-//! * US-003: CLI launch opens a real AdwApplicationWindow.
+//! * US-003: CLI launch opens a real `AdwApplicationWindow`.
 
 use clap::{Parser, ValueEnum};
 use ui_gtk::{ManagerConfig, PickerAction, PickerFilter, PickerSource, PopupConfig};

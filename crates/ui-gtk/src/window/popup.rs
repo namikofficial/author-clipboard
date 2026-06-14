@@ -34,6 +34,9 @@ pub fn run(config: PopupConfig) -> anyhow::Result<()> {
     Ok(())
 }
 
+// The function never returns Err today; the `Result` signature is kept
+// for future expansion (e.g. resource loading errors).
+#[allow(clippy::unnecessary_wraps, clippy::too_many_lines)]
 fn build_popup(app: &adw::Application, _config: &PopupConfig) -> anyhow::Result<()> {
     let window = adw::Window::builder()
         .application(app)
@@ -96,10 +99,7 @@ fn build_popup(app: &adw::Application, _config: &PopupConfig) -> anyhow::Result<
         }
         let search = find_search_entry(&content_for_esc);
         let list = find_list_box(&content_for_esc);
-        let query_empty = search
-            .as_ref()
-            .map(|s| s.text().is_empty())
-            .unwrap_or(true);
+        let query_empty = search.as_ref().is_none_or(|s| s.text().is_empty());
         let focus = *focus_state_for_esc.borrow();
         let outcome = resolve_escape(focus, query_empty);
         match outcome {

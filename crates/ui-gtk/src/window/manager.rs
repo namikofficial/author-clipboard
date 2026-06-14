@@ -1,4 +1,4 @@
-//! AdwApplicationWindow manager. Real implementation in T015.
+//! `AdwApplicationWindow` manager. Real implementation in T015.
 //!
 //! For the bug-fix slice (T016-T018) we ship a minimal manager with
 //! a real `AdwApplicationWindow` and `AdwToolbarView`, so launching
@@ -6,9 +6,9 @@
 //! (US-003) instead of the previous 520×700 broken pane.
 //!
 //! T015 brings the 6 pages: Clipboard (real, with IPC), Emoji /
-//! Symbols / Kaomoji (real, with shared::emoji/kaomoji/symbols
+//! Symbols / Kaomoji (real, with `shared::emoji/kaomoji/symbols`
 //! data), Snippets (real, with snippet DB), Settings (real, with
-//! AdwPreferencesWindow).
+//! `AdwPreferencesWindow`).
 
 use crate::ManagerConfig;
 use gtk4::gdk;
@@ -18,6 +18,10 @@ use libadwaita as adw;
 use libadwaita::prelude::AdwApplicationWindowExt;
 
 /// Run the manager window. Blocks until the window closes.
+//
+// `ManagerConfig` is taken by value for parity with `run_popup`,
+// even though it is only borrowed in a single call below.
+#[allow(clippy::needless_pass_by_value)]
 pub fn run(config: ManagerConfig) -> anyhow::Result<()> {
     tracing::info!(?config, "ui-gtk manager starting");
 
@@ -38,6 +42,8 @@ pub fn run(config: ManagerConfig) -> anyhow::Result<()> {
     Ok(())
 }
 
+// Signature kept for future expansion (e.g. loading errors).
+#[allow(clippy::unnecessary_wraps)]
 fn build_manager_window(app: &adw::Application) -> anyhow::Result<()> {
     let window = adw::ApplicationWindow::builder()
         .application(app)

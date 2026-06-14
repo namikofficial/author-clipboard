@@ -104,9 +104,8 @@ pub fn build(config: &Config, on_copy: impl Fn(i64, &str) + 'static) -> impl IsA
     let item_rows_for_copy = item_rows.clone();
     let on_copy = Rc::new(on_copy);
     list_box.connect_row_activated(move |_list, row| {
-        let index = row.index();
-        if index >= 0 {
-            let idx = index as usize;
+        let index = usize::try_from(row.index()).ok();
+        if let Some(idx) = index {
             if let Some((id, _)) = item_rows_for_copy.borrow().get(idx) {
                 on_copy(*id, "text/plain");
             }
@@ -253,8 +252,7 @@ pub fn copy_via_ipc(id: i64, mime: &str) -> Result<String, String> {
         Ok(resp) if resp.ok => Ok(mime.to_string()),
         Ok(resp) => Err(resp
             .error
-            .map(|e| e.message)
-            .unwrap_or_else(|| "copy failed".to_string())),
+            .map_or_else(|| "copy failed".to_string(), |e| e.message)),
         Err(e) => Err(e.to_string()),
     }
 }

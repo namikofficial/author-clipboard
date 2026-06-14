@@ -373,7 +373,15 @@ fn main() -> Result<()> {
             include_sensitive,
             action,
             filter,
-        } => run_external_picker(menu, source, count, &prompt, include_sensitive, action, filter)?,
+        } => run_external_picker(
+            menu,
+            source,
+            count,
+            &prompt,
+            include_sensitive,
+            action,
+            filter.as_str(),
+        )?,
         Command::HyprlandConfig => print_hyprland_config(),
     }
     Ok(())
@@ -558,7 +566,7 @@ fn run_external_picker(
     prompt: &str,
     include_sensitive: bool,
     action: ActionArg,
-    filter: String,
+    filter: &str,
 ) -> Result<()> {
     let backend = resolve_menu_backend(menu)
         .context("No picker backend found. Install wofi, rofi, or fuzzel.")?;
