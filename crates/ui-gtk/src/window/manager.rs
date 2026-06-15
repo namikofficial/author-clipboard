@@ -94,15 +94,20 @@ fn build_manager_window(app: &adw::Application) -> anyhow::Result<()> {
     clipboard_paned.set_end_child(Some(preview.widget()));
 
     // ── Sidebar list ──────────────────────────────────────────
-    let sidebar_list = gtk4::ListBox::builder().width_request(180).build();
+    // Width bumped from 180→200 to give the icon + label
+    // breathing room. The selected row's pill background and
+    // padding are driven by the `list.sidebar` rules in
+    // `data/style.css`.
+    let sidebar_list = gtk4::ListBox::builder().width_request(200).build();
     sidebar_list.add_css_class("sidebar");
 
     fn make_sidebar_row(label: &str, icon_name: &str, page_tag: &str) -> gtk4::ListBoxRow {
-        let hbox = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
-        hbox.set_margin_top(8);
-        hbox.set_margin_bottom(8);
-        hbox.set_margin_start(12);
-        hbox.set_margin_end(12);
+        // The hbox padding / spacing are all driven by the
+        // `list.sidebar > row > box` CSS rule, so the Rust
+        // side is just a plain hbox. We keep the widget-name
+        // pattern intact because the row-activation handler
+        // reads it back to figure out which page to switch to.
+        let hbox = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
         let icon = gtk4::Image::from_icon_name(icon_name);
         let label_w = gtk4::Label::new(Some(label));
         label_w.set_halign(gtk4::Align::Start);

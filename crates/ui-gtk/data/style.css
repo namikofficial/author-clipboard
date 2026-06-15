@@ -95,6 +95,7 @@ scrollbar slider {
 scrollbar slider:hover {
   background: alpha(currentColor, 0.4);
 }
+
 /* ── Popup shell ──────────────────────────────────────────── */
 /* The popup is a vertical stack of: search, filter bar, list,
  * status. Each section uses spacing tokens so the rhythm is
@@ -209,6 +210,65 @@ scrollbar slider:hover {
 .clipboard-list > row:selected {
   background: alpha(@accent_bg_color, 0.18);
 }
+
+/* ── Item rows (the cute pill-shaped card) ─────────────────── */
+.item-row {
+  border-radius: var(--radius-md);
+  padding: var(--space-md) var(--space-lg);
+  margin: 0;
+  background: transparent;
+}
+.item-row:hover {
+  background: alpha(@accent_bg_color, 0.08);
+}
+.item-row.selected {
+  background: alpha(@accent_bg_color, 0.18);
+  box-shadow: var(--shadow-sm);
+}
+/* Sensitive red left border — set via JS in item_row.rs */
+.item-row.sensitive {
+  border-left: 3px solid var(--danger);
+}
+/* Clamp the AdwBin wrapper to a minimum size so the empty-list
+ * path stops emitting Gtk-WARNINGs about negative allocations. */
+.item-row-bin {
+  min-width: 0;
+  min-height: 0;
+}
+
+.item-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-0);
+}
+.item-subtitle {
+  font-size: 11px;
+  color: var(--text-2);
+}
+.item-row > .item-row-cluster {
+  /* Trailing chip cluster uses the spacing scale for gaps. */
+  spacing: var(--space-xs);
+  margin-left: var(--space-md);
+}
+
+/* ── Empty state ──────────────────────────────────────────── */
+.empty-state {
+  /* AdwStatusPage already centers its content; we just give it
+   * generous vertical padding so the illustration feels
+   * intentional rather than missing. */
+  padding: var(--space-2xl) var(--space-xl);
+  min-height: 240px;
+}
+.empty-state-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-0);
+}
+.empty-state-description {
+  font-size: 12px;
+  color: var(--text-2);
+}
+
 /* ── Suggested / Destructive buttons ──────────────────────── */
 button.suggested-action {
   border-radius: var(--radius-md);
@@ -236,4 +296,131 @@ button.destructive-action {
 .symbol-cell:hover,
 .kaomoji-cell:hover {
   background: alpha(@accent_bg_color, 0.15);
+}
+
+/* ── Manager sidebar ─────────────────────────────────────── */
+/* The sidebar is a vertical `ListBox` of page rows (icon +
+ * label). The audit called out that the selected row had no
+ * pill chrome and the rows were visually dense; these rules
+ * give the selected row a clear pill background, balanced
+ * padding, and a stronger icon/label color so the active
+ * page is obvious at a glance. */
+list.sidebar {
+  background: transparent;
+  padding: var(--space-sm) var(--space-xs);
+}
+list.sidebar > row {
+  border-radius: var(--radius-md);
+  margin: var(--space-2xs) 0;
+  padding: 0;
+  transition:
+    background-color var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out);
+}
+list.sidebar > row:hover {
+  background: alpha(@accent_bg_color, 0.06);
+}
+list.sidebar > row:selected,
+list.sidebar > row:selected:hover {
+  background: alpha(@accent_bg_color, 0.18);
+  box-shadow: var(--shadow-sm);
+}
+list.sidebar > row:selected image,
+list.sidebar > row:selected label {
+  color: @accent_fg_color;
+}
+list.sidebar > row > box {
+  /* The row's child is the icon+label hbox. We give it
+   * vertical padding so the icon and label line up with
+   * the rest of the spacing scale. */
+  padding: var(--space-sm) var(--space-lg);
+  spacing: var(--space-md);
+}
+list.sidebar > row image {
+  /* The symbolic icons get a consistent size so the sidebar
+   * looks balanced regardless of which icon the page
+   * happens to use. */
+  -gtk-icon-size: 18px;
+}
+
+/* ── Preview pane (manager right column) ─────────────────── */
+/* The preview pane was declared in the spec but had no CSS
+ * rules, so the right side of the manager window looked
+ * like an empty slab. This gives the pane a subtle surface
+ * tone, vertical padding, and a max width so very wide
+ * windows don't make the text content stretch. */
+.preview-pane {
+  background: alpha(@window_fg_color, 0.02);
+  padding: var(--space-xl);
+  border-left: 1px solid @borders_color;
+}
+.preview-pane .preview-text {
+  /* sourceview text: use the text-1 colour for body and
+   * a monospace font that respects the user's preferences. */
+  font-family: monospace;
+  font-size: 13px;
+  color: var(--text-1);
+  background: transparent;
+}
+.preview-pane .preview-image {
+  /* Cap the image preview so a 4K screenshot doesn't blow
+   * the right pane out to full window width. */
+  -gtk-icon-size: 320px;
+}
+.preview-pane .preview-empty {
+  /* The "Select an item to preview" state gets the same
+   * generous padding as the clipboard empty state so the
+   * two empty surfaces feel related. */
+  padding: var(--space-2xl) var(--space-xl);
+  min-height: 240px;
+}
+
+/* ── Sensitive redaction overlay ─────────────────────────── */
+/* The redacted overlay reuses `AdwStatusPage` (same widget
+ * as the empty state) but the visual treatment has to read
+ * as "shielded / locked", not as "missing content". The
+ * rules below paint a danger-tinted background, a
+ * bordered lock badge around the icon, and emphasise the
+ * title so the user understands this is intentional. */
+.preview-pane .preview-redacted {
+  /* Tinted surface so the overlay reads as a distinct
+   * state, not a blank panel. */
+  background: alpha(@error_bg_color, 0.06);
+  border-radius: var(--radius-lg);
+  border: 1px solid alpha(@error_bg_color, 0.18);
+  padding: var(--space-2xl) var(--space-xl);
+  margin: var(--space-xl);
+  min-height: 240px;
+}
+.preview-pane .preview-redacted image {
+  /* The lock icon gets tinted to match the danger colour
+   * so the visual cue is unambiguous. */
+  color: @error_fg_color;
+  -gtk-icon-size: 64px;
+}
+.preview-pane .preview-redacted .title {
+  color: @error_fg_color;
+  font-size: 16px;
+  font-weight: 600;
+}
+.preview-pane .preview-redacted .description {
+  color: var(--text-1);
+  font-size: 12px;
+  margin-top: var(--space-sm);
+}
+.preview-pane .preview-redacted button.suggested-action {
+  /* The Reveal button is the only call to action in the
+   * redacted state; keep it neutral (not suggested-action
+   * blue) so the danger palette is the only colour the
+   * user sees. */
+  background: alpha(@error_bg_color, 0.15);
+  color: @error_fg_color;
+  border: 1px solid alpha(@error_bg_color, 0.30);
+  margin-top: var(--space-lg);
+  padding: var(--space-sm) var(--space-xl);
+  border-radius: var(--radius-md);
+  font-weight: 600;
+}
+.preview-pane .preview-redacted button.suggested-action:hover {
+  background: alpha(@error_bg_color, 0.22);
 }

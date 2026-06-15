@@ -342,6 +342,45 @@ author-clipboard-ui-gtk --all-targets -- -D warnings` clean.
 `cargo fmt --all -- --check` clean. `just ui-smoke` shows the
 new empty state in `docs/UI/snapshots/{popup,manager,clipboard-page}.png`.
 
+### T004 follow-up: manager sidebar
+
+T004 (manager layout polish) is tracked in
+`specs/features/024-ui-cohesion-polish/06-task-plan.md` as the
+next slice. The audit's sidebar finding (item 9) — "rows use 8px
+margins with no visual selection state beyond the default
+list-box row style" — is small enough to land in this same
+pass:
+
+* `crates/ui-gtk/src/window/manager.rs`: sidebar width bumped
+  from 180→200px; `make_sidebar_row` no longer hardcodes 8/12px
+  margins (the CSS owns them now); the hbox spacing argument
+  dropped to 0 (CSS owns it).
+* `crates/ui-gtk/data/style.css`: new `list.sidebar` block
+  defines the pill-chrome background for `:selected`, the
+  `--space-md` icon gap, the `--space-sm/lg` row padding, and
+  a uniform 18px icon size.
+
+### T005 follow-up: sensitive redaction overlay
+
+The audit's item 5 noted that the redacted overlay in
+`PreviewPane` reused the same `AdwStatusPage` as the empty
+state, making "nothing here" and "sensitive — reveal" look
+indistinguishable. The fix is CSS-only:
+
+* `crates/ui-gtk/data/style.css`: new `.preview-pane
+  .preview-redacted` block. Tinted surface (danger-tinted
+  background + border), 64px lock icon in the danger colour,
+  emphasised title in the danger colour, neutral-tinted Reveal
+  button that doesn't fight the palette.
+* `crates/ui-gtk/data/style.css`: new `.preview-pane` block
+  fixes the broader issue from audit item 6 — the pane now
+  has a subtle surface, a left border separating it from the
+  list, and capped image-preview width so a 4K screenshot
+  doesn't blow the right pane out to full window width.
+
+The Reveal button still calls the same IPC path (`on_reveal`),
+so the redaction contract from feature 023 is unchanged.
+
 ## Rollback
 
 The previous libcosmic applet and the parallel GTK4 hypr-picker
