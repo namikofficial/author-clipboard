@@ -95,6 +95,9 @@ enum Command {
         /// Action on selection: copy or quick-paste
         #[arg(short, long, default_value = "copy")]
         action: ActionArg,
+        /// Filter chip: all / text / images / files / pinned / starred / sensitive
+        #[arg(long, default_value = "all")]
+        filter: String,
     },
     /// Print recommended Hyprland config for keybinds and window rules
     HyprlandConfig,
@@ -369,7 +372,16 @@ fn main() -> Result<()> {
             prompt,
             include_sensitive,
             action,
-        } => run_external_picker(menu, source, count, &prompt, include_sensitive, action)?,
+            filter,
+        } => run_external_picker(
+            menu,
+            source,
+            count,
+            &prompt,
+            include_sensitive,
+            action,
+            filter.as_str(),
+        )?,
         Command::HyprlandConfig => print_hyprland_config(),
     }
     Ok(())
@@ -516,6 +528,7 @@ fn copy_item_by_id(id: i64) -> Result<()> {
     match client.send_command(&IpcCommand::Copy {
         id,
         mode: CopyMode::Copy,
+        mime: None,
     }) {
         Ok(resp) => {
             if let Some(data) = resp.data {
@@ -554,6 +567,7 @@ fn run_external_picker(
     prompt: &str,
     include_sensitive: bool,
     action: ActionArg,
+    filter: &str,
 ) -> Result<()> {
     let backend = resolve_menu_backend(menu)
         .context("No picker backend found. Install wofi, rofi, or fuzzel.")?;
@@ -572,12 +586,16 @@ fn run_external_picker(
     let entries =
         picker::load_entries(&db, &config, &options).context("Failed to load picker entries")?;
 
+    // Parse the filter arg, fall back to All on unknown.
+    let filter_enum: author_clipboard_shared::picker::PickerFilter =
+        filter.parse().unwrap_or_default();
+
     if entries.is_empty() {
         println!("No items found.");
         return Ok(());
     }
 
-    let rows = picker::build_external_rows(&entries, true);
+    let (entries, rows) = picker::build_external_rows(&entries, filter_enum, true);
     let labels: Vec<String> = rows.iter().map(|row| row.label.clone()).collect();
 
     let selected = run_menu_backend(backend, prompt, &labels)?;

@@ -273,7 +273,11 @@ async fn handle_method(client: &IpcClient, method: &str, params: Option<Value>) 
                         _ => CopyMode::Copy,
                     };
 
-                    match client.send_command(&IpcCommand::Copy { id, mode }) {
+                    match client.send_command(&IpcCommand::Copy {
+                        id,
+                        mode,
+                        mime: None,
+                    }) {
                         Ok(resp) => {
                             serde_json::json!({"content": [{"type": "text", "text": serde_json::to_string(&resp.data).unwrap_or_default()}]})
                         }

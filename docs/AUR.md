@@ -26,8 +26,8 @@ git config user.email "you@example.com"
 $EDITOR ../packaging/arch/PKGBUILD
 # 2. Regenerate .SRCINFO from PKGBUILD
 makepkg --printsrcinfo > ../packaging/arch/.SRCINFO
-# 3. Smoke-test the build
-makepkg --nocheck --nodeps
+# 3. Smoke-test the build (dependencies include gtk4-layer-shell)
+makepkg --noconfirm --syncdeps --cleanbuild
 # 4. Commit & push
 git add PKGBUILD .SRCINFO
 git commit -m "upgpkg: author-clipboard 0.6.0"
@@ -46,8 +46,8 @@ cd packaging/arch
 makepkg --printsrcinfo > .SRCINFO.new
 diff -u .SRCINFO .SRCINFO.new && rm .SRCINFO.new
 
-# Build without install (CI does this)
-makepkg --nocheck --nodeps
+# Build without install (CI preinstalls dependencies and does this)
+makepkg --noconfirm --cleanbuild --skipinteg
 ```
 
 ## Sources of Truth

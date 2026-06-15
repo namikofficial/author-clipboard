@@ -96,6 +96,64 @@ impl std::str::FromStr for PickerAction {
     }
 }
 
+/// Filter chip shown in the unified GTK4 UI's filter bar.
+///
+/// Mirrors the 7 chips: All / Text / Images / Files / Pinned /
+/// Starred / Sensitive. `Text` and `Images` and `Files` filter by
+/// content type; `Pinned` and `Starred` filter by flag;
+/// `Sensitive` is the union of sensitive + confirmed; `All` is
+/// everything.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PickerFilter {
+    /// Show every entry. Default.
+    #[default]
+    All,
+    /// Plain text entries only.
+    Text,
+    /// Image entries only.
+    Images,
+    /// File-list entries only.
+    Files,
+    /// Pinned entries only.
+    Pinned,
+    /// Starred entries only.
+    Starred,
+    /// Sensitive entries only (redacted by default).
+    Sensitive,
+}
+
+impl std::fmt::Display for PickerFilter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            Self::All => "all",
+            Self::Text => "text",
+            Self::Images => "images",
+            Self::Files => "files",
+            Self::Pinned => "pinned",
+            Self::Starred => "starred",
+            Self::Sensitive => "sensitive",
+        };
+        f.write_str(s)
+    }
+}
+
+impl std::str::FromStr for PickerFilter {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "all" => Ok(Self::All),
+            "text" => Ok(Self::Text),
+            "images" => Ok(Self::Images),
+            "files" => Ok(Self::Files),
+            "pinned" => Ok(Self::Pinned),
+            "starred" => Ok(Self::Starred),
+            "sensitive" => Ok(Self::Sensitive),
+            _ => Err(format!("unknown picker filter: {s}")),
+        }
+    }
+}
+
 /// Options controlling which entries are loaded and how they are displayed.
 #[derive(Debug, Clone)]
 pub struct PickerOptions {
@@ -135,7 +193,141 @@ pub struct PickerEntry {
     pub mime_type: Option<String>,
     pub sensitive: bool,
     pub pinned: bool,
+    /// Starred status (priority ranking). Mirrors [`ClipboardItem::starred`].
+    pub starred: bool,
     pub timestamp: Option<DateTime<Utc>>,
+}
+
+// ── UI-Facing Models ─────────────────────────────────────────────
+
+/// Unified error type for clipboard UI operations.
+/// This provides a clear, user-friendly error hierarchy that all
+/// UI components (applet, picker, CLI) can use.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ClipboardUiError {
+    /// Database operation failed.
+    Database(String),
+    /// Clipboard restore operation failed.
+    Clipboard(String),
+    /// Item requires explicit user confirmation before copy (sensitive item).
+    SensitiveConfirmationRequired { id: i64 },
+    /// Permission denied (e.g., quick-paste requires setup).
+    PermissionRequired(String),
+    /// Daemon is not running or IPC is unavailable.
+    DaemonUnavailable,
+    /// Item is encrypted and decryption failed or is not available.
+    EncryptedContentUnavailable { id: i64 },
+    /// Item not found.
+    NotFound { id: i64 },
+    /// I/O error (file read/write, etc.).
+    Io(String),
+    /// Invalid configuration.
+    Config(String),
+}
+
+impl std::fmt::Display for ClipboardUiError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Database(msg) => write!(f, "Database error: {msg}"),
+            Self::Clipboard(msg) => write!(f, "Clipboard error: {msg}"),
+            Self::SensitiveConfirmationRequired { id } => {
+                write!(f, "Sensitive item {id} requires confirmation")
+            }
+            Self::PermissionRequired(msg) => write!(f, "Permission required: {msg}"),
+            Self::DaemonUnavailable => write!(f, "Clipboard daemon is not running"),
+            Self::EncryptedContentUnavailable { id } => {
+                write!(f, "Cannot access encrypted item {id}")
+            }
+            Self::NotFound { id } => write!(f, "Item {id} not found"),
+            Self::Io(msg) => write!(f, "I/O error: {msg}"),
+            Self::Config(msg) => write!(f, "Configuration error: {msg}"),
+        }
+    }
+}
+
+impl std::error::Error for ClipboardUiError {}
+
+impl From<rusqlite::Error> for ClipboardUiError {
+    fn from(e: rusqlite::Error) -> Self {
+        Self::Database(e.to_string())
+    }
+}
+
+impl From<clipboard::ClipboardSetError> for ClipboardUiError {
+    fn from(e: clipboard::ClipboardSetError) -> Self {
+        Self::Clipboard(e.to_string())
+    }
+}
+
+/// State of an action for UI feedback.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum ActionState {
+    /// No action in progress.
+    #[default]
+    Idle,
+    /// Action is currently executing.
+    Loading { message: Option<String> },
+    /// Action completed successfully.
+    Success { message: Option<String> },
+    /// Action failed.
+    Failed { error: ClipboardUiError },
+    /// Action requires user confirmation (e.g., sensitive item copy).
+    AwaitingConfirmation { id: i64, action: String },
+    /// Daemon is not available.
+    DaemonUnavailable,
+}
+
+/// Filter options for clipboard history queries.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ClipboardFilterState {
+    /// Filter by content type.
+    pub content_types: Option<Vec<ContentType>>,
+    /// Filter by pinned status (Some(true) = pinned only, Some(false) = unpinned only).
+    pub pinned: Option<bool>,
+    /// Filter by sensitive flag.
+    pub sensitive: Option<bool>,
+    /// Filter by source application.
+    pub source_app: Option<String>,
+}
+
+impl ClipboardFilterState {
+    /// Returns true if no filters are active (show all items).
+    pub fn is_empty(&self) -> bool {
+        self.content_types.is_none()
+            && self.pinned.is_none()
+            && self.sensitive.is_none()
+            && self.source_app.is_none()
+    }
+}
+
+/// Search options with pagination.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ClipboardSearchState {
+    /// The search query string.
+    pub query: String,
+    /// Additional filters to apply.
+    pub filters: ClipboardFilterState,
+    /// Number of items to skip (for pagination).
+    pub offset: usize,
+    /// Maximum number of items to return.
+    pub limit: usize,
+}
+
+impl ClipboardSearchState {
+    /// Create a new search state with default pagination.
+    pub fn new(query: impl Into<String>) -> Self {
+        Self {
+            query: query.into(),
+            filters: ClipboardFilterState::default(),
+            offset: 0,
+            limit: 50,
+        }
+    }
+
+    /// Returns true if this is an empty search (show recent items).
+    pub fn is_empty(&self) -> bool {
+        self.query.is_empty() && self.filters.is_empty()
+    }
 }
 
 // ── Content-type icon helpers ─────────────────────────────────────
@@ -250,6 +442,7 @@ pub fn entry_preview(item: &ClipboardItem, reveal_sensitive: bool, config: &Conf
         mime_type: Some(item.mime_type.clone()),
         sensitive: item.sensitive,
         pinned: item.pinned,
+        starred: item.starred,
         timestamp: Some(item.timestamp),
     };
 
@@ -272,6 +465,7 @@ pub fn snippet_preview(snippet: Snippet) -> PickerEntry {
         mime_type: Some("text/plain".to_string()),
         sensitive: false,
         pinned: false,
+        starred: false,
         timestamp: Some(snippet.updated_at),
     }
 }
@@ -295,6 +489,7 @@ pub fn emoji_entries(query: &str) -> Vec<PickerEntry> {
                     mime_type: Some("text/plain".to_string()),
                     sensitive: false,
                     pinned: false,
+                    starred: false,
                     timestamp: None,
                 });
             }
@@ -311,6 +506,7 @@ pub fn emoji_entries(query: &str) -> Vec<PickerEntry> {
                         mime_type: Some("text/plain".to_string()),
                         sensitive: false,
                         pinned: false,
+                        starred: false,
                         timestamp: None,
                     });
                 }
@@ -337,6 +533,7 @@ pub fn symbol_entries(query: &str) -> Vec<PickerEntry> {
                     mime_type: Some("text/plain".to_string()),
                     sensitive: false,
                     pinned: false,
+                    starred: false,
                     timestamp: None,
                 });
             }
@@ -353,6 +550,7 @@ pub fn symbol_entries(query: &str) -> Vec<PickerEntry> {
                         mime_type: Some("text/plain".to_string()),
                         sensitive: false,
                         pinned: false,
+                        starred: false,
                         timestamp: None,
                     });
                 }
@@ -379,6 +577,7 @@ pub fn kaomoji_entries(query: &str) -> Vec<PickerEntry> {
                     mime_type: Some("text/plain".to_string()),
                     sensitive: false,
                     pinned: false,
+                    starred: false,
                     timestamp: None,
                 });
             }
@@ -395,6 +594,7 @@ pub fn kaomoji_entries(query: &str) -> Vec<PickerEntry> {
                         mime_type: Some("text/plain".to_string()),
                         sensitive: false,
                         pinned: false,
+                        starred: false,
                         timestamp: None,
                     });
                 }
@@ -451,6 +651,43 @@ pub fn restore_entry(
         return Err(PickerError::SensitiveConfirmationRequired);
     }
 
+    // Try IPC first for proper encryption/decryption handling.
+    // This ensures encrypted items are properly decrypted before clipboard restore.
+    if let Some(id) = entry.id {
+        let copy_mode = match action {
+            PickerAction::Copy => crate::ipc::CopyMode::Copy,
+            PickerAction::QuickPaste => crate::ipc::CopyMode::QuickPaste,
+        };
+        let client = crate::ipc::IpcClient::new();
+        if let Ok(response) = client.send_command(&crate::ipc::IpcCommand::Copy {
+            id,
+            mode: copy_mode,
+            mime: entry.mime_type.clone(),
+        }) {
+            if response.ok {
+                // IPC succeeded - parse the result
+                if let Some(data) = response.data {
+                    let mime_type = data
+                        .get("mime_type")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("text/plain")
+                        .to_string();
+                    return Ok(clipboard::ClipboardSetResult {
+                        mime_type,
+                        behavior: if matches!(action, PickerAction::QuickPaste) {
+                            "quick-paste"
+                        } else {
+                            "copy"
+                        },
+                    });
+                }
+            }
+            // IPC failed with error - fall through to fallback
+        }
+        // IPC unavailable or failed - fall through to direct access
+    }
+
+    // Fallback: direct clipboard access (may not work for encrypted items)
     match action {
         PickerAction::Copy => {
             if let Some(id) = entry.id {
@@ -558,11 +795,18 @@ pub struct ExternalPickerRow {
 }
 
 /// Build stable-key external rows so UI labels can stay human-readable.
+/// The `filter` is applied internally so callers do not need to pre-filter.
+///
+/// Returns `(filtered_entries, rows)` where `rows[i].key` is the index into
+/// `filtered_entries`. Callers should use the returned `filtered_entries`
+/// for item lookup after user selection.
 pub fn build_external_rows(
     entries: &[PickerEntry],
+    filter: PickerFilter,
     include_key_prefix: bool,
-) -> Vec<ExternalPickerRow> {
-    entries
+) -> (Vec<PickerEntry>, Vec<ExternalPickerRow>) {
+    let filtered = apply_filter(entries, filter);
+    let rows = filtered
         .iter()
         .enumerate()
         .map(|(index, entry)| {
@@ -572,7 +816,8 @@ pub fn build_external_rows(
             }
             ExternalPickerRow { key: index, label }
         })
-        .collect()
+        .collect();
+    (filtered, rows)
 }
 
 /// Parse a selected menu row and resolve back to the original entry index.
@@ -594,16 +839,71 @@ pub fn parse_external_row_selection(
 }
 
 /// Filter entries by a search query (case-insensitive substring match on title + content).
+/// This is a thin wrapper around [`filter_and_query`] with [`PickerFilter::All`].
 pub fn filter_entries(entries: &[PickerEntry], query: &str) -> Vec<PickerEntry> {
-    if query.is_empty() {
+    filter_and_query(entries, query, PickerFilter::All)
+}
+
+/// Filter and query entries: apply [`PickerFilter`] first, then do a
+/// case-insensitive substring match on title + content.
+///
+/// Returns `entries.to_vec()` (identity) when `query.is_empty()` and
+/// `filter == PickerFilter::All`, so the common no-op path is fast.
+pub fn filter_and_query(
+    entries: &[PickerEntry],
+    query: &str,
+    filter: PickerFilter,
+) -> Vec<PickerEntry> {
+    if query.is_empty() && filter == PickerFilter::All {
         return entries.to_vec();
     }
+    let filtered = apply_filter(entries, filter);
+    if query.is_empty() {
+        return filtered;
+    }
     let q = query.to_lowercase();
+    filtered
+        .into_iter()
+        .filter(|e| e.title.to_lowercase().contains(&q) || e.content.to_lowercase().contains(&q))
+        .collect()
+}
+
+/// Apply a [`PickerFilter`] to a list of entries.
+///
+/// Used by both the unified GTK4 UI's filter bar and the external
+/// `ctl picker --filter` flag, so the two surfaces share semantics.
+pub fn apply_filter(entries: &[PickerEntry], filter: PickerFilter) -> Vec<PickerEntry> {
+    if matches!(filter, PickerFilter::All) {
+        return entries.to_vec();
+    }
     entries
         .iter()
-        .filter(|e| e.title.to_lowercase().contains(&q) || e.content.to_lowercase().contains(&q))
+        .filter(|e| match filter {
+            PickerFilter::All => true,
+            PickerFilter::Text => matches!(
+                e.content_type,
+                Some(ContentType::Text) | None // expression entries (emoji/symbol/kaomoji) act as text
+            ),
+            PickerFilter::Images => matches!(e.content_type, Some(ContentType::Image)),
+            PickerFilter::Files => matches!(e.content_type, Some(ContentType::Files)),
+            PickerFilter::Pinned => e.pinned,
+            PickerFilter::Starred => e.starred,
+            PickerFilter::Sensitive => e.sensitive,
+        })
         .cloned()
         .collect()
+}
+
+/// Format a filter + query pair into a label for the external picker row.
+pub fn format_external_label_with_filter(entry: &PickerEntry, filter: PickerFilter) -> String {
+    let base = format_external_label(entry, false);
+    let suffix = match filter {
+        PickerFilter::Pinned if entry.pinned => " 📌".to_string(),
+        PickerFilter::Starred if entry.starred => " ⭐".to_string(),
+        PickerFilter::Sensitive if entry.sensitive => " 🔒".to_string(),
+        _ => String::new(),
+    };
+    format!("{base}{suffix}")
 }
 
 // ── Private helpers ───────────────────────────────────────────────
@@ -660,6 +960,7 @@ mod tests {
             mime_type: Some("text/plain".to_string()),
             sensitive: false,
             pinned: false,
+            starred: false,
             timestamp: None,
         };
         let label = format_external_label(&entry, true);
@@ -702,9 +1003,10 @@ mod tests {
             mime_type: Some("text/plain".to_string()),
             sensitive: false,
             pinned: false,
+            starred: false,
             timestamp: None,
         }];
-        let rows = build_external_rows(&entries, true);
+        let (_filtered, rows) = build_external_rows(&entries, PickerFilter::All, true);
         let selected = rows[0].label.clone();
         assert_eq!(
             parse_external_row_selection(&selected, &rows, true),
@@ -725,6 +1027,7 @@ mod tests {
                 mime_type: None,
                 sensitive: false,
                 pinned: false,
+                starred: false,
                 timestamp: None,
             },
             PickerEntry {
@@ -737,6 +1040,7 @@ mod tests {
                 mime_type: None,
                 sensitive: false,
                 pinned: false,
+                starred: false,
                 timestamp: None,
             },
         ];
@@ -799,5 +1103,346 @@ mod tests {
         assert_eq!(entry.title, "greeting");
         assert_eq!(entry.content, "hello world");
         assert!(!entry.sensitive);
+    }
+
+    // ── PickerFilter tests ───────────────────────────────────────
+
+    fn entry(content_type: ContentType, pinned: bool, sensitive: bool) -> PickerEntry {
+        PickerEntry {
+            id: Some(0),
+            source: PickerSource::History,
+            content_type: Some(content_type),
+            title: "x".to_string(),
+            subtitle: None,
+            content: "x".to_string(),
+            mime_type: None,
+            sensitive,
+            pinned,
+            starred: false,
+            timestamp: None,
+        }
+    }
+
+    #[test]
+    fn picker_filter_display_round_trip() {
+        for f in [
+            PickerFilter::All,
+            PickerFilter::Text,
+            PickerFilter::Images,
+            PickerFilter::Files,
+            PickerFilter::Pinned,
+            PickerFilter::Starred,
+            PickerFilter::Sensitive,
+        ] {
+            assert_eq!(f.to_string().parse::<PickerFilter>().unwrap(), f);
+        }
+    }
+
+    #[test]
+    fn apply_filter_all_returns_everything() {
+        let entries = vec![
+            entry(ContentType::Text, false, false),
+            entry(ContentType::Image, true, true),
+        ];
+        assert_eq!(apply_filter(&entries, PickerFilter::All).len(), 2);
+    }
+
+    #[test]
+    fn apply_filter_text_drops_images_and_files() {
+        let entries = vec![
+            entry(ContentType::Text, false, false),
+            entry(ContentType::Image, false, false),
+            entry(ContentType::Files, false, false),
+        ];
+        let filtered = apply_filter(&entries, PickerFilter::Text);
+        assert_eq!(filtered.len(), 1);
+        assert!(matches!(filtered[0].content_type, Some(ContentType::Text)));
+    }
+
+    #[test]
+    fn apply_filter_pinned_only() {
+        let entries = vec![
+            entry(ContentType::Text, false, false),
+            entry(ContentType::Text, true, false),
+            entry(ContentType::Text, true, true),
+        ];
+        let filtered = apply_filter(&entries, PickerFilter::Pinned);
+        assert_eq!(filtered.len(), 2);
+    }
+
+    #[test]
+    fn apply_filter_sensitive_only() {
+        let entries = vec![
+            entry(ContentType::Text, false, false),
+            entry(ContentType::Text, false, true),
+        ];
+        let filtered = apply_filter(&entries, PickerFilter::Sensitive);
+        assert_eq!(filtered.len(), 1);
+        assert!(filtered[0].sensitive);
+    }
+
+    #[test]
+    fn from_str_rejects_unknown() {
+        assert!("unknown".parse::<PickerFilter>().is_err());
+    }
+
+    // ── filter_and_query tests ─────────────────────────────────────
+
+    fn text_entry(title: &str, content: &str) -> PickerEntry {
+        PickerEntry {
+            id: Some(0),
+            source: PickerSource::History,
+            content_type: Some(ContentType::Text),
+            title: title.to_string(),
+            subtitle: None,
+            content: content.to_string(),
+            mime_type: None,
+            sensitive: false,
+            pinned: false,
+            starred: false,
+            timestamp: None,
+        }
+    }
+
+    fn image_entry(title: &str) -> PickerEntry {
+        PickerEntry {
+            id: Some(0),
+            source: PickerSource::History,
+            content_type: Some(ContentType::Image),
+            title: title.to_string(),
+            subtitle: None,
+            content: String::new(),
+            mime_type: None,
+            sensitive: false,
+            pinned: false,
+            starred: false,
+            timestamp: None,
+        }
+    }
+
+    fn pinned_text_entry(title: &str) -> PickerEntry {
+        PickerEntry {
+            id: Some(0),
+            source: PickerSource::History,
+            content_type: Some(ContentType::Text),
+            title: title.to_string(),
+            subtitle: None,
+            content: "pinned content".to_string(),
+            mime_type: None,
+            sensitive: false,
+            pinned: true,
+            starred: false,
+            timestamp: None,
+        }
+    }
+
+    fn starred_text_entry(title: &str) -> PickerEntry {
+        PickerEntry {
+            id: Some(0),
+            source: PickerSource::History,
+            content_type: Some(ContentType::Text),
+            title: title.to_string(),
+            subtitle: None,
+            content: "starred content".to_string(),
+            mime_type: None,
+            sensitive: false,
+            pinned: false,
+            starred: true,
+            timestamp: None,
+        }
+    }
+
+    fn sensitive_text_entry(title: &str) -> PickerEntry {
+        PickerEntry {
+            id: Some(0),
+            source: PickerSource::History,
+            content_type: Some(ContentType::Text),
+            title: title.to_string(),
+            subtitle: None,
+            content: "sensitive content".to_string(),
+            mime_type: None,
+            sensitive: true,
+            pinned: false,
+            starred: false,
+            timestamp: None,
+        }
+    }
+
+    fn file_entry(title: &str) -> PickerEntry {
+        PickerEntry {
+            id: Some(0),
+            source: PickerSource::History,
+            content_type: Some(ContentType::Files),
+            title: title.to_string(),
+            subtitle: None,
+            content: "/path/to/file".to_string(),
+            mime_type: None,
+            sensitive: false,
+            pinned: false,
+            starred: false,
+            timestamp: None,
+        }
+    }
+
+    // Test 1: identity case — empty query + All filter returns all entries
+    #[test]
+    fn filter_and_query_identity_empty_query_all() {
+        let entries = vec![
+            text_entry("foo", "bar"),
+            text_entry("baz", "qux"),
+            image_entry("an image"),
+        ];
+        let result = filter_and_query(&entries, "", PickerFilter::All);
+        assert_eq!(result.len(), 3);
+    }
+
+    // Test 2–8: every filter with matching query
+    #[test]
+    fn filter_and_query_all_with_matching_query() {
+        let entries = vec![text_entry("hello world", "some content")];
+        let result = filter_and_query(&entries, "hello", PickerFilter::All);
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn filter_and_query_text_with_matching_query() {
+        let entries = vec![text_entry("hello", "world"), image_entry("an image")];
+        let result = filter_and_query(&entries, "hello", PickerFilter::Text);
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn filter_and_query_images_with_matching_query() {
+        let entries = vec![image_entry("screenshot.png"), text_entry("hello", "world")];
+        let result = filter_and_query(&entries, "screenshot", PickerFilter::Images);
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn filter_and_query_files_with_matching_query() {
+        let entries = vec![file_entry("document.pdf"), text_entry("hello", "world")];
+        let result = filter_and_query(&entries, "document", PickerFilter::Files);
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn filter_and_query_pinned_with_matching_query() {
+        let entries = vec![
+            pinned_text_entry("important note"),
+            text_entry("hello", "world"),
+        ];
+        let result = filter_and_query(&entries, "important", PickerFilter::Pinned);
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn filter_and_query_starred_with_matching_query() {
+        let entries = vec![
+            starred_text_entry("favorite quote"),
+            text_entry("hello", "world"),
+        ];
+        let result = filter_and_query(&entries, "favorite", PickerFilter::Starred);
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn filter_and_query_sensitive_with_matching_query() {
+        let entries = vec![
+            sensitive_text_entry("secret password"),
+            text_entry("hello", "world"),
+        ];
+        let result = filter_and_query(&entries, "secret", PickerFilter::Sensitive);
+        assert_eq!(result.len(), 1);
+    }
+
+    // Test 9–15: every filter with non-matching query
+    #[test]
+    fn filter_and_query_all_with_non_matching_query() {
+        let entries = vec![text_entry("hello", "world")];
+        let result = filter_and_query(&entries, "xyz", PickerFilter::All);
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn filter_and_query_text_with_non_matching_query() {
+        let entries = vec![text_entry("hello", "world"), image_entry("an image")];
+        let result = filter_and_query(&entries, "xyz", PickerFilter::Text);
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn filter_and_query_images_with_non_matching_query() {
+        let entries = vec![image_entry("screenshot.png"), text_entry("hello", "world")];
+        let result = filter_and_query(&entries, "xyz", PickerFilter::Images);
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn filter_and_query_files_with_non_matching_query() {
+        let entries = vec![file_entry("document.pdf"), text_entry("hello", "world")];
+        let result = filter_and_query(&entries, "xyz", PickerFilter::Files);
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn filter_and_query_pinned_with_non_matching_query() {
+        let entries = vec![
+            pinned_text_entry("important note"),
+            text_entry("hello", "world"),
+        ];
+        let result = filter_and_query(&entries, "xyz", PickerFilter::Pinned);
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn filter_and_query_starred_with_non_matching_query() {
+        let entries = vec![
+            starred_text_entry("favorite quote"),
+            text_entry("hello", "world"),
+        ];
+        let result = filter_and_query(&entries, "xyz", PickerFilter::Starred);
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn filter_and_query_sensitive_with_non_matching_query() {
+        let entries = vec![
+            sensitive_text_entry("secret password"),
+            text_entry("hello", "world"),
+        ];
+        let result = filter_and_query(&entries, "xyz", PickerFilter::Sensitive);
+        assert_eq!(result.len(), 0);
+    }
+
+    // Test 16: query that matches nothing across multiple entries
+    #[test]
+    fn filter_and_query_query_matches_nothing() {
+        let entries = vec![
+            text_entry("foo bar", "baz qux"),
+            text_entry("hello world", "goodbye"),
+            image_entry("an image"),
+        ];
+        let result = filter_and_query(&entries, "zzzzz", PickerFilter::All);
+        assert_eq!(result.len(), 0);
+    }
+
+    // Test 17: empty query + specific filter returns only filtered entries
+    #[test]
+    fn filter_and_query_empty_query_text_filter() {
+        let entries = vec![text_entry("hello", "world"), image_entry("photo.png")];
+        let result = filter_and_query(&entries, "", PickerFilter::Text);
+        assert_eq!(result.len(), 1);
+    }
+
+    // Test 18: content substring match (not just title)
+    #[test]
+    fn filter_and_query_content_substring_match() {
+        let entries = vec![
+            text_entry("title here", "secret content"),
+            text_entry("other title", "other content"),
+        ];
+        let result = filter_and_query(&entries, "secret", PickerFilter::All);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].title, "title here");
     }
 }

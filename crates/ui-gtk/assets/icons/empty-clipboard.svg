@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+  <title>empty clipboard</title>
+  <rect x="14" y="10" width="20" height="30" rx="3" opacity="0.6"/>
+  <path d="M19 10 V8 a2 2 0 0 1 2-2 h6 a2 2 0 0 1 2 2 V10"/>
+  <circle cx="24" cy="22" r="2" fill="currentColor" opacity="0.4"/>
+  <circle cx="24" cy="29" r="2" fill="currentColor" opacity="0.4"/>
+  <path d="M20 36 h8" opacity="0.4"/>
+</svg>

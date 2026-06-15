@@ -33,13 +33,13 @@ fmt:
 fmt-check:
     cargo fmt --all -- --check
 
-# Run clippy linter
+# Run clippy linter (no --all-features — webview feature requires webkitgtk-6.0-dev)
 lint:
-    cargo clippy --all-targets --all-features -- -D warnings
+    cargo clippy --all-targets -- -D warnings
 
 # Run clippy with auto-fix
 lint-fix:
-    cargo clippy --all-targets --all-features --fix --allow-dirty --allow-staged
+    cargo clippy --all-targets --fix --allow-dirty --allow-staged
 
 # ── Testing ────────────────────────────────────────────────────────────
 
@@ -50,6 +50,18 @@ test:
 # Run tests with output
 test-verbose:
     cargo test --all -- --nocapture
+
+# Validate GSettings schema compiles
+ui-check:
+    glib-compile-schemas crates/ui-gtk/data/ && cargo check -p author-clipboard-ui-gtk
+
+# Generate GTK screenshots under Xvfb (requires xvfb-run, xdotool, ffmpeg)
+ui-smoke:
+    xvfb-run -a -s "-screen 0 1280x800x24" crates/ui-gtk/tests/smoke.sh
+
+# Run GTK unit tests under Xvfb (manual)
+ui-test:
+    cargo test -p author-clipboard-ui-gtk
 
 # ── Full Verification ──────────────────────────────────────────────────
 
@@ -106,6 +118,13 @@ changelog-preview:
 # Tag a release and generate changelog (usage: just release 0.2.0)
 release version:
     @echo "🚀 Releasing v{{version}}..."
+    @WORKSPACE_VERSION=$$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml); \
+        PKGBUILD_VERSION=$$(sed -n 's/^pkgver=//p' packaging/arch/PKGBUILD); \
+        SRCINFO_VERSION=$$(sed -n 's/^[[:space:]]*pkgver = //p' packaging/arch/.SRCINFO | head -1); \
+        test "{{version}}" = "$$WORKSPACE_VERSION"; \
+        test "{{version}}" = "$$PKGBUILD_VERSION"; \
+        test "{{version}}" = "$$SRCINFO_VERSION"
+    just aur-check
     git-cliff --tag "v{{version}}" --output CHANGELOG.md
     git add CHANGELOG.md
     git commit -m "chore(release): v{{version}}"

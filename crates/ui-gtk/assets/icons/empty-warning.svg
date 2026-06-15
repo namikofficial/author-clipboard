@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+  <title>warning</title>
+  <path d="M24 6 L44 40 L4 40 Z" opacity="0.7"/>
+  <path d="M24 20 v8 M24 32 v1" stroke-width="3"/>
+</svg>

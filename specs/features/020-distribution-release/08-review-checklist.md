@@ -15,7 +15,12 @@
 - [x] `crates/applet/Cargo.toml` deb assets are workspace-relative.
 - [x] `.deb` includes applet, daemon, ctl, AND hypr-picker.
 - [x] `release.yml` builds the full workspace, builds the `.deb`, generates `SHA256SUMS`, and conditionally signs.
-- [x] `ci.yml` validates the Arch PKGBUILD inside `archlinux:latest`.
+- [x] `ci.yml` builds and inspects the `.deb` on pull requests.
+- [x] `ci.yml` builds the Arch package and verifies `.SRCINFO` inside `archlinux:latest`.
+- [x] Ubuntu jobs build a pinned gtk4-layer-shell version unavailable from apt.
+- [x] Arch jobs invoke `makepkg` through an unprivileged builder account.
+- [x] `release.yml` runs only for explicit version tags and never pushes a version-bump commit.
+- [x] Release validation rejects tag/package version drift before publication.
 - [x] Flatpak manifest is at `packaging/flatpak/...` and references the Freedesktop 23.08 runtime.
 - [x] AppImage build script is in `packaging/appimage/` with `build.sh` + `AppRun` + desktop.
 - [x] `flake.nix` exposes `packages.<system>.default` and `apps.<system>.default`.
@@ -29,7 +34,7 @@
 - [x] `just fmt-check` passes.
 - [x] `just lint` passes (no new warnings on applet, shared, daemon, ctl, mcp-server).
 - [x] `cargo test` for shared crate passes.
-- [x] New CI job (arch-pkg) is documented in the workflow and has a 5-minute timeout.
+- [x] PR Rust, Debian, and Arch jobs are green for the current head SHA.
 
 ## Security & Privacy
 
@@ -46,8 +51,10 @@
 
 ## Deviations from Plan
 
-- [x] No deviations: every FR and NFR in `01-requirements.md` is implemented or documented as out-of-scope.
+- [x] The temporary release-on-`main` and automatic patch-bump design was
+  rejected because it published before an explicit maintainer action and wrote
+  unreviewed commits back to the stable branch.
 
 ---
 
-**Last Updated**: 2026-06-08
+**Last Updated**: 2026-06-15

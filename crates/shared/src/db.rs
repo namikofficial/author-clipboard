@@ -219,6 +219,35 @@ impl Database {
             self.set_schema_version(8)?;
         }
 
+        if version < 9 {
+            // v9: Encryption-at-rest metadata for sensitive items.
+            //
+            // - encrypted: 1 if the `content` column is ciphertext,
+            //   0 (the default) if it is plaintext. Non-sensitive
+            //   items are never encrypted.
+            // - encryption_version: scheme version of the ciphertext.
+            //   Currently always 1 (AES-256-GCM, base64(nonce || ct)).
+            //   Bumping this value invalidates all previously
+            //   encrypted rows and forces a re-encrypt on next read.
+            // - redacted_preview: a fixed-length redacted form of
+            //   the sensitive content, used by UIs and exports so
+            //   they never have to decrypt the item just to display
+            //   "••••••••" or a one-line hint. NULL for non-sensitive
+            //   items.
+            let has_encrypted = self
+                .conn
+                .prepare("SELECT encrypted FROM clipboard_items LIMIT 0")
+                .is_ok();
+            if !has_encrypted {
+                self.conn.execute_batch(
+                    "ALTER TABLE clipboard_items ADD COLUMN encrypted INTEGER NOT NULL DEFAULT 0;
+                     ALTER TABLE clipboard_items ADD COLUMN encryption_version INTEGER DEFAULT NULL;
+                     ALTER TABLE clipboard_items ADD COLUMN redacted_preview TEXT DEFAULT NULL;",
+                )?;
+            }
+            self.set_schema_version(9)?;
+        }
+
         Ok(())
     }
 
@@ -263,6 +292,109 @@ impl Database {
         Ok(self.conn.last_insert_rowid())
     }
 
+    /// Insert with the encryption-at-rest policy applied.
+    ///
+    /// If `item.sensitive` is true AND `encrypt_sensitive` is true,
+    /// the `content` column is replaced with the ciphertext and the
+    /// `encrypted` / `encryption_version` / `redacted_preview`
+    /// columns are populated. Otherwise the item is inserted as a
+    /// plain row (the same shape as `insert_item`).
+    ///
+    /// The FTS5 index is built from the *redacted* form for
+    /// encrypted items, so a free-text search never sees the
+    /// plaintext of an encrypted item. This is the safe default.
+    ///
+    /// Returns the new row id. A failure to encrypt or insert
+    /// propagates the error and **no row is created**.
+    pub fn insert_with_encryption(
+        &self,
+        item: &ClipboardItem,
+        manager: &crate::encryption::EncryptionManager,
+        encrypt_sensitive: bool,
+    ) -> SqlResult<i64> {
+        // Decide whether to encrypt before touching the DB.
+        let (stored_content, stored_plain_text, encrypted, version, redacted) =
+            if item.sensitive && encrypt_sensitive {
+                let ciphertext = manager
+                    .encrypt(&item.content)
+                    .map_err(|_e| rusqlite::Error::InvalidQuery)?;
+                let plain_text_ciphertext = match &item.plain_text {
+                    Some(plain) if !plain.is_empty() => Some(
+                        manager
+                            .encrypt(plain)
+                            .map_err(|_e| rusqlite::Error::InvalidQuery)?,
+                    ),
+                    _ => None,
+                };
+                let redacted = item.redacted_preview();
+                (
+                    ciphertext,
+                    plain_text_ciphertext,
+                    1_i32,
+                    Some(1_i32),
+                    Some(redacted),
+                )
+            } else {
+                (
+                    item.content.clone(),
+                    item.plain_text.clone(),
+                    0_i32,
+                    None,
+                    None,
+                )
+            };
+
+        self.conn.execute(
+            "INSERT INTO clipboard_items
+                (content_hash, content, mime_type, content_type, timestamp, pinned, source_app, sensitive, plain_text,
+                 encrypted, encryption_version, redacted_preview)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            rusqlite::params![
+                item.content_hash.cast_signed(),
+                stored_content,
+                &item.mime_type,
+                item.content_type.as_str(),
+                item.timestamp.to_rfc3339(),
+                i32::from(item.pinned),
+                &item.source_app,
+                i32::from(item.sensitive),
+                &stored_plain_text,
+                encrypted,
+                version,
+                &redacted,
+            ],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    /// Decrypt the content of a stored item, returning a fresh
+    /// `ClipboardItem` whose `content` (and `plain_text`, if any)
+    /// has been replaced with the plaintext.
+    ///
+    /// If the item is not encrypted (`encrypted = 0`), the input
+    /// item is returned unchanged. If the item is encrypted but
+    /// the supplied `EncryptionManager` cannot decrypt it
+    /// (e.g. wrong key, tampered ciphertext), an error is
+    /// returned and the caller must decide what to do.
+    pub fn decrypt_item(
+        &self,
+        item: &ClipboardItem,
+        manager: &crate::encryption::EncryptionManager,
+    ) -> Result<ClipboardItem, String> {
+        // Fast path: not encrypted, no work to do.
+        if !Self::is_item_encrypted(item) {
+            return Ok(item.clone());
+        }
+        let mut out = item.clone();
+        out.content = manager.decrypt(&item.content)?;
+        if let Some(ciphertext) = &item.plain_text {
+            if !ciphertext.is_empty() {
+                out.plain_text = Some(manager.decrypt(ciphertext)?);
+            }
+        }
+        Ok(out)
+    }
+
     /// Insert only if content hash doesn't already exist within the dedup window.
     /// If duplicate within `dedup_window_seconds`, bumps the existing item's timestamp instead.
     /// Returns the id of the inserted or bumped row.
@@ -300,7 +432,7 @@ impl Database {
     /// Get the most recent items, pinned first.
     pub fn get_recent(&self, limit: usize) -> SqlResult<Vec<ClipboardItem>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, content_hash, content, mime_type, content_type, timestamp, pinned, starred, source_app, sensitive, plain_text
+            "SELECT id, content_hash, content, mime_type, content_type, timestamp, pinned, starred, source_app, sensitive, plain_text, encrypted, encryption_version, redacted_preview
              FROM clipboard_items
              ORDER BY pinned DESC, timestamp DESC
              LIMIT ?1",
@@ -315,7 +447,7 @@ impl Database {
     /// `Ok(None)` when the history is empty.
     pub fn get_most_recent(&self) -> SqlResult<Option<ClipboardItem>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, content_hash, content, mime_type, content_type, timestamp, pinned, starred, source_app, sensitive, plain_text
+            "SELECT id, content_hash, content, mime_type, content_type, timestamp, pinned, starred, source_app, sensitive, plain_text, encrypted, encryption_version, redacted_preview
              FROM clipboard_items
              ORDER BY timestamp DESC
              LIMIT 1",
@@ -328,7 +460,7 @@ impl Database {
     pub fn search(&self, query: &str, limit: usize) -> SqlResult<Vec<ClipboardItem>> {
         // Try FTS5 first for better performance
         let fts_result = self.conn.prepare(
-            "SELECT ci.id, ci.content_hash, ci.content, ci.mime_type, ci.content_type, ci.timestamp, ci.pinned, ci.starred, ci.source_app, ci.sensitive, ci.plain_text
+            "SELECT ci.id, ci.content_hash, ci.content, ci.mime_type, ci.content_type, ci.timestamp, ci.pinned, ci.starred, ci.source_app, ci.sensitive, ci.plain_text, ci.encrypted, ci.encryption_version, ci.redacted_preview
              FROM clipboard_fts fts
              JOIN clipboard_items ci ON ci.id = fts.rowid
              WHERE clipboard_fts MATCH ?1
@@ -353,7 +485,7 @@ impl Database {
         // Fallback: LIKE search
         let pattern = format!("%{query}%");
         let mut stmt = self.conn.prepare(
-            "SELECT id, content_hash, content, mime_type, content_type, timestamp, pinned, starred, source_app, sensitive, plain_text
+            "SELECT id, content_hash, content, mime_type, content_type, timestamp, pinned, starred, source_app, sensitive, plain_text, encrypted, encryption_version, redacted_preview
              FROM clipboard_items
              WHERE (content LIKE ?1 OR plain_text LIKE ?1)
              ORDER BY pinned DESC, timestamp DESC
@@ -365,7 +497,7 @@ impl Database {
     /// Get a single item by id.
     pub fn get_by_id(&self, id: i64) -> SqlResult<Option<ClipboardItem>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, content_hash, content, mime_type, content_type, timestamp, pinned, starred, source_app, sensitive, plain_text
+            "SELECT id, content_hash, content, mime_type, content_type, timestamp, pinned, starred, source_app, sensitive, plain_text, encrypted, encryption_version, redacted_preview
              FROM clipboard_items WHERE id = ?1",
         )?;
         let mut items = stmt.query_map([id], Self::row_to_item)?;
@@ -586,19 +718,44 @@ impl Database {
     /// Export all clipboard items as JSON string.
     pub fn export_items(&self) -> SqlResult<String> {
         let items = self.get_recent(i32::MAX as usize)?;
-        let json = serde_json::to_string_pretty(&items)
+        // For encrypted items, replace ciphertext content with redacted_preview
+        // to avoid leaking encrypted content in exports.
+        let items_for_export: Vec<crate::types::ClipboardItem> = items
+            .into_iter()
+            .map(|mut item| {
+                if item.encrypted {
+                    item.content = item
+                        .redacted_preview
+                        .clone()
+                        .unwrap_or_else(|| "••••••••".to_string());
+                    item.plain_text = None;
+                }
+                item
+            })
+            .collect();
+        let json = serde_json::to_string_pretty(&items_for_export)
             .unwrap_or_else(|e| format!("{{\"error\": \"{e}\"}}"));
         Ok(json)
     }
 
     /// Import clipboard items from JSON string. Returns count of imported items.
+    ///
+    /// The `sensitive` flag is **always re-derived** from the content
+    /// before insert, not trusted from the source JSON. This defends
+    /// against a tampered export that marks a credential as
+    /// `sensitive: false` to bypass the policy. If the re-derived
+    /// flag says sensitive, the imported item is treated as sensitive
+    /// regardless of what the source said; if the re-derived flag
+    /// says not sensitive, the source flag is also cleared so a
+    /// stale "sensitive" mark on a sanitized payload is removed.
     pub fn import_items(&self, json: &str) -> Result<usize, String> {
         let items: Vec<crate::types::ClipboardItem> =
             serde_json::from_str(json).map_err(|e| format!("Invalid JSON: {e}"))?;
 
         let mut count = 0;
-        for item in &items {
-            match self.insert_or_bump(item, 0) {
+        for mut item in items {
+            item.sensitive = Self::derive_sensitive_for_import(&item);
+            match self.insert_or_bump(&item, 0) {
                 Ok(_) => count += 1,
                 Err(e) => {
                     tracing::warn!("Failed to import item: {e}");
@@ -625,6 +782,31 @@ impl Database {
 
     // ── Helpers ────────────────────────────────────────────────────────
 
+    /// Whether the given item is stored as ciphertext in the
+    /// `content` (and `plain_text`, if any) columns. The
+    /// `EncryptionManager` must be used to read these fields.
+    pub fn is_item_encrypted(item: &crate::types::ClipboardItem) -> bool {
+        item.encrypted
+    }
+
+    /// Re-derive the `sensitive` flag for an item being imported,
+    /// using the same detection rules as the constructors. This is
+    /// the *only* way an item's sensitive flag is allowed to enter
+    /// the database on import; the source JSON is never trusted.
+    pub fn derive_sensitive_for_import(item: &crate::types::ClipboardItem) -> bool {
+        use crate::types::ContentType;
+        match item.content_type {
+            ContentType::Text | ContentType::Files => {
+                crate::sensitive::check_sensitivity(&item.content).is_sensitive
+            }
+            ContentType::Html => {
+                let plain = item.plain_text.as_deref().unwrap_or("");
+                crate::sensitive::check_sensitive_html(&item.content, plain).is_sensitive
+            }
+            ContentType::Image => false,
+        }
+    }
+
     fn row_to_item(row: &rusqlite::Row<'_>) -> SqlResult<ClipboardItem> {
         Ok(ClipboardItem {
             id: row.get(0)?,
@@ -642,6 +824,9 @@ impl Database {
             source_app: row.get(8)?,
             sensitive: row.get::<_, i32>(9).unwrap_or(0) != 0,
             plain_text: row.get(10).ok(),
+            encrypted: row.get::<_, i32>(11).unwrap_or(0) != 0,
+            encryption_version: row.get(12).ok(),
+            redacted_preview: row.get(13).ok(),
         })
     }
 
@@ -807,7 +992,7 @@ impl Database {
     /// Get all items in a collection, ordered by `added_at` DESC.
     pub fn get_collection_items(&self, collection_id: &str) -> SqlResult<Vec<ClipboardItem>> {
         let mut stmt = self.conn.prepare(
-            "SELECT ci.id, ci.content_hash, ci.content, ci.mime_type, ci.content_type, ci.timestamp, ci.pinned, ci.starred, ci.source_app, ci.sensitive, ci.plain_text
+            "SELECT ci.id, ci.content_hash, ci.content, ci.mime_type, ci.content_type, ci.timestamp, ci.pinned, ci.starred, ci.source_app, ci.sensitive, ci.plain_text, ci.encrypted, ci.encryption_version, ci.redacted_preview
              FROM clipboard_items ci
              JOIN collection_memberships cm ON ci.id = cm.item_id
              WHERE cm.collection_id = ?1
@@ -1069,9 +1254,9 @@ mod tests {
     #[test]
     fn test_schema_version() {
         let db = make_db();
-        // After init, version should be 8 (latest)
+        // After init, version should be 9 (latest)
         let version = db.get_schema_version();
-        assert_eq!(version, 8);
+        assert_eq!(version, 9);
     }
 
     #[test]
@@ -1170,5 +1355,380 @@ mod tests {
 
         // Clear custom TTL
         db.set_item_ttl(id, None).unwrap();
+    }
+
+    #[test]
+    fn import_redisovers_sensitive_flag_on_text() {
+        // Craft a JSON payload that lies about the sensitive flag.
+        // The import path must NOT trust it.
+        let json = r#"[
+            {
+                "id": 0,
+                "content_hash": 0,
+                "content": "ghp_1234567890abcdefghij",
+                "mime_type": "text/plain",
+                "content_type": "Text",
+                "timestamp": "2026-01-01T00:00:00Z",
+                "pinned": false,
+                "starred": false,
+                "source_app": null,
+                "sensitive": false,
+                "plain_text": null
+            }
+        ]"#;
+        let db = make_db();
+        let count = db.import_items(json).unwrap();
+        assert_eq!(count, 1);
+        let items = db.get_recent(10).unwrap();
+        assert_eq!(items.len(), 1);
+        assert!(
+            items[0].sensitive,
+            "import must re-derive sensitive=true even when source says false"
+        );
+    }
+
+    #[test]
+    #[allow(clippy::uninlined_format_args)]
+    fn import_redisovers_sensitive_flag_on_html() {
+        // HTML with a secret in an attribute; tampered JSON claims
+        // sensitive=false. The import path must re-derive it.
+        let html = r#"<form><input type="password" value="MyP@ssw0rd!" /></form>"#;
+        let json = format!(
+            r#"[
+                {{
+                    "id": 0,
+                    "content_hash": 0,
+                    "content": {:?},
+                    "mime_type": "text/html",
+                    "content_type": "Html",
+                    "timestamp": "2026-01-01T00:00:00Z",
+                    "pinned": false,
+                    "starred": false,
+                    "source_app": null,
+                    "sensitive": false,
+                    "plain_text": ""
+                }}
+            ]"#,
+            html
+        );
+        let db = make_db();
+        db.import_items(&json).unwrap();
+        let items = db.get_recent(10).unwrap();
+        assert!(items[0].sensitive, "HTML import must re-derive sensitive");
+    }
+
+    #[test]
+    #[allow(clippy::uninlined_format_args)]
+    fn import_redisovers_sensitive_flag_on_files() {
+        // URI list with an embedded credential; tampered JSON says
+        // sensitive=false. The import path must re-derive it.
+        let list = "file:///tmp/a\npostgresql://admin:secret@db.example.com/x";
+        let json = format!(
+            r#"[
+                {{
+                    "id": 0,
+                    "content_hash": 0,
+                    "content": {:?},
+                    "mime_type": "text/uri-list",
+                    "content_type": "Files",
+                    "timestamp": "2026-01-01T00:00:00Z",
+                    "pinned": false,
+                    "starred": false,
+                    "source_app": null,
+                    "sensitive": false,
+                    "plain_text": null
+                }}
+            ]"#,
+            list
+        );
+        let db = make_db();
+        db.import_items(&json).unwrap();
+        let items = db.get_recent(10).unwrap();
+        assert!(items[0].sensitive, "files import must re-derive sensitive");
+    }
+
+    #[test]
+    fn import_drops_stale_sensitive_flag_on_safe_content() {
+        // JSON claims sensitive=true for plain text that is actually
+        // safe. The import path must clear the stale flag.
+        let json = r#"[
+            {
+                "id": 0,
+                "content_hash": 0,
+                "content": "Hello world",
+                "mime_type": "text/plain",
+                "content_type": "Text",
+                "timestamp": "2026-01-01T00:00:00Z",
+                "pinned": false,
+                "starred": false,
+                "source_app": null,
+                "sensitive": true,
+                "plain_text": null
+            }
+        ]"#;
+        let db = make_db();
+        db.import_items(json).unwrap();
+        let items = db.get_recent(10).unwrap();
+        assert!(
+            !items[0].sensitive,
+            "stale sensitive=true on safe content must be cleared"
+        );
+    }
+
+    // ── Encryption at rest ─────────────────────────────────────────────
+
+    fn tmp_data_dir() -> tempfile::TempDir {
+        tempfile::tempdir().expect("tempdir")
+    }
+
+    #[test]
+    fn insert_with_encryption_stores_ciphertext_not_plaintext() {
+        // A sensitive item inserted with encrypt_sensitive=true must
+        // be retrievable in encrypted form, and the on-disk row
+        // must not contain the plaintext. This is the
+        // no-plaintext-at-rest invariant the hardening pass
+        // requires.
+        let tmp = tmp_data_dir();
+        let mgr = crate::encryption::EncryptionManager::new(tmp.path()).unwrap();
+        let db = make_db();
+        let item = ClipboardItem::new_text("ghp_1234567890abcdefghij".to_string());
+        assert!(item.sensitive);
+        let plaintext = item.content.clone();
+
+        let id = db
+            .insert_with_encryption(&item, &mgr, true)
+            .expect("insert");
+
+        // 1. The DB row must not contain the plaintext in the
+        //    `content` column. (The content column is what a future
+        //    raw-SQL attacker would read; if it contains the
+        //    plaintext, encryption is broken.)
+        let stored: String = db
+            .conn
+            .query_row(
+                "SELECT content FROM clipboard_items WHERE id = ?1",
+                [id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_ne!(
+            stored, plaintext,
+            "content column must hold ciphertext, not plaintext"
+        );
+        assert!(
+            !stored.contains(&plaintext),
+            "content column must not contain the plaintext substring"
+        );
+        // 2. encrypted + version + redacted columns must be set.
+        let (encrypted, version, redacted): (i32, Option<i32>, Option<String>) = db
+            .conn
+            .query_row(
+                "SELECT encrypted, encryption_version, redacted_preview
+                 FROM clipboard_items WHERE id = ?1",
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(encrypted, 1);
+        assert_eq!(version, Some(1));
+        assert!(redacted.is_some(), "redacted_preview must be populated");
+    }
+
+    #[test]
+    fn insert_with_encryption_decrypts_at_boundary() {
+        // Round-trip: insert encrypted, read back through
+        // decrypt_item, get the original plaintext.
+        let tmp = tmp_data_dir();
+        let mgr = crate::encryption::EncryptionManager::new(tmp.path()).unwrap();
+        let db = make_db();
+        let item = ClipboardItem::new_text("postgresql://u:secret@host/db".to_string());
+        let original = item.content.clone();
+        let id = db
+            .insert_with_encryption(&item, &mgr, true)
+            .expect("insert");
+
+        let stored = db.get_by_id(id).unwrap().unwrap();
+        assert!(stored.encrypted);
+        let decrypted = db.decrypt_item(&stored, &mgr).unwrap();
+        assert_eq!(decrypted.content, original);
+    }
+
+    #[test]
+    fn insert_with_encryption_persists_across_restart() {
+        // After "restart" (new manager reading the same key file),
+        // encrypted rows must still decrypt.
+        let tmp = tmp_data_dir();
+        let mgr1 = crate::encryption::EncryptionManager::new(tmp.path()).unwrap();
+        let db = make_db();
+        let item = ClipboardItem::new_text("hunter2-not-sensitive".to_string());
+        // Force the test fixture to be sensitive so the
+        // encrypt_sensitive=true path is actually exercised.
+        let mut sensitive_item = item.clone();
+        sensitive_item.sensitive = true;
+        let _ = db
+            .insert_with_encryption(&sensitive_item, &mgr1, true)
+            .unwrap();
+
+        // Simulate restart.
+        let mgr2 = crate::encryption::EncryptionManager::new(tmp.path()).unwrap();
+        let items = db.get_recent(10).unwrap();
+        assert_eq!(items.len(), 1);
+        // Sensitive + encrypt_sensitive=true item must be encrypted.
+        assert!(items[0].encrypted);
+        let decrypted = db.decrypt_item(&items[0], &mgr2).unwrap();
+        assert_eq!(decrypted.content, sensitive_item.content);
+    }
+
+    #[test]
+    fn insert_with_encryption_wrong_key_fails_safely() {
+        // Decrypting with a manager from a different data dir must
+        // fail rather than return garbage. This protects against
+        // the user moving the database to a new machine / user
+        // account and getting a silent tamper.
+        let tmp1 = tmp_data_dir();
+        let tmp2 = tmp_data_dir();
+        let mgr1 = crate::encryption::EncryptionManager::new(tmp1.path()).unwrap();
+        let mgr2 = crate::encryption::EncryptionManager::new(tmp2.path()).unwrap();
+
+        let db = make_db();
+        let item = ClipboardItem::new_text("ghp_secret_value".to_string());
+        let _ = db
+            .insert_with_encryption(&item, &mgr1, true)
+            .expect("insert");
+        let stored = db.get_recent(10).unwrap();
+        assert_eq!(stored.len(), 1);
+
+        let result = db.decrypt_item(&stored[0], &mgr2);
+        assert!(
+            result.is_err(),
+            "decryption with a foreign key must fail rather than return plaintext"
+        );
+    }
+
+    #[test]
+    fn insert_with_encryption_flag_false_stores_plaintext() {
+        // With encrypt_sensitive=false, sensitive items are still
+        // stored as plaintext (the user has opted out). This is the
+        // expected behavior — the flag is opt-in.
+        let tmp = tmp_data_dir();
+        let mgr = crate::encryption::EncryptionManager::new(tmp.path()).unwrap();
+        let db = make_db();
+        let item = ClipboardItem::new_text("sk-abc123xyz".to_string());
+        assert!(item.sensitive);
+        let id = db
+            .insert_with_encryption(&item, &mgr, false)
+            .expect("insert");
+
+        let stored: String = db
+            .conn
+            .query_row(
+                "SELECT content FROM clipboard_items WHERE id = ?1",
+                [id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            stored, "sk-abc123xyz",
+            "plaintext must be stored when opt-out"
+        );
+
+        let (encrypted, redacted): (i32, Option<String>) = db
+            .conn
+            .query_row(
+                "SELECT encrypted, redacted_preview FROM clipboard_items WHERE id = ?1",
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(encrypted, 0);
+        assert!(redacted.is_none());
+    }
+
+    #[test]
+    fn redacted_preview_helper_is_safe_for_sensitive_items() {
+        // The helper must never echo the plaintext back, even
+        // partially. A UI that uses this helper is safe by
+        // construction.
+        let item = ClipboardItem::new_text("MyP@ssw0rd!hunter2".to_string());
+        let preview = item.redacted_preview();
+        assert!(!preview.contains("MyP"));
+        assert!(!preview.contains("hunter"));
+        assert!(preview.contains("Sensitive"));
+    }
+
+    #[test]
+    fn export_items_redacts_encrypted_content() {
+        // When exporting, encrypted items must not leak ciphertext.
+        // The export must use redacted_preview instead of content.
+        let tmp = tmp_data_dir();
+        let mgr = crate::encryption::EncryptionManager::new(tmp.path()).unwrap();
+        let db = make_db();
+
+        // Insert an encrypted sensitive item
+        let item = ClipboardItem::new_text("ghp_secretToken123456".to_string());
+        assert!(item.sensitive);
+        db.insert_with_encryption(&item, &mgr, true)
+            .expect("insert encrypted");
+
+        // Export and verify the ciphertext is not in the JSON
+        let json = db.export_items().unwrap();
+
+        // The plaintext must not appear in the export
+        assert!(
+            !json.contains("ghp_secretToken123456"),
+            "export must not contain plaintext of encrypted item"
+        );
+
+        // The ciphertext (base64) must not appear either
+        let stored_item = db.get_recent(1).unwrap().pop().unwrap();
+        assert!(stored_item.encrypted);
+        // The ciphertext is base64 encoded, so it should be longer than plaintext
+        // and contain chars like +/= that plaintext wouldn't have
+        assert!(
+            !json.contains(&stored_item.content),
+            "export must not contain ciphertext of encrypted item"
+        );
+
+        // The redacted marker should be present
+        assert!(json.contains("Sensitive item") || json.contains("••••"));
+    }
+
+    #[test]
+    fn search_results_mask_encrypted_content() {
+        // Encrypted content is NOT searchable (by design). This test
+        // verifies that:
+        // 1. An encrypted item's original plaintext is NOT found via search
+        // 2. The item's encrypted flag is correctly set
+        // 3. If we retrieve the item directly, it's properly encrypted
+        let tmp = tmp_data_dir();
+        let mgr = crate::encryption::EncryptionManager::new(tmp.path()).unwrap();
+        let db = make_db();
+
+        // Insert an encrypted sensitive item
+        let item = ClipboardItem::new_text("AKIAIOSFODNN7EXAMPLE".to_string());
+        assert!(item.sensitive);
+        db.insert_with_encryption(&item, &mgr, true)
+            .expect("insert encrypted");
+
+        // Search for part of the original plaintext - should NOT find it
+        // because encrypted content is not indexed
+        let results = db.search("AKIA", 10).unwrap();
+        assert_eq!(
+            results.len(),
+            0,
+            "encrypted content must not be searchable (plaintext not indexed)"
+        );
+
+        // But the item exists and is retrievable
+        let all_items = db.get_recent(10).unwrap();
+        assert_eq!(all_items.len(), 1);
+        assert!(all_items[0].encrypted, "item must be marked as encrypted");
+
+        // And we can decrypt it back to original plaintext
+        let decrypted = db.decrypt_item(&all_items[0], &mgr).unwrap();
+        assert_eq!(
+            decrypted.content, "AKIAIOSFODNN7EXAMPLE",
+            "decrypted content must match original plaintext"
+        );
     }
 }

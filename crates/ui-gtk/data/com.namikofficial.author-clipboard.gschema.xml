@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist gettext-domain="author-clipboard">
+  <enum id="com.namikofficial.author-clipboard.AcFilter">
+    <value value="0" nick="all" />
+    <value value="1" nick="text" />
+    <value value="2" nick="images" />
+    <value value="3" nick="files" />
+    <value value="4" nick="pinned" />
+    <value value="5" nick="starred" />
+    <value value="6" nick="sensitive" />
+  </enum>
+  <enum id="com.namikofficial.author-clipboard.AcSort">
+    <value value="0" nick="newest" />
+    <value value="1" nick="oldest" />
+    <value value="2" nick="most-used" />
+  </enum>
+  <enum id="com.namikofficial.author-clipboard.AcPage">
+    <value value="0" nick="clipboard" />
+    <value value="1" nick="emoji" />
+    <value value="2" nick="symbols" />
+    <value value="3" nick="kaomoji" />
+    <value value="4" nick="snippets" />
+    <value value="5" nick="settings" />
+  </enum>
+  <schema id="com.namikofficial.author-clipboard.state"
+          path="/com/namikofficial/author-clipboard/state/">
+    <key name="filter" enum="com.namikofficial.author-clipboard.AcFilter">
+      <default>"all"</default>
+      <summary>Active filter chip</summary>
+    </key>
+    <key name="sort" enum="com.namikofficial.author-clipboard.AcSort">
+      <default>"newest"</default>
+      <summary>Sort order</summary>
+    </key>
+    <key name="last-page" enum="com.namikofficial.author-clipboard.AcPage">
+      <default>"clipboard"</default>
+      <summary>Last visited page in manager window</summary>
+    </key>
+    <key name="window-width" type="i">
+      <default>1100</default>
+      <summary>Manager window width</summary>
+    </key>
+    <key name="window-height" type="i">
+      <default>720</default>
+      <summary>Manager window height</summary>
+    </key>
+    <key name="popup-width" type="i">
+      <default>720</default>
+      <summary>Popup window width</summary>
+    </key>
+    <key name="popup-height" type="i">
+      <default>520</default>
+      <summary>Popup window height</summary>
+    </key>
+  </schema>
+</schemalist>

@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::{Context, Result};
 use author_clipboard_shared::clipboard;
 use author_clipboard_shared::config::Config;
+use author_clipboard_shared::encryption::EncryptionManager;
 use author_clipboard_shared::image_store;
 use author_clipboard_shared::ipc::{
     remove_ipc_socket, CopyMode, IpcCommand, IpcMessage, IpcRequest, IpcResponse, IpcServer,
@@ -48,10 +49,16 @@ struct AppState {
     db: Database,
     /// Application configuration.
     config: Config,
+    /// Encryption manager for sensitive content at rest (shared via Arc).
+    encryption_manager: Arc<Option<EncryptionManager>>,
 }
 
 impl AppState {
-    fn new(db: Database, config: Config) -> Self {
+    fn new(
+        db: Database,
+        config: Config,
+        encryption_manager: Arc<Option<EncryptionManager>>,
+    ) -> Self {
         Self {
             manager: None,
             seat: None,
@@ -60,6 +67,7 @@ impl AppState {
             last_content: None,
             db,
             config,
+            encryption_manager,
         }
     }
 
@@ -72,6 +80,21 @@ impl AppState {
                 self.device = Some(device);
             }
         }
+    }
+
+    /// Insert a clipboard item, encrypting it at rest if sensitive and encryption is enabled.
+    fn insert_item(&self, item: &ClipboardItem) -> anyhow::Result<i64> {
+        if self.config.encrypt_sensitive && item.sensitive {
+            if let Some(ref manager) = *self.encryption_manager {
+                return self
+                    .db
+                    .insert_with_encryption(item, manager, true)
+                    .map_err(|e| anyhow::anyhow!("Encryption insert failed: {e}"));
+            }
+        }
+        self.db
+            .insert_or_bump(item, self.config.dedup_window_seconds)
+            .map_err(|e| anyhow::anyhow!("DB insert failed: {e}"))
     }
 
     /// Read raw bytes from a clipboard offer via a pipe.
@@ -231,10 +254,7 @@ impl Dispatch<ZwlrDataControlDeviceV1, ()> for AppState {
                                             hash,
                                         );
 
-                                        match state.db.insert_or_bump(
-                                            &item,
-                                            state.config.dedup_window_seconds,
-                                        ) {
+                                        match state.insert_item(&item) {
                                             Ok(_) => info!(
                                                 "🖼️  Stored image: {filename} ({} bytes, {mime})",
                                                 data.len()
@@ -286,10 +306,7 @@ impl Dispatch<ZwlrDataControlDeviceV1, ()> for AppState {
 
                                     let item =
                                         ClipboardItem::new_html(html_content.clone(), plain_text);
-                                    match state
-                                        .db
-                                        .insert_or_bump(&item, state.config.dedup_window_seconds)
-                                    {
+                                    match state.insert_item(&item) {
                                         Ok(_) => info!("📄 Stored HTML: {preview}"),
                                         Err(e) => warn!("DB insert failed for HTML: {e}"),
                                     }
@@ -326,10 +343,7 @@ impl Dispatch<ZwlrDataControlDeviceV1, ()> for AppState {
                                         .count();
 
                                     let item = ClipboardItem::new_files(file_list.clone());
-                                    match state
-                                        .db
-                                        .insert_or_bump(&item, state.config.dedup_window_seconds)
-                                    {
+                                    match state.insert_item(&item) {
                                         Ok(_) => {
                                             info!("📁 Stored file list ({file_count} files)");
                                         }
@@ -371,10 +385,7 @@ impl Dispatch<ZwlrDataControlDeviceV1, ()> for AppState {
 
                                     let item = ClipboardItem::new_text(content.clone());
 
-                                    match state
-                                        .db
-                                        .insert_or_bump(&item, state.config.dedup_window_seconds)
-                                    {
+                                    match state.insert_item(&item) {
                                         Ok(_) => {
                                             if item.sensitive {
                                                 info!(
@@ -498,10 +509,16 @@ struct IpcHandlerState {
     visibility_path: std::path::PathBuf,
     subscriptions: Arc<Mutex<Vec<Subscription>>>,
     next_sub_id: Arc<Mutex<u64>>,
+    encryption_manager: Arc<Option<EncryptionManager>>,
 }
 
 impl IpcHandlerState {
-    fn new(db: Database, config: Config, data_dir: std::path::PathBuf) -> Self {
+    fn new(
+        db: Database,
+        config: Config,
+        data_dir: std::path::PathBuf,
+        encryption_manager: Arc<Option<EncryptionManager>>,
+    ) -> Self {
         let visibility_path = data_dir.join(".visibility_toggle");
         Self {
             db: Arc::new(Mutex::new(db)),
@@ -510,6 +527,7 @@ impl IpcHandlerState {
             visibility_path,
             subscriptions: Arc::new(Mutex::new(Vec::new())),
             next_sub_id: Arc::new(Mutex::new(1)),
+            encryption_manager,
         }
     }
 
@@ -764,7 +782,7 @@ impl IpcHandlerState {
             }
 
             // ── Mutations ────────────────────────────────────────────────
-            IpcCommand::Copy { id, mode } => {
+            IpcCommand::Copy { id, mode, mime } => {
                 let db = self.db.lock().unwrap();
                 let item = match db.get_by_id(id) {
                     Ok(Some(item)) => item,
@@ -774,6 +792,29 @@ impl IpcHandlerState {
                     Err(e) => {
                         return IpcResponse::err("DB_ERROR", format!("Failed to get item: {e}"))
                     }
+                };
+
+                // Decrypt item if encrypted (for sensitive items stored with encryption)
+                let item = if item.encrypted {
+                    if let Some(ref manager) = *self.encryption_manager {
+                        match db.decrypt_item(&item, manager) {
+                            Ok(decrypted) => decrypted,
+                            Err(e) => {
+                                return IpcResponse::err(
+                                    "DECRYPT_ERROR",
+                                    format!("Failed to decrypt item: {e}"),
+                                )
+                            }
+                        }
+                    } else {
+                        // Encryption manager not available but item is encrypted - this shouldn't happen
+                        return IpcResponse::err(
+                            "DECRYPT_ERROR",
+                            "Item is encrypted but encryption manager is not available".to_string(),
+                        );
+                    }
+                } else {
+                    item
                 };
                 drop(db);
 
@@ -806,7 +847,7 @@ impl IpcHandlerState {
                         }
                         IpcResponse::ok(serde_json::json!({
                             "id": id,
-                            "mime_type": result.mime_type,
+                            "mime_type": mime.unwrap_or(result.mime_type),
                             "behavior": result.behavior,
                             "sensitive_confirmed": false,
                         }))
@@ -1088,25 +1129,36 @@ impl IpcHandlerState {
     }
 
     /// Convert a clipboard item to JSON, applying sensitivity masking.
+    /// For encrypted items, uses the pre-computed `redacted_preview` to avoid
+    /// leaking ciphertext in the UI.
     fn item_to_json(&self, item: &ClipboardItem) -> serde_json::Value {
         let show_sensitive = self.config.picker.show_sensitive_previews;
-        let content = if item.sensitive && !show_sensitive {
-            "••••••••".to_string()
-        } else {
-            item.content.clone()
-        };
-        let plain_text = if item.sensitive && !show_sensitive {
-            "••••••••".to_string()
-        } else {
-            item.plain_text.clone().unwrap_or_default()
-        };
-        let preview = if item.sensitive && !show_sensitive {
-            "••••••••".to_string()
-        } else if item.content.len() > 80 {
-            format!("{}...", &item.content[..80])
-        } else {
-            item.content.clone()
-        };
+
+        // For encrypted items, use the pre-computed redacted_preview.
+        // This avoids ever passing ciphertext to the UI.
+        let (content, plain_text, preview, encrypted) =
+            if item.encrypted || (item.sensitive && !show_sensitive) {
+                // Use redacted preview for encrypted or sensitive items
+                let redacted = if item.encrypted {
+                    item.redacted_preview
+                        .clone()
+                        .unwrap_or_else(|| "••••••••".to_string())
+                } else {
+                    "••••••••".to_string()
+                };
+                (redacted.clone(), redacted.clone(), redacted, item.encrypted)
+            } else {
+                (
+                    item.content.clone(),
+                    item.plain_text.clone().unwrap_or_default(),
+                    if item.content.len() > 80 {
+                        format!("{}...", &item.content[..80])
+                    } else {
+                        item.content.clone()
+                    },
+                    item.encrypted,
+                )
+            };
 
         serde_json::json!({
             "id": item.id,
@@ -1118,6 +1170,7 @@ impl IpcHandlerState {
             "pinned": item.pinned,
             "source_app": item.source_app,
             "sensitive": item.sensitive,
+            "encrypted": encrypted,
             "plain_text": plain_text,
             "preview": preview,
         })
@@ -1277,7 +1330,30 @@ fn run() -> Result<()> {
 
     // Spawn IPC server thread for shortcut activation (with separate DB connection)
     let ipc_db = Database::open(&config.db_path()).context("Failed to open IPC database")?;
-    let ipc_state = IpcHandlerState::new(ipc_db, config.clone(), config.data_dir.clone());
+
+    // Initialize encryption manager if encrypt_sensitive is enabled.
+    // If initialization fails, we continue without encryption (items stored as plaintext).
+    let encryption_manager: Arc<Option<EncryptionManager>> = if config.encrypt_sensitive {
+        match EncryptionManager::new(&config.data_dir) {
+            Ok(mgr) => {
+                info!("Encryption manager initialized (sensitive items will be encrypted at rest)");
+                Arc::new(Some(mgr))
+            }
+            Err(e) => {
+                warn!("Failed to initialize encryption manager: {}. Sensitive items will be stored as plaintext.", e);
+                Arc::new(None)
+            }
+        }
+    } else {
+        Arc::new(None)
+    };
+
+    let ipc_state = IpcHandlerState::new(
+        ipc_db,
+        config.clone(),
+        config.data_dir.clone(),
+        Arc::clone(&encryption_manager),
+    );
     spawn_ipc_server(ipc_state);
 
     let conn = Connection::connect_to_env().context(
@@ -1290,7 +1366,7 @@ fn run() -> Result<()> {
     let mut event_queue: EventQueue<AppState> = conn.new_event_queue();
     let qh = event_queue.handle();
 
-    let mut state = AppState::new(db, config);
+    let mut state = AppState::new(db, config, Arc::clone(&encryption_manager));
 
     // Trigger global advertisement
     display.get_registry(&qh, ());

@@ -45,13 +45,19 @@ impl std::str::FromStr for ContentType {
 }
 
 /// Represents a single clipboard entry
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(clippy::struct_excessive_bools)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ClipboardItem {
     /// Unique identifier
     pub id: i64,
     /// Hash of the content for deduplication
     pub content_hash: u64,
     /// The actual content (text) or file path (images)
+    ///
+    /// If `encrypted` is true, this holds the base64(nonce || ct)
+    /// ciphertext and must not be displayed, logged, or exported
+    /// without going through the `EncryptionManager`. Use
+    /// `redacted_preview` for safe display.
     pub content: String,
     /// MIME type (e.g., "text/plain", "image/png")
     pub mime_type: String,
@@ -68,7 +74,25 @@ pub struct ClipboardItem {
     /// Whether this item contains sensitive content
     pub sensitive: bool,
     /// Plain text representation for search indexing (used for HTML items)
+    ///
+    /// If `encrypted` is true, this is also ciphertext and must
+    /// not be displayed / logged / searched without going through
+    /// the `EncryptionManager`.
+    #[serde(default)]
     pub plain_text: Option<String>,
+    /// Whether the `content` (and `plain_text`, if any) is stored
+    /// as ciphertext. Defaults to `false` (plaintext at rest).
+    #[serde(default)]
+    pub encrypted: bool,
+    /// Cipher scheme version used to encrypt the row, or `None`
+    /// when `encrypted` is false. Currently always `Some(1)`.
+    #[serde(default)]
+    pub encryption_version: Option<i32>,
+    /// Redacted placeholder used by UIs and exports so they never
+    /// have to decrypt the row to render a list item.
+    /// `None` for non-sensitive items.
+    #[serde(default)]
+    pub redacted_preview: Option<String>,
 }
 
 impl ClipboardItem {
@@ -87,6 +111,9 @@ impl ClipboardItem {
             source_app: None,
             sensitive,
             plain_text: None,
+            encrypted: false,
+            encryption_version: None,
+            redacted_preview: None,
         }
     }
 
@@ -105,12 +132,23 @@ impl ClipboardItem {
             source_app: None,
             sensitive: false,
             plain_text: None,
+            encrypted: false,
+            encryption_version: None,
+            redacted_preview: None,
         }
     }
 
     /// Create a new HTML clipboard item with both HTML content and plain text for search.
+    ///
+    /// `html_content` is the raw `text/html` payload, `plain_text` is the
+    /// browser-provided `text/plain` companion. Sensitive detection runs
+    /// on the plain text, on the tag-stripped HTML body, on every quoted
+    /// attribute value, and on the raw HTML — see
+    /// `crate::sensitive::check_sensitive_html`.
     pub fn new_html(html_content: String, plain_text: String) -> Self {
         let content_hash = Self::hash_content(&html_content);
+        let sensitive =
+            crate::sensitive::check_sensitive_html(&html_content, &plain_text).is_sensitive;
         Self {
             id: 0,
             content_hash,
@@ -121,15 +159,22 @@ impl ClipboardItem {
             pinned: false,
             starred: false,
             source_app: None,
-            sensitive: false,
+            sensitive,
             plain_text: Some(plain_text),
+            encrypted: false,
+            encryption_version: None,
+            redacted_preview: None,
         }
     }
 
     /// Create a new file list clipboard item.
-    /// `file_list` is the raw text/uri-list content.
+    /// `file_list` is the raw text/uri-list content. Sensitive
+    /// detection runs on the full URI list so that URIs with embedded
+    /// credentials (e.g. `postgresql://user:pass@host/db`) are
+    /// flagged the same way as a plain-text credential.
     pub fn new_files(file_list: String) -> Self {
         let content_hash = Self::hash_content(&file_list);
+        let sensitive = crate::sensitive::check_sensitivity(&file_list).is_sensitive;
         Self {
             id: 0,
             content_hash,
@@ -140,8 +185,11 @@ impl ClipboardItem {
             pinned: false,
             starred: false,
             source_app: None,
-            sensitive: false,
+            sensitive,
             plain_text: None,
+            encrypted: false,
+            encryption_version: None,
+            redacted_preview: None,
         }
     }
 
@@ -199,6 +247,41 @@ impl ClipboardItem {
             Some(data_dir.join("images").join(&self.content))
         } else {
             None
+        }
+    }
+
+    /// Build a redacted preview string suitable for sensitive items.
+    ///
+    /// Used for:
+    /// - the `redacted_preview` DB column (set at insert time when
+    ///   the item is encrypted at rest),
+    /// - UIs that want to display a placeholder without decrypting,
+    /// - exports that must never include sensitive plaintext by
+    ///   default.
+    ///
+    /// The shape is `••••••••••••••••` for text / html / files, and
+    /// `Image (redacted)` / `Files (redacted)` for image / file-list
+    /// items, so the caller can show a small badge of the content
+    /// type without ever touching the plaintext.
+    pub fn redacted_preview(&self) -> String {
+        match self.content_type {
+            ContentType::Image => "Image (redacted)".to_string(),
+            ContentType::Files => "File list (redacted)".to_string(),
+            ContentType::Html | ContentType::Text => {
+                if self.sensitive {
+                    "•••••••••••••••• Sensitive item — reveal to copy".to_string()
+                } else {
+                    // Non-sensitive: caller should not normally be
+                    // calling this, but we still produce a safe
+                    // preview (first 80 chars) for accidental calls.
+                    let trimmed = self.content.trim();
+                    if trimmed.len() > 80 {
+                        format!("{}…", &trimmed[..80])
+                    } else {
+                        trimmed.to_string()
+                    }
+                }
+            }
         }
     }
 
@@ -269,7 +352,7 @@ pub struct AuditEvent {
 }
 
 /// A user-defined text snippet for quick reuse
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Snippet {
     pub id: i64,
     pub name: String,

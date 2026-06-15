@@ -2,23 +2,23 @@
 name = "author-clipboard-applet"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
 description.workspace = true
+homepage.workspace = true
 
 [[bin]]
 name = "author-clipboard"
 path = "src/main.rs"
 
-[lints]
-workspace = true
-
 [dependencies]
-author-clipboard-shared = { path = "../shared" }
+author-clipboard-ui-gtk = { path = "../ui-gtk" }
+anyhow.workspace = true
+clap.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
-anyhow.workspace = true
-chrono.workspace = true
-libcosmic.workspace = true
 
 [package.metadata.deb]
 name = "author-clipboard"
@@ -26,11 +26,10 @@ maintainer = "Namik <author-clipboard@namik.dev>"
 copyright = "2024 Namik"
 license-file = ["../../LICENSE", "4"]
 extended-description = """\
-Author Clipboard is a native COSMIC clipboard manager with wlroots compositor
-support, including Hyprland and Sway. It monitors your clipboard history,
-provides instant full-text search, and keeps sensitive data safe with automatic
-detection and optional encryption. Requires Wayland with wlr-data-control
-protocol support."""
+Author Clipboard is a native GTK4 clipboard manager for Wayland compositors,
+including COSMIC, Hyprland, and Sway. It monitors clipboard history, provides
+full-text search, and protects sensitive data with automatic detection and
+optional encryption."""
 depends = "$auto, libwayland-client0 (>= 1.20), libxkbcommon0 (>= 1.0)"
 section = "utils"
 priority = "optional"
@@ -47,3 +46,6 @@ assets = [
     { source = "../../LICENSE", dest = "usr/share/doc/author-clipboard/LICENSE", mode = "644" },
     { source = "../../CHANGELOG.md", dest = "usr/share/doc/author-clipboard/CHANGELOG.md", mode = "644" },
 ]
+
+[lints]
+workspace = true

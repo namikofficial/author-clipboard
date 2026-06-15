@@ -27,12 +27,37 @@ docker run --rm -v "$PWD":/work -w /work archlinux:latest \
 ```
 
 ## T-003: Improve release.yml
-**Goal**: Build the full workspace, build the `.deb`, generate `SHA256SUMS`, conditionally sign with GPG, and attach `*.deb`, `*-linux-x86_64.tar.xz`, `SHA256SUMS` (and `.asc` if signed), plus the AUR bundle.
+**Goal**: On an explicit `vX.Y.Z` tag, validate version parity, build the full workspace and packages, then publish complete release artifacts without writing a version bump to `main`.
 **Files**: `.github/workflows/release.yml`
 **Verify**:
 ```bash
 # Local sim: read the workflow and ensure all steps are present
 yq '.jobs.release.steps[].name' .github/workflows/release.yml
+```
+
+## T-013: Restore PR packaging gates
+**Goal**: Pull requests build and inspect the Debian package, build the Arch
+package, and fail if `.SRCINFO` is not generated from the committed `PKGBUILD`.
+**Files**: `.github/workflows/ci.yml`, `packaging/arch/PKGBUILD`,
+`packaging/arch/.SRCINFO`
+**Verify**:
+```bash
+cargo deb -p author-clipboard-applet --no-build
+dpkg-deb -c target/debian/author-clipboard_*.deb
+cd packaging/arch && makepkg --printsrcinfo > .SRCINFO.new
+diff -u .SRCINFO .SRCINFO.new
+```
+
+## T-014: Make packaging gates portable across GitHub runners
+**Goal**: Ubuntu jobs install a pinned gtk4-layer-shell build when the distro
+package is unavailable, and Arch jobs execute `makepkg` as an unprivileged
+builder.
+**Files**: `.github/workflows/ci.yml`, `.github/workflows/release.yml`
+**Verify**:
+```bash
+yq '.' .github/workflows/ci.yml >/dev/null
+yq '.' .github/workflows/release.yml >/dev/null
+gh pr checks 5
 ```
 
 ## T-004: Add Flatpak manifest
@@ -97,4 +122,4 @@ just lint
 
 ---
 
-**Last Updated**: 2026-06-08
+**Last Updated**: 2026-06-15

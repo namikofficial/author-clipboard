@@ -60,30 +60,29 @@
   </keywords>
 
   <releases>
-    <release version="0.5.0" date="2026-05-31">
-      <description>
-        <p>Documentation alignment, Hyprland setup guidance, wlroots support matrix,
-        compositor detection cleanup, packaging notes, and privacy-safe audit metadata.</p>
-      </description>
-    </release>
-    <release version="0.4.0" date="2026-03-02">
-      <description>
-        <p>FTS5 search, WAL mode, per-item TTL, dedup controls, systemd packaging,
-        SECURITY.md, screen lock detection, deb packaging support, snippets,
-        denylist rules, and X11 detection.</p>
-      </description>
-    </release>
-    <release version="0.3.1" date="2025-01-01">
+    <release version="0.3.1" date="2026-03-02">
       <description>
         <p>Bug fixes: scroll position, layout, URI credential detection, IPC security hardening.</p>
       </description>
     </release>
-    <release version="0.3.0" date="2024-12-01">
+    <release version="0.3.0" date="2026-03-01">
       <description>
-        <p>Phase 9-10: COSMIC native icons and advanced keyboard navigation.</p>
+        <p>Phases 9-10: COSMIC native icons and advanced keyboard navigation.</p>
+      </description>
+    </release>
+    <release version="0.2.0" date="2026-03-01">
+      <description>
+        <p>Initial pre-release on crates.io path; GTK picker prototype.</p>
       </description>
     </release>
   </releases>
+
+  <!--
+    NOTE: 0.4.0 and 0.5.0 were developed on the `dev` branch but were
+    never tagged or released. New `<release>` entries must only be added
+    at the moment a `v<version>` git tag is pushed and the GitHub
+    release is published. See CHANGELOG.md and docs/RELEASING.md.
+  -->
 
   <content_rating type="oars-1.1" />
 
