@@ -34,7 +34,7 @@
 - [x] `just fmt-check` passes.
 - [x] `just lint` passes (no new warnings on applet, shared, daemon, ctl, mcp-server).
 - [x] `cargo test` for shared crate passes.
-- [ ] PR Rust, Debian, and Arch jobs are green for the current head SHA.
+- [x] PR Rust, Debian, and Arch jobs are green for the current head SHA.
 
 ## Security & Privacy
 
