@@ -130,6 +130,10 @@ jobs:
     container:
       image: archlinux:latest
     steps:
+      - name: Install Git for checkout
+        shell: bash
+        run: pacman -Sy --noconfirm --needed git
+
       - uses: actions/checkout@v4
 
       - name: Install package dependencies

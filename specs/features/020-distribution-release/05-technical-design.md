@@ -94,7 +94,9 @@ only needs the native library and pkg-config metadata.
 The Arch container may install dependencies and generate the source archive as
 root, but it changes workspace ownership and invokes `makepkg` through
 `runuser -u builder`. Workflow steps use Bash explicitly so strict mode and
-variable handling are consistent inside the container.
+variable handling are consistent inside the container. Git is installed before
+`actions/checkout` so the action creates a real repository instead of falling
+back to an extracted source archive without `.git` metadata.
 
 ## Failure Modes
 

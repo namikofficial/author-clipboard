@@ -55,4 +55,12 @@ workspace ownership.
 **Reason**: `makepkg` intentionally rejects root execution. The explicit user
 boundary matches normal Arch packaging behavior.
 
+## D-008: Install Git before checkout in Arch containers
+
+**Decision**: Arch jobs install Git before invoking `actions/checkout`.
+
+**Reason**: The minimal Arch image does not include Git. Without it, checkout
+falls back to an extracted archive and the packaging job cannot create its
+versioned source archive from `HEAD`.
+
 **Last Updated**: 2026-06-15
