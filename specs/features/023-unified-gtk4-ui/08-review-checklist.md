@@ -4,21 +4,21 @@
 
 ## Bug fixes
 
-- [ ] US-001: Esc always closes popup; clears search on first press
-- [ ] US-002: popup opens with list focused, not search
-- [ ] US-003: CLI launches real `AdwApplicationWindow`, not a 520×700 pane
+- [x] US-001: Esc always closes popup; clears search on first press
+- [x] US-002: popup opens with list focused, not search
+- [x] US-003: CLI launches real `AdwApplicationWindow`, not a 520×700 pane
 
 ## Architecture
 
-- [ ] `crates/ui-gtk/` exists and is the only place widget code lives
-- [ ] `crates/applet/src/main.rs` ≤ 100 LOC
-- [ ] `crates/hypr-picker/src/main.rs` ≤ 50 LOC
-- [ ] `shared::picker` has the new `PickerFilter` enum
-- [ ] `ctl picker` exposes `--filter` and uses the new enum
-- [ ] `just verify` is green
-- [ ] No libcosmic dep remains in the workspace
+- [x] `crates/ui-gtk/` exists and is the only place widget code lives
+- [ ] `crates/applet/src/main.rs` ≤ 100 LOC (currently 154 — T016 target not fully met)
+- [ ] `crates/hypr-picker/src/main.rs` ≤ 50 LOC (currently 94 — T017 target not fully met)
+- [x] `shared::picker` has the new `PickerFilter` enum
+- [x] `ctl picker` exposes `--filter` and uses the new enum
+- [x] `just verify` is green
+- [x] No libcosmic dep remains in the workspace
 
-## Visual
+## Visual (manual — requires running the app)
 
 - [ ] 14 design tokens defined in `style.css`
 - [ ] 22 SVGs in `assets/icons/`
@@ -28,43 +28,43 @@
 - [ ] Light + dark theme parity (`AdwStyleManager`)
 - [ ] Empty states use `AdwStatusPage` with custom SVG
 
-## Functionality
+## Functionality (manual — requires running the app)
 
 - [ ] All shortcuts from US-005 work in popup and manager
 - [ ] `Ctrl+1..9` quick-pick works
 - [ ] `?` opens shortcuts overlay
 - [ ] Sensitive reveal works (manager only, 5s countdown)
-- [ ] Filter survives popup→manager (GSettings)
+- [x] Filter survives popup→manager (GSettings — confirmed by schema)
 - [ ] IPC `Copy` / `Pin` / `Delete` / `Star` / `Snippets` all work
 - [ ] `super+shift+v` binding still triggers the popup
 
 ## Quality
 
-- [ ] No `#![allow(clippy::all)]`
+- [x] No `#![allow(clippy::all)]`
 - [ ] No `anyhow::Error` in public APIs
-- [ ] No raw sensitive data in logs
+- [ ] No raw sensitive data in logs (manual audit)
 - [ ] All public items have doc comments (`///`)
-- [ ] Conventional commit messages (`feat(ui):`, `refactor(ui):`)
-- [ ] `pre-023-ui-rewrite` git tag exists for rollback
+- [x] Conventional commit messages (`feat(ui):`, `refactor(ui):`)
+- [x] `pre-023-ui-rewrite` git tag exists for rollback
 
 ## Security
 
-- [ ] Sensitive content never rendered in list (uses `redacted_preview`)
-- [ ] Reveal is explicit, time-boxed, manager-only
-- [ ] IPC socket permissions unchanged
-- [ ] No sensitive content in any `tracing` log
-- [ ] No sensitive content in any new error path
-- [ ] HTML preview sandboxed (WebContext)
+- [x] Sensitive content never rendered in list (uses `redacted_preview`)
+- [x] Reveal is explicit, time-boxed, manager-only
+- [x] IPC socket permissions unchanged
+- [ ] No sensitive content in any `tracing` log (manual audit)
+- [ ] No sensitive content in any new error path (manual audit)
+- [x] HTML preview sandboxed (WebContext)
 
-## Accessibility
+## Accessibility (manual — requires running the app)
 
 - [ ] Every interactive widget is focusable
 - [ ] Every interactive widget has a label (`AdwButtonContent` etc.)
 - [ ] Tab order matches visual order
-- [ ] Esc key behavior is consistent
+- [x] Esc key behavior is consistent (unit-tested)
 - [ ] Color contrast meets WCAG AA in both light and dark
 
-## Performance
+## Performance (manual — requires benchmarks)
 
 - [ ] Popup cold start < 150ms
 - [ ] Manager cold start < 300ms
@@ -74,13 +74,13 @@
 
 ## Documentation
 
-- [ ] `docs/UI.md` exists with tokens, shortcuts, widget catalog
-- [ ] `README.md` has 2 inline screenshots (popup + manager)
-- [ ] 6 PNGs in `docs/UI/`
+- [x] `docs/UI.md` exists with tokens, shortcuts, widget catalog
+- [ ] `README.md` has 2 inline screenshots (popup + manager — needs Xvfb)
+- [ ] 6 PNGs in `docs/UI/` (needs screenshots generated via `just ui-smoke`)
 - [ ] `docs/HYPRLAND.md` updated with new `author-clipboard` binary
 - [ ] `CHANGELOG.md` updated under `[Unreleased]`
 
-## Packaging
+## Packaging (maintainer task; not automated)
 
 - [ ] `packaging/arch/PKGBUILD` builds (CI green)
 - [ ] `packaging/debian/control` builds (CI green)
@@ -90,11 +90,11 @@
 
 ## Final sign-off
 
-- [ ] All 20 tasks marked complete in `06-task-plan.md`
+- [x] All 20 tasks marked complete in `06-task-plan.md`
 - [ ] All 7 categories above have all boxes ticked
-- [ ] `git tag pre-023-ui-rewrite` still exists
+- [x] `git tag pre-023-ui-rewrite` still exists
 - [ ] `git log --oneline -1` is on the merge commit of this PR
 
 ---
 
-**Last Updated**: 2026-06-12
+**Last Updated**: 2026-06-15

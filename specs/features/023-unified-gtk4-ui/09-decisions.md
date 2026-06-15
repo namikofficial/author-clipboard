@@ -180,6 +180,17 @@ into `verify` — they require either `glib-compile-schemas` or `Xvfb`.
 
 **Confirmed by**: PR 7.
 
+## D15: Sidebar uses `AdwOverlaySplitView` + `gtk::ListBox` (no `AdwSidebar`)
+
+**Chosen**: Sidebar built from `gtk::ListBox` with 6 icon+label rows inside
+`AdwOverlaySplitView`. `AdwSidebar` was attempted first but is not available
+in libadwaita 0.9 with `v1_4` features — it was introduced in libadwaita 1.5.
+`AdwOverlaySplitView::set_show_sidebar(true/false)` controls visibility;
+a 200ms periodic check toggles the sidebar at the 900px breakpoint.
+
+**Confirmed by**: PR 6. Recorded at
+`crates/ui-gtk/src/window/manager.rs`.
+
 ---
 
 **Last Updated**: 2026-06-15
