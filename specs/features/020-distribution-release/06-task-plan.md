@@ -48,6 +48,18 @@ cd packaging/arch && makepkg --printsrcinfo > .SRCINFO.new
 diff -u .SRCINFO .SRCINFO.new
 ```
 
+## T-014: Make packaging gates portable across GitHub runners
+**Goal**: Ubuntu jobs install a pinned gtk4-layer-shell build when the distro
+package is unavailable, and Arch jobs execute `makepkg` as an unprivileged
+builder.
+**Files**: `.github/workflows/ci.yml`, `.github/workflows/release.yml`
+**Verify**:
+```bash
+yq '.' .github/workflows/ci.yml >/dev/null
+yq '.' .github/workflows/release.yml >/dev/null
+gh pr checks 5
+```
+
 ## T-004: Add Flatpak manifest
 **Goal**: `packaging/flatpak/com.namikofficial.author-clipboard.yml` builds author-clipboard against the Freedesktop 23.08 runtime and grants Wayland socket access.
 **Files**: `packaging/flatpak/com.namikofficial.author-clipboard.yml`, `docs/FLATPAK.md`

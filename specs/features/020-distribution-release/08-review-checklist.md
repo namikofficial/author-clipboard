@@ -17,6 +17,8 @@
 - [x] `release.yml` builds the full workspace, builds the `.deb`, generates `SHA256SUMS`, and conditionally signs.
 - [x] `ci.yml` builds and inspects the `.deb` on pull requests.
 - [x] `ci.yml` builds the Arch package and verifies `.SRCINFO` inside `archlinux:latest`.
+- [x] Ubuntu jobs build a pinned gtk4-layer-shell version unavailable from apt.
+- [x] Arch jobs invoke `makepkg` through an unprivileged builder account.
 - [x] `release.yml` runs only for explicit version tags and never pushes a version-bump commit.
 - [x] Release validation rejects tag/package version drift before publication.
 - [x] Flatpak manifest is at `packaging/flatpak/...` and references the Freedesktop 23.08 runtime.

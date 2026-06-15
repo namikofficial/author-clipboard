@@ -81,6 +81,21 @@ not clone another AUR repository, run nested `makepkg`, or install packages
 during `build()`. CI installs dependencies before invoking `makepkg`, then
 regenerates `.SRCINFO` and requires a byte-identical result.
 
+### 11. Ubuntu CI builds gtk4-layer-shell from a pinned tag
+
+Ubuntu 24.04 does not provide `libgtk4-layer-shell-dev`. Rust, Debian, and
+release jobs therefore build and install upstream `gtk4-layer-shell` from the
+explicit `v1.3.0` tag before compiling the workspace. Optional examples,
+documentation, tests, introspection, and Vala bindings are disabled because CI
+only needs the native library and pkg-config metadata.
+
+### 12. Arch package builds run as an unprivileged user
+
+The Arch container may install dependencies and generate the source archive as
+root, but it changes workspace ownership and invokes `makepkg` through
+`runuser -u builder`. Workflow steps use Bash explicitly so strict mode and
+variable handling are consistent inside the container.
+
 ## Failure Modes
 
 | Failure | Handling |
@@ -90,6 +105,8 @@ regenerates `.SRCINFO` and requires a byte-identical result.
 | `.SRCINFO` out of sync with PKGBUILD | CI job regenerates `.SRCINFO` and fails with `git diff` if there's a delta. |
 | Tag and package versions differ | Release validation fails before artifact creation. |
 | Debian package omits a required file | PR and release inspection steps fail before publication. |
+| Ubuntu runner lacks gtk4-layer-shell packages | CI builds pinned upstream `v1.3.0` before compiling the workspace. |
+| Arch `makepkg` is invoked as root | Workflow changes ownership and executes it through the `builder` account. |
 | GPG key invalid / missing | Release still completes, logs a warning, omits `.asc`. |
 | Flatpak manifest schema error | Documented; not validated in CI (flatpak-builder isn't preinstalled). |
 | Nix flake fails on Darwin | Documented: flake defaults to Linux x86_64; aarch64 is best-effort. |

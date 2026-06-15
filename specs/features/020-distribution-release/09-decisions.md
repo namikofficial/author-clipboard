@@ -38,4 +38,21 @@ are non-reproducible and incompatible with normal non-root package builds.
 SQLite that Rust's linker does not consume correctly, leaving unresolved
 `sqlite3_*` symbols. Cargo's normal optimized release profile remains enabled.
 
+## D-006: Pin gtk4-layer-shell source builds on Ubuntu CI
+
+**Decision**: Ubuntu jobs build upstream `gtk4-layer-shell` tag `v1.3.0`
+instead of installing `libgtk4-layer-shell-dev`.
+
+**Reason**: Ubuntu 24.04 does not publish that development package. Pinning the
+source tag keeps runner setup reproducible and provides the pkg-config metadata
+required by the Rust bindings.
+
+## D-007: Run Arch makepkg as a dedicated builder
+
+**Decision**: Arch workflow jobs use `runuser -u builder` after changing
+workspace ownership.
+
+**Reason**: `makepkg` intentionally rejects root execution. The explicit user
+boundary matches normal Arch packaging behavior.
+
 **Last Updated**: 2026-06-15
