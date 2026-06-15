@@ -130,20 +130,13 @@ jobs:
           OUTPUT: RELEASE_NOTES.md
           GITHUB_REPO: ${{ github.repository }}
 
-      # Verify AUR package files (defense-in-depth; ci.yml also runs makepkg).
-      - name: Verify AUR PKGBUILD & .SRCINFO are in sync
+      # Stage AUR source files for package maintainers (no makepkg on Ubuntu).
+      - name: Stage AUR source files
         run: |
-          cd packaging/arch
-          makepkg --printsrcinfo > .SRCINFO.new
-          if ! diff -u .SRCINFO .SRCINFO.new; then
-            echo "::error::packaging/arch/.SRCINFO is out of sync with PKGBUILD."
-            echo "Run 'makepkg --printsrcinfo > packaging/arch/.SRCINFO' to regenerate."
-            exit 1
-          fi
-          rm -f .SRCINFO.new
-          mkdir -p ../../release-staging/aur
-          cp PKGBUILD .SRCINFO ../../release-staging/aur/
-          tar -C ../arch -czf ../../release-staging/aur/author-clipboard-aur-files.tar.gz \
+          set -euo pipefail
+          mkdir -p release-staging/aur
+          cp packaging/arch/PKGBUILD packaging/arch/.SRCINFO release-staging/aur/
+          tar -C release-staging/aur -czf release-staging/aur/author-clipboard-aur-files.tar.gz \
             PKGBUILD .SRCINFO
 
       - name: Upload build artifacts (debug)
@@ -172,5 +165,46 @@ jobs:
             release-staging/aur/PKGBUILD
             release-staging/aur/.SRCINFO
             release-staging/aur/author-clipboard-aur-files.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  arch-pkg:
+    name: Build Arch Linux .pkg.tar.zst
+    needs: [release]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container:
+      image: archlinux:latest
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Bootstrap pacman & install build deps
+        run: |
+          pacman -Sy --noconfirm --needed base-devel rust cargo pkgconf wayland-protocols \
+            wl-clipboard sqlite libxkbcommon wayland gtk4 git
+          useradd -m builder
+
+      - name: Build gtk4-layer-shell from AUR
+        run: |
+          cd /tmp
+          git clone https://aur.archlinux.org/gtk4-layer-shell.git
+          chown -R builder:builder gtk4-layer-shell
+          cd gtk4-layer-shell
+          su builder -c 'makepkg --noconfirm --skippgpcheck'
+          pacman --noconfirm --upgrade gtk4-layer-shell-*.pkg.tar.zst
+
+      - name: Build Arch package
+        run: |
+          cd packaging/arch
+          chown -R builder:builder "$PWD"
+          su builder -c 'makepkg --noconfirm --skipchecksums'
+
+      - name: Upload Arch package to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: packaging/arch/*.pkg.tar.zst
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
