@@ -146,9 +146,6 @@ jobs:
         run: |
           set -euo pipefail
           cd packaging/arch
-          makepkg --printsrcinfo > .SRCINFO.generated
-          diff -u .SRCINFO .SRCINFO.generated
-          rm .SRCINFO.generated
           PKGNAME=$(sed -n 's/^pkgname=//p' PKGBUILD)
           PKGVER=$(sed -n 's/^pkgver=//p' PKGBUILD)
           git -C ../.. archive \
@@ -157,5 +154,12 @@ jobs:
             --output="$PWD/$PKGNAME-$PKGVER.tar.gz" \
             HEAD
           chown -R builder:builder "$GITHUB_WORKSPACE"
-          runuser -u builder -- bash -lc \
-            "cd '$GITHUB_WORKSPACE/packaging/arch' && makepkg --noconfirm --cleanbuild --clean --skipinteg"
+          runuser -u builder -- env HOME=/home/builder \
+            bash --noprofile --norc -c "
+              set -euo pipefail
+              cd '$GITHUB_WORKSPACE/packaging/arch'
+              makepkg --printsrcinfo > .SRCINFO.generated
+              diff -u .SRCINFO .SRCINFO.generated
+              rm .SRCINFO.generated
+              makepkg --noconfirm --cleanbuild --clean --skipinteg
+            "
