@@ -25,7 +25,12 @@ author-clipboard-ctl picker --menu auto
 
 ## Design tokens
 
-14 design tokens live in `crates/ui-gtk/assets/style.css`:
+26 design tokens live in `crates/ui-gtk/data/style.css`. The
+same scale is also exposed as Rust-side constants in
+`crates/ui-gtk/src/theme.rs` (`theme::spacing`, `theme::radius`,
+`theme::motion`, `theme::focus`, `theme::font_size`).
+
+### Colors
 
 | Token | Value | Purpose |
 |---|---|---|
@@ -40,19 +45,56 @@ author-clipboard-ctl picker --menu auto
 | `--border` | `@borders_color` | 1px dividers |
 | `--danger` | `@error_bg_color` | Sensitive red border |
 | `--success` | `@success_bg_color` | Pinned chip |
+| `--warning` | `@warning_bg_color` | Starred chip |
+
+### Spacing
+
+| Token | Value | Purpose |
+|---|---|---|
+| `--space-2xs` | `2px` | Hairline gap (title ↔ subtitle) |
+| `--space-xs` | `4px` | Tight icon gap, pill padding |
+| `--space-sm` | `6px` | Chip vertical padding |
+| `--space-md` | `8px` | Base gap between siblings |
+| `--space-lg` | `12px` | List row vertical, sidebar row gap |
+| `--space-xl` | `16px` | Content area padding |
+| `--space-2xl` | `24px` | Section break |
+
+### Radii
+
+| Token | Value | Purpose |
+|---|---|---|
 | `--radius-sm` | `6px` | Small chips |
 | `--radius-md` | `12px` | Item rows |
 | `--radius-lg` | `16px` | Cards |
-| `--radius-pill` | `999px` | Pill chips |
-| `--shadow-sm` | `0 1px 2px rgba(0,0,0,0.06)` | Hover |
-| `--shadow-md` | `0 4px 12px rgba(0,0,0,0.10)` | Selected |
+| `--radius-pill` | `999px` | Pill chips, search entry |
+
+### Shadows
+
+| Token | Value | Purpose |
+|---|---|---|
+| `--shadow-sm` | `0 1px 2px alpha(@window_fg_color, 0.06)` | Hover |
+| `--shadow-md` | `0 4px 12px alpha(@window_fg_color, 0.10)` | Selected |
+| `--shadow-lg` | `0 8px 24px alpha(@window_fg_color, 0.14)` | Toast, menus |
+
+### Focus ring
+
+| Token | Value | Purpose |
+|---|---|---|
+| `--focus-ring-width` | `2px` | Focus halo stroke |
+| `--focus-ring-offset` | `2px` | Focus halo distance from edge |
+| `--focus-ring-color` | `alpha(@accent_bg_color, 0.45)` | Focus halo color |
+
+### Motion
+
+| Token | Value | Purpose |
+|---|---|---|
 | `--motion-fast` | `120ms` | Hover/select |
 | `--motion-base` | `200ms` | Modal / toast |
 | `--motion-slow` | `320ms` | Page transition |
 | `--ease-out` | `cubic-bezier(0.16, 1, 0.3, 1)` | Default |
 | `--ease-spring` | `cubic-bezier(0.34, 1.56, 0.64, 1)` | Pin/star bounce |
 
-The tokens are wired to libadwaita's `@*` aliases, so light + dark
+The color tokens are wired to libadwaita's `@*` aliases, so light + dark
 modes work out of the box via `AdwStyleManager::default()`.
 
 ## Keyboard shortcuts (canonical table)
@@ -164,6 +206,100 @@ Unit tests cover:
 * `shared::picker::PickerFilter::display_round_trip`
 * `settings::schema_id_is_stable`
 
+## Visual audit (T001 — 2026-06-15)
+
+Baseline screenshots captured via `just ui-smoke` live in
+`docs/UI/snapshots/`. The audit below lists the cohesion gaps
+that the T002 token pass (and downstream T003–T005 layout / state
+polish) need to address.
+
+### Findings
+
+1. **No spacing scale.** All widget paddings and margins are
+   hardcoded pixel values in Rust (`padding: 10px 14px`,
+   `margin: 2px 0`, `margin_top(4)`, etc.) with no shared tokens.
+   This makes the popup and the manager feel related by accident
+   rather than by design. T002 introduces a `--space-{2xs,xs,sm,md,lg,xl,2xl}`
+   scale (7 steps on a 2-4-6-8-12-16-24 px rhythm).
+2. **No focus-ring token.** The search entry's focus halo
+   (`0 0 0 2px alpha(@accent_bg_color, 0.15)`) is inline in
+   `style.css:134`. Other focusable widgets (chips, sidebar rows,
+   item rows) have no shared focus style. T002 adds
+   `--focus-ring-width/offset/color` tokens plus a shared
+   `:focus` rule so the whole app uses one ring.
+3. **Global transition is incomplete.** The `*` transition only
+   covers `background-color`, `border-color`, and `box-shadow`.
+   `color` and `opacity` are not transitioned, which is why chips
+   and rows feel "snappy" on hover but static on selection. T002
+   widens the transition set to include `color` and `opacity`.
+4. **Shadows break in dark mode.** `--shadow-sm` and `--shadow-md`
+   use hardcoded `rgba(0, 0, 0, 0.06)` / `rgba(0, 0, 0, 0.10)`,
+   which are invisible on a dark surface. T002 switches them to
+   `alpha(@window_fg_color, …)` and adds a `--shadow-lg` for
+   floating surfaces (toasts, menus).
+5. **Empty / redacted overlays are placeholders.** `widgets::empty`
+   is a 3-line stub (`#![allow(dead_code…)]`) and the redacted
+   overlay reuses the same `adw::StatusPage` as the empty state,
+   making them visually indistinguishable. Tracked in T005.
+6. **Preview pane chrome is missing.** `PreviewPane` has a
+   `.preview-pane` CSS class defined in the spec but no actual
+   rules. The pane has no surface color, no padding, and no visible
+   separation from the list. Tracked in T004.
+7. **No pill-chrome on item rows.** Rows use `--radius-md` (12px)
+   and a 2px margin. The cute pill feel from feature 023 (a
+   6-8px gap and `--radius-pill` on hover) is missing. Tracked in
+   T003.
+8. **Theme.rs is a stub.** It just sets
+   `ColorScheme::Default` and provides no Rust-side constants
+   for the design tokens. Widgets that need a spacing value have
+   to hardcode pixels. T002 adds `theme::spacing`, `theme::radius`,
+   `theme::motion`, `theme::focus`, and `theme::font_size` modules
+   with Rust-side constants and unit tests that lock the scales.
+9. **Manager sidebar text is dense.** Sidebar rows use 8px
+   margins with no visual selection state beyond the default
+   list-box row style. Tracked in T004.
+10. **Status bar uses ASCII dot.** The `● Daemon` indicator is
+    a Unicode glyph; should be a small filled circle with a
+    status color. Tracked in T005.
+
+### Smoke-test notes
+
+* `popup.png` and `popup-search.png` are byte-identical because
+  `xdotool type "git"` runs faster than GTK paints the keystroke.
+  The search focus ring *is* visible in `manager.png` (the
+  cyan border around the search field), confirming focus styling
+  works. A real session would show the search query text. The
+  test is still useful as a layout / focus-state baseline.
+* The smoke run also emits a long stream of
+  `Gtk-WARNING: attempt to allocate … with width 0 and height -27`
+  and `… with width -27898 and height 664`. These come from
+  `AdwBin` wrappers inside `ItemRow` getting unclamped width
+  requests during the empty-list path (no rows → no
+  constraints → GTK speculatively tries negative sizes). Tracked
+  for T003 item-row polish.
+
+### T002 resolution
+
+The token pass addresses findings 1, 2, 3, 4, and 8 above.
+Compare the new `docs/UI/snapshots/manager.png` with the prior
+baseline: the focus ring around the search field is now driven
+by `--focus-ring-width/offset/color`, the filter chips wrap to
+two rows using the spacing scale, and the list surface picks
+up a subtle `--shadow-md` (visible at the top edge).
+
+Implementation summary:
+
+| File | Change |
+|---|---|
+| `crates/ui-gtk/data/style.css` | Added `--space-{2xs..2xl}`, `--focus-ring-*`, `--shadow-lg`; widened `*` transition to `color` + `opacity`; added shared `:focus` rule; replaced hardcoded focus-halo with the new token; switched shadows to `alpha(@window_fg_color, …)` for dark-mode parity |
+| `crates/ui-gtk/src/theme.rs` | Replaced the stub with five `pub mod` token modules (`spacing`, `radius`, `motion`, `focus`, `font_size`), each documented and pinned by monotonicity tests |
+| `docs/UI.md` | This audit section |
+
+Verification: `cargo test -p author-clipboard-ui-gtk` → 79
+passed, 14 ignored (GTK-init-only), 0 failed. `cargo clippy
+-p author-clipboard-ui-gtk -- -D warnings` clean. `just ui-smoke`
+regenerates the screenshots above.
+
 ## Rollback
 
 The previous libcosmic applet and the parallel GTK4 hypr-picker
@@ -179,6 +315,7 @@ git revert e4b821b
 
 * Spec: `specs/features/023-unified-gtk4-ui/00-brief.md` (and 9
   companion files)
+* Polish pass: `specs/features/024-ui-cohesion-polish/`
 * Decisions: `specs/features/023-unified-gtk4-ui/09-decisions.md`
 * Source: `crates/ui-gtk/`
 * Old code: `crates/applet/` (was 2995 LOC, now 152) and
