@@ -67,9 +67,9 @@ fn build_manager_window(app: &adw::Application) -> anyhow::Result<()> {
     // Clipboard page uses a Paned: list on left, preview on right.
     let clipboard_paned = gtk4::Paned::builder()
         .orientation(gtk4::Orientation::Horizontal)
-        .position(60)
+        .position(420)
         .wide_handle(true)
-        .resize_start_child(false)
+        .resize_start_child(true)
         .shrink_start_child(false)
         .build();
 
@@ -152,16 +152,20 @@ fn build_manager_window(app: &adw::Application) -> anyhow::Result<()> {
             PageId::Settings => crate::pages::settings::build(&shared_config).upcast(),
         };
 
-        // Wrap in a gtk::ScrolledWindow
-        let scrolled = gtk4::ScrolledWindow::builder()
-            .hscrollbar_policy(gtk4::PolicyType::Never)
-            .vscrollbar_policy(gtk4::PolicyType::Automatic)
-            .vexpand(true)
-            .hexpand(true)
-            .child(&content_widget)
-            .build();
+        let page_widget = if matches!(page_id, PageId::Clipboard | PageId::Settings) {
+            content_widget
+        } else {
+            gtk4::ScrolledWindow::builder()
+                .hscrollbar_policy(gtk4::PolicyType::Never)
+                .vscrollbar_policy(gtk4::PolicyType::Automatic)
+                .vexpand(true)
+                .hexpand(true)
+                .child(&content_widget)
+                .build()
+                .upcast()
+        };
 
-        page_widgets.push((page_id, scrolled.upcast()));
+        page_widgets.push((page_id, page_widget));
     }
 
     // ── Stack for page content ────────────────────────────────

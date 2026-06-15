@@ -55,9 +55,9 @@ test-verbose:
 ui-check:
     glib-compile-schemas crates/ui-gtk/data/ && cargo check -p author-clipboard-ui-gtk
 
-# Run smoke tests under Xvfb (manual, requires xvfb-run + xdotool)
+# Generate GTK screenshots under Xvfb (requires xvfb-run, xdotool, ffmpeg)
 ui-smoke:
-    xvfb-run -a crates/ui-gtk/tests/smoke.sh
+    xvfb-run -a -s "-screen 0 1280x800x24" crates/ui-gtk/tests/smoke.sh
 
 # Run GTK unit tests under Xvfb (manual)
 ui-test:
@@ -118,6 +118,13 @@ changelog-preview:
 # Tag a release and generate changelog (usage: just release 0.2.0)
 release version:
     @echo "🚀 Releasing v{{version}}..."
+    @WORKSPACE_VERSION=$$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml); \
+        PKGBUILD_VERSION=$$(sed -n 's/^pkgver=//p' packaging/arch/PKGBUILD); \
+        SRCINFO_VERSION=$$(sed -n 's/^[[:space:]]*pkgver = //p' packaging/arch/.SRCINFO | head -1); \
+        test "{{version}}" = "$$WORKSPACE_VERSION"; \
+        test "{{version}}" = "$$PKGBUILD_VERSION"; \
+        test "{{version}}" = "$$SRCINFO_VERSION"
+    just aur-check
     git-cliff --tag "v{{version}}" --output CHANGELOG.md
     git add CHANGELOG.md
     git commit -m "chore(release): v{{version}}"

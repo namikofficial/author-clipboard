@@ -7,16 +7,17 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   RUSTFLAGS: "-D warnings"
 
 permissions:
   contents: read
-  statuses: write
 
 jobs:
-  check:
+  rust:
     name: Format / Lint / Test
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -26,118 +27,106 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          # Only cache daemon/shared/ctl — applet (libcosmic) is excluded from CI
           cache-all-crates: "true"
-          key: ci-no-applet
+          key: ci-workspace
 
-      # Minimal deps: only what daemon/shared/ctl need — skip heavy libcosmic deps
       - name: Install system dependencies
         run: |
+          sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            libwayland-dev libxkbcommon-dev libdbus-1-dev pkg-config
+            libwayland-dev libxkbcommon-dev libdbus-1-dev \
+            libgtk-4-dev libadwaita-1-dev libgtk4-layer-shell-dev \
+            libgtksourceview-5-dev pkg-config
 
-      # Fast check — no compilation
       - name: Format check
         run: cargo fmt --all -- --check
 
-      # Lint daemon/shared/ctl only (applet excluded — libcosmic takes 5+ min)
       - name: Clippy
-        run: |
-          cargo clippy \
-            -p author-clipboard-shared \
-            -p author-clipboard-daemon \
-            -p author-clipboard-ctl \
-            -p author-clipboard-mcp \
-            -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
-      # Tests live entirely in shared crate — no system deps beyond bundled sqlite
       - name: Tests
-        run: cargo test -p author-clipboard-shared
+        run: cargo test --workspace --locked
 
-  arch-pkg:
-    name: Arch PKGBUILD
+  deb:
+    name: Debian package
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    container:
-      image: archlinux:latest
-      options: --privileged
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
-      - name: Bootstrap pacman & install build deps
-        run: |
-          pacman -Sy --noconfirm --needed base-devel rust cargo pkgconf wayland-protocols \
-            wl-clipboard sqlite libxkbcommon wayland gtk4 git gobject-introspection meson ninja valabind luajit
-          # gtk4-layer-shell may not be in official repos, build from AUR if missing
-          if ! pacman -Qs gtk4-layer-shell > /dev/null 2>&1; then
-            useradd -m builder
-            cd /tmp
-            git clone https://aur.archlinux.org/gtk4-layer-shell.git
-            chown -R builder:builder gtk4-layer-shell
-            cd gtk4-layer-shell
-            su builder -c 'makepkg --noconfirm --skippgpcheck'
-            pacman --noconfirm --upgrade gtk4-layer-shell-*.pkg.tar.zst
-          fi
+      - uses: dtolnay/rust-toolchain@stable
 
-      - name: Verify PKGBUILD parses & sources
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-all-crates: "true"
+          key: ci-deb
+
+      - name: Install system dependencies
         run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwayland-dev libxkbcommon-dev libdbus-1-dev \
+            libgtk-4-dev libadwaita-1-dev libgtk4-layer-shell-dev \
+            libgtksourceview-5-dev dpkg-dev fakeroot pkg-config
+
+      - name: Install cargo-deb
+        run: cargo install cargo-deb --locked
+
+      - name: Build workspace
+        run: cargo build --release --workspace --locked
+
+      - name: Build Debian package
+        run: cargo deb -p author-clipboard-applet --no-build
+
+      - name: Inspect Debian package
+        run: |
+          set -euo pipefail
+          DEB=$(find target/debian -maxdepth 1 -name 'author-clipboard_*.deb' -print -quit)
+          test -n "$DEB"
+          dpkg-deb -I "$DEB"
+          CONTENTS=$(dpkg-deb -c "$DEB")
+          for path in \
+            usr/bin/author-clipboard \
+            usr/bin/author-clipboard-daemon \
+            usr/bin/author-clipboard-ctl \
+            usr/bin/author-clipboard-hypr-picker \
+            usr/lib/systemd/user/author-clipboard-daemon.service \
+            usr/share/applications/com.namikofficial.author-clipboard.desktop \
+            usr/share/metainfo/com.namikofficial.author-clipboard.metainfo.xml
+          do
+            grep -F "$path" <<<"$CONTENTS"
+          done
+
+  arch-pkg:
+    name: Arch package
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    container:
+      image: archlinux:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install package dependencies
+        run: |
+          pacman -Syu --noconfirm --needed \
+            base-devel rust cargo pkgconf git wayland-protocols \
+            wayland wl-clipboard sqlite libxkbcommon gtk4 libadwaita \
+            gtk4-layer-shell gtksourceview5
+          useradd -m builder
+
+      - name: Verify SRCINFO and build package
+        run: |
+          set -euo pipefail
           cd packaging/arch
-          bash -c 'source ./PKGBUILD && echo "pkgname=$pkgname pkgver=$pkgver"'
-
-      - name: Verify PKGBUILD parses
-        run: |
-          cd packaging/arch
-          bash -c 'source ./PKGBUILD && echo "pkgname=$pkgname pkgver=$pkgver"'
-
-      - name: Verify PKGBUILD structure
-        run: |
-          cd packaging/arch
-          # Verify PKGBUILD has required fields
-          bash -c 'source ./PKGBUILD && \
-            echo "pkgname=$pkgname" && \
-            echo "pkgver=$pkgver" && \
-            echo "depends=${depends[*]}" && \
-            echo "makedepends=${makedepends[*]}" && \
-            echo "source count=$(echo "${#source[@]}")"'
-
-  # deb:
-  #   name: Debian .deb build
-  #   runs-on: ubuntu-latest
-  #   timeout-minutes: 25
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #
-  #     - uses: dtolnay/rust-toolchain@stable
-  #       with:
-  #         components: rustfmt, clippy
-  #
-  #     - uses: Swatinem/rust-cache@v2
-  #       with:
-  #         cache-all-crates: "true"
-  #         key: ci-deb
-  #
-  #     - name: Install system dependencies
-  #       run: |
-  #         sudo apt-get update || true
-  #         sudo apt-get install -y --no-install-recommends --fix-missing \
-  #           libwayland-dev libxkbcommon-dev libdbus-1-dev \
-  #           libgtk-4-dev libudev-dev libinput-dev libgbm-dev \
-  #           libseat-dev libpixman-1-dev libxcb-render0-dev \
-  #           libxcb-shape0-dev libxcb-xfixes0-dev pkg-config dpkg-dev
-  #
-  #     - name: Install cargo-deb
-  #       run: cargo install cargo-deb --locked
-  #
-  #     - name: Build workspace release
-  #       run: cargo build --release --workspace
-  #
-  #     - name: Build .deb
-  #       run: cargo deb -p author-clipboard-applet --no-build
-  #
-  #     - name: Inspect .deb contents
-  #       run: |
-  #         DEB=$(ls target/debian/author-clipboard_*.deb | head -1)
-  #         echo "Package: $DEB"
-  #         dpkg-deb -I "$DEB"
-  #         echo "--- contents ---"
-  #         dpkg-deb -c "$DEB" | grep -E "usr/bin/author-clipboard"
+          makepkg --printsrcinfo > .SRCINFO.generated
+          diff -u .SRCINFO .SRCINFO.generated
+          rm .SRCINFO.generated
+          source ./PKGBUILD
+          git -C ../.. archive \
+            --format=tar.gz \
+            --prefix="$pkgname-$pkgver/" \
+            --output="$PWD/$pkgname-$pkgver.tar.gz" \
+            HEAD
+          chown -R builder:builder "$GITHUB_WORKSPACE"
+          su builder -c \
+            "cd '$GITHUB_WORKSPACE/packaging/arch' && makepkg --noconfirm --cleanbuild --clean --skipinteg"

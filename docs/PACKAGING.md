@@ -2,9 +2,10 @@
 
 Instructions for packaging author-clipboard for Linux distributions.
 
-Current workspace version: `0.5.0`.
+Current workspace version: `0.6.0`.
 
-author-clipboard is a native COSMIC clipboard manager with wlroots compositor support, including Hyprland and Sway. The UI is built with `libcosmic`; Hyprland support is runtime/compositor support, not a Hyprland-native UI.
+author-clipboard uses a unified GTK4/libadwaita UI on COSMIC, Hyprland, Sway,
+and other supported Wayland compositors.
 
 ## Install Paths
 
@@ -72,6 +73,10 @@ Runtime dependencies:
 - `wl-clipboard`
 - `sqlite`
 - `xkbcommon`
+- `gtk4`
+- `libadwaita`
+- `gtk4-layer-shell`
+- `gtksourceview5`
 
 Optional dependencies:
 
@@ -84,6 +89,7 @@ Make dependencies:
 - `cargo`
 - `pkg-config`
 - `wayland-protocols`
+- `glib2`
 
 Arch/AUR templates live in:
 
@@ -95,7 +101,7 @@ The GitHub release workflow uploads these files as release assets alongside the 
 ### Local Build (Arch)
 
 ```bash
-just arch-build      # runs makepkg --nocheck --nodeps
+just arch-build      # runs makepkg against the release source
 just aur-check       # verifies .SRCINFO is in sync with PKGBUILD
 ```
 

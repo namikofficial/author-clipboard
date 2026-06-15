@@ -24,15 +24,16 @@ The default GUI is COSMIC-native through `libcosmic`. Hyprland and wlroots users
 
 ## Screenshots
 
-> Screenshots generated with `just ui-smoke`. Requires `xvfb-run`, `xdotool`, and `import` (ImageMagick).
+> Screenshots generated from the real GTK application with `just ui-smoke`.
+> Requires `xvfb-run`, `xdotool`, and `ffmpeg`.
 
 | Popup | Manager |
 |---|---|
 | ![Popup](docs/UI/snapshots/popup.png) | ![Manager](docs/UI/snapshots/manager.png) |
 
-| Clipboard Page | Settings Page | Sensitive Reveal |
-|---|---|---|
-| ![Clipboard](docs/UI/snapshots/clipboard-page.png) | ![Settings](docs/UI/snapshots/settings.png) | ![Sensitive](docs/UI/snapshots/sensitive-reveal.png) |
+| Clipboard Page | Popup Search |
+|---|---|
+| ![Clipboard](docs/UI/snapshots/clipboard-page.png) | ![Popup search](docs/UI/snapshots/popup-search.png) |
 
 ## Features
 

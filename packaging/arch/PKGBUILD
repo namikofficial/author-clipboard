@@ -6,8 +6,10 @@ pkgdesc='Native COSMIC clipboard manager with wlroots compositor support'
 arch=('x86_64')
 url='https://github.com/namikofficial/author-clipboard'
 license=('GPL-3.0-or-later')
-depends=('wayland' 'wl-clipboard' 'sqlite' 'libxkbcommon' 'gtk4' 'libadwaita')
-makedepends=('rust' 'cargo' 'pkgconf' 'wayland-protocols' 'gtk4' 'glib2-devel')
+options=('!lto')
+depends=('wayland' 'wl-clipboard' 'sqlite' 'libxkbcommon' 'gtk4' 'libadwaita'
+         'gtk4-layer-shell' 'gtksourceview5')
+makedepends=('rust' 'cargo' 'pkgconf' 'wayland-protocols' 'glib2')
 optdepends=(
   'wtype: preferred quick paste backend on Wayland'
   'ydotool: optional input automation backend'
@@ -15,19 +17,10 @@ optdepends=(
   'fuzzel: minimal external menu picker alternative'
   'rofi: feature-rich external menu picker alternative'
 )
-source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz"
-        "gtk4-layer-shell::https://aur.archlinux.org/gtk4-layer-shell.git")
-sha256sums=('SKIP'
-            'SKIP')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
+sha256sums=('SKIP')
 
 build() {
-  # Build gtk4-layer-shell from AUR if not installed
-  if ! pacman -Qs gtk4-layer-shell > /dev/null 2>&1; then
-    cd "$srcdir/gtk4-layer-shell"
-    makepkg --noconfirm --skippgpcheck
-    pacman --noconfirm --upgrade gtk4-layer-shell-*.pkg.tar.zst
-  fi
-
   cd "$pkgname-$pkgver"
   cargo build --release --workspace --locked
 }

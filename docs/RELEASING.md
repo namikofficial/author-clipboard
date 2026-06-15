@@ -7,11 +7,21 @@ and `git-cliff`, and is fully automated by `.github/workflows/release.yml`.
 ## Quick Path
 
 1. Ensure `main` is green and you have a clean working tree.
-2. Decide the new version. Bump `Cargo.toml` `[workspace.package].version` and
-   update the `tag:` in `packaging/flatpak/com.namikofficial.author-clipboard.yml`.
-3. (Optional) Set the maintainer GPG key in repo secrets (see
+2. Decide the new version. Update it in `Cargo.toml`,
+   `packaging/arch/PKGBUILD`, the generated `packaging/arch/.SRCINFO`, and
+   other pinned packaging manifests such as Flatpak/Nix.
+3. Regenerate and verify Arch metadata:
+
+   ```bash
+   cd packaging/arch
+   makepkg --printsrcinfo > .SRCINFO
+   cd ../..
+   just aur-check
+   ```
+4. (Optional) Set the maintainer GPG key in repo secrets (see
    [Signing](#signing-releases-with-gpg) below).
-4. Tag and push:
+5. Merge the version-preparation commit only after PR CI is green, then tag and
+   push:
 
    ```bash
    git switch main
@@ -20,16 +30,18 @@ and `git-cliff`, and is fully automated by `.github/workflows/release.yml`.
    git push && git push --tags
    ```
 
-5. The `Release` workflow runs:
+6. The `Release` workflow runs only for the explicit `vX.Y.Z` tag:
+   - Reject a tag that differs from Cargo, PKGBUILD, or `.SRCINFO`
    - Format, lint, test
    - Build the full workspace
-   - Build the `.deb`
+   - Build and inspect the `.deb`
+   - Build the Arch package
    - Generate `SHA256SUMS`
    - Sign `SHA256SUMS` (if GPG secrets are set)
    - Bundle PKGBUILD / `.SRCINFO` for AUR
    - Publish the GitHub Release with all artifacts
 
-6. After CI completes, **verify** the release:
+7. After CI completes, **verify** the release:
 
    ```bash
    gh release download v0.6.0
@@ -38,8 +50,11 @@ and `git-cliff`, and is fully automated by `.github/workflows/release.yml`.
    gpg --verify SHA256SUMS.asc SHA256SUMS
    ```
 
-7. Submit to the COSMIC store (see [`docs/COSMIC_STORE.md`](COSMIC_STORE.md)).
-8. Push the PKGBUILD to the AUR (see [`docs/AUR.md`](AUR.md)).
+8. Submit to the COSMIC store (see [`docs/COSMIC_STORE.md`](COSMIC_STORE.md)).
+9. Push the PKGBUILD to the AUR (see [`docs/AUR.md`](AUR.md)).
+
+Merging or pushing to `main` never creates a release. The workflow also never
+bumps versions or pushes commits back to `main`.
 
 ## What Goes Into a Release
 
@@ -51,6 +66,7 @@ and `git-cliff`, and is fully automated by `.github/workflows/release.yml`.
 | GPG signature | `gpg --armor --detach-sign SHA256SUMS` | `SHA256SUMS.asc` (optional) |
 | AppStream metainfo | copied from `data/` | `com.namikofficial.author-clipboard.metainfo.xml` |
 | AUR bundle | `tar -C packaging/arch -czf` | `author-clipboard-aur-files.tar.gz` |
+| Arch package | `makepkg` in `archlinux:latest` | `author-clipboard-<ver>-1-x86_64.pkg.tar.zst` |
 | Release notes | `git-cliff --latest --strip header` | release body |
 
 ## Reproducible Builds
@@ -148,6 +164,7 @@ sudo apt --fix-broken install
 | `gpg: signing failed: Inappropriate ioctl` | The CI step uses `--pinentry-mode loopback`; locally, configure `pinentry-mode loopback` in `~/.gnupg/gpg-agent.conf`. |
 | `mismatched hashes` on tarball | `SOURCE_DATE_EPOCH` not exported; re-run the release job. |
 | `.SRCINFO` out of sync with `PKGBUILD` | `cd packaging/arch && makepkg --printsrcinfo > .SRCINFO` |
+| Release exits during version validation | Make the tag, Cargo version, `pkgver`, and `.SRCINFO` version identical before tagging. |
 | Hyprland picker missing from .deb | Check `crates/applet/Cargo.toml` `[package.metadata.deb].assets` for the `author-clipboard-hypr-picker` line. |
 
 ## See Also

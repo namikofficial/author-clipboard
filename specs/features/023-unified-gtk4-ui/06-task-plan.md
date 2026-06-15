@@ -471,9 +471,10 @@ test; the screenshot diffs against `docs/UI/snapshots/`.
 `docs/UI/snapshots/*.png`.
 
 **Implementation**:
-- `xvfb-run -a target/debug/author-clipboard --popup &`
-- `xdotool type "git"; sleep 0.3; import -window root snap.png`
-- Repeat for `--manager`.
+- `just ui-smoke` starts one 1280×800 Xvfb session.
+- The script launches `author-clipboard --mode popup|manager`, drives it with
+  `xdotool`, and captures the real X11 root with `ffmpeg`.
+- XDG state and GSettings are isolated in a temporary directory.
 - `kill $PID`.
 
 **Verification**:
@@ -541,8 +542,8 @@ grep -c "docs/UI" README.md   # ≥ 2
 | T016 | ✅ (PR 1) | applet/main.rs slimmed to 154 lines (dispatches to `ui_gtk::run_popup`/`run_manager`) |
 | T017 | ✅ (PR 1) | hypr-picker/main.rs 92 lines (dispatches to `ui_gtk::run_popup`) |
 | T018 | ✅ (PR 2) | `filter_and_query` + `build_external_rows` takes `PickerFilter`; `ctl picker` uses new API |
-| T019 | ✅ (PR 7) | smoke.sh exists; just ui-smoke / just ui-check recipes; manual-only (no CI) |
-| T020 | ✅ (PR 7) | docs/UI.md extended; 6-page sidebar; PreviewPane ref; GSettings persistence doc'd |
+| T019 | ✅ (PR 7 + PR 5 remediation) | `just ui-smoke` generates six real GTK PNGs under isolated Xvfb state; manual-only (no CI) |
+| T020 | ✅ (PR 7 + PR 5 remediation) | `README.md` embeds verified popup/manager captures; six snapshots are stored in `docs/UI/snapshots/` |
 
 ---
 

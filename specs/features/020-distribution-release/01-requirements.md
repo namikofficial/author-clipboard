@@ -74,6 +74,9 @@
 - GPG signing is conditional on `GPG_PRIVATE_KEY` and `GPG_PASSPHRASE` secrets being set.
 - `docs/RELEASING.md` documents the tag-and-push flow plus how to set up signing locally.
 - The release uses `git-cliff` to generate release notes.
+- A merge or direct push to `main` never creates a release or mutates version files.
+- The release tag must exactly match `[workspace.package].version` and the
+  versions recorded by the Arch package metadata.
 
 ### US-007: Downstream/COSMIC store reviewer verifies the package
 **As a** COSMIC store reviewer (or downstream packager)
@@ -105,6 +108,9 @@
 | FR-011 | `docs/AUR.md` documents how to push the PKGBUILD to the AUR. | Should | |
 | FR-012 | The `justfile` adds recipes: `just deb`, `just release-archive`, `just release-checksums`, `just release-sign`, `just flatpak-build`, `just appimage-build`, `just nix-check`. | Should | |
 | FR-013 | `PROJECT_PLAN.md` Phase 18 checkboxes reflect actual completion. | Must | |
+| FR-014 | Releases run only for explicit `vX.Y.Z` tags; pushes to `main` never publish artifacts or create version-bump commits. | Must | |
+| FR-015 | PR CI builds and inspects the Debian package, builds the Arch package, and fails when `.SRCINFO` differs from `PKGBUILD`. | Must | |
+| FR-016 | Release CI verifies tag/workspace/PKGBUILD/`.SRCINFO` version parity before building or publishing artifacts. | Must | |
 
 ## Non-Functional Requirements
 
@@ -126,6 +132,8 @@
 | Nix flake evaluation fails on a non-Linux runner | Documented; the flake is only expected to evaluate on Linux by default. |
 | Hyprland-only build needs GTK4 + gtk4-layer-shell | `.deb` already includes them via `$auto`; the AppImage and Flatpak manifest pin them. |
 | `mcp-server` binary is a new addition | Not currently shipped; documented as future scope in RELEASING.md. |
+| A release tag disagrees with package metadata | Release fails before creating a GitHub Release. |
+| A release artifact build fails | No GitHub Release is created; successful artifacts remain available only as workflow artifacts for diagnosis. |
 
 ## Out of Scope
 
@@ -147,4 +155,4 @@
 
 ---
 
-**Last Updated**: 2026-06-08
+**Last Updated**: 2026-06-15

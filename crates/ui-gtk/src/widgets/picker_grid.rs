@@ -14,7 +14,7 @@ pub type OnActivate = Rc<dyn Fn(&str)>;
 ///
 /// Each item is rendered as a `FlowBoxChild` with a text label.
 /// `on_activate` fires when the user clicks or presses Enter on an item.
-pub fn build(items: &[String], on_activate: OnActivate) -> Widget {
+pub fn build(items: &[String], on_activate: &OnActivate) -> Widget {
     let flow = FlowBox::builder()
         .selection_mode(SelectionMode::Single)
         .min_children_per_line(4)
@@ -31,10 +31,14 @@ pub fn build(items: &[String], on_activate: OnActivate) -> Widget {
 
     for item in items {
         let item_clone = item.clone();
+        let on_activate = Rc::clone(on_activate);
         let child = FlowBoxChild::new();
         let label = Label::new(Some(item));
         label.set_css_classes(&["picker-grid-item"]);
-        label.set_margin(4);
+        label.set_margin_top(4);
+        label.set_margin_bottom(4);
+        label.set_margin_start(4);
+        label.set_margin_end(4);
         child.set_child(Some(&label));
         child.connect_activate(move |_| {
             on_activate(&item_clone);

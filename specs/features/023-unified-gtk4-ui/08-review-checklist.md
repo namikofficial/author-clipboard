@@ -75,17 +75,17 @@
 ## Documentation
 
 - [x] `docs/UI.md` exists with tokens, shortcuts, widget catalog
-- [ ] `README.md` has 2 inline screenshots (popup + manager — needs Xvfb)
-- [ ] 6 PNGs in `docs/UI/` (needs screenshots generated via `just ui-smoke`)
+- [x] `README.md` has inline popup and manager screenshots generated from the real GTK app
+- [x] 6 PNGs in `docs/UI/snapshots/` generated via `just ui-smoke`
 - [ ] `docs/HYPRLAND.md` updated with new `author-clipboard` binary
 - [ ] `CHANGELOG.md` updated under `[Unreleased]`
 
 ## Packaging (maintainer task; not automated)
 
-- [ ] `packaging/arch/PKGBUILD` builds (CI green)
+- [x] `packaging/arch/PKGBUILD` builds locally through `makepkg`
 - [ ] `packaging/debian/control` builds (CI green)
 - [ ] `flake.nix` builds (CI green)
-- [ ] `.SRCINFO` regenerated and committed
+- [x] `.SRCINFO` regenerated and committed
 - [ ] Nix dev shell has `gtk4` and `glib`
 
 ## Final sign-off
