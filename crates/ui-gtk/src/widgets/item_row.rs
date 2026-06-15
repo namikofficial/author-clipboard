@@ -26,6 +26,10 @@ pub struct ItemRow {
     pin_chip: Chip,
     star_chip: Chip,
     sensitive_chip: Chip,
+    /// The inner `adw::Bin` wrapper. We keep a handle so we can
+    /// toggle the `sensitive` CSS class without traversing the
+    /// widget tree at every `bind`.
+    frame: adw::Bin,
 }
 
 impl ItemRow {
@@ -64,7 +68,7 @@ impl ItemRow {
 
         let text_col = GtkBox::builder()
             .orientation(gtk4::Orientation::Vertical)
-            .spacing(2)
+            .spacing(crate::theme::spacing::SPACE_2XS)
             .hexpand(true)
             .halign(gtk4::Align::Fill)
             .build();
@@ -74,10 +78,11 @@ impl ItemRow {
         // ── Trailing chips: pin / star / sensitive ─────────────
         let chips_col = GtkBox::builder()
             .orientation(gtk4::Orientation::Horizontal)
-            .spacing(4)
+            .spacing(crate::theme::spacing::SPACE_XS)
             .halign(gtk4::Align::End)
             .valign(gtk4::Align::Center)
             .build();
+        chips_col.add_css_class("item-row-cluster");
         let pin_chip = Chip::new("📌", ChipStyle::Success);
         let star_chip = Chip::new("⭐", ChipStyle::Warning);
         let sensitive_chip = Chip::new("🔒 sensitive", ChipStyle::Danger);
@@ -88,7 +93,7 @@ impl ItemRow {
         // ── Outer row: text + trailing chips ───────────────────
         let hbox = GtkBox::builder()
             .orientation(gtk4::Orientation::Horizontal)
-            .spacing(8)
+            .spacing(crate::theme::spacing::SPACE_MD)
             .build();
         hbox.append(&text_col);
         hbox.append(&chips_col);
@@ -98,7 +103,11 @@ impl ItemRow {
         // a red left border for sensitive items via CSS class.
         let frame = adw::Bin::new();
         frame.set_child(Some(&hbox));
+        // `item-row` is the outer pill chrome; `item-row-bin` is
+        // the inner AdwBin clamp that silences the empty-list
+        // Gtk-WARNINGs about negative allocations.
         frame.add_css_class("item-row");
+        frame.add_css_class("item-row-bin");
         frame.set_hexpand(true);
         frame.set_vexpand(false);
 
@@ -111,6 +120,7 @@ impl ItemRow {
             pin_chip,
             star_chip,
             sensitive_chip,
+            frame,
         };
         me.bind(item);
         me
@@ -197,15 +207,10 @@ impl ItemRow {
         }
 
         // ── CSS class for sensitive red border ───────────────
-        let frame = self
-            .row
-            .child()
-            .and_downcast::<adw::Bin>()
-            .expect("row has a Bin frame");
         if item.sensitive {
-            frame.add_css_class("sensitive");
+            self.frame.add_css_class("sensitive");
         } else {
-            frame.remove_css_class("sensitive");
+            self.frame.remove_css_class("sensitive");
         }
     }
 

@@ -300,6 +300,48 @@ passed, 14 ignored (GTK-init-only), 0 failed. `cargo clippy
 -p author-clipboard-ui-gtk -- -D warnings` clean. `just ui-smoke`
 regenerates the screenshots above.
 
+### T003 resolution
+
+T003 addresses the remaining popup-hierarchy polish items from
+the audit (findings 5, 6, 7, and 9). It introduces:
+
+* A sectioned shell for the popup: `.popup-section-{search,filter,list}`
+  give every popup surface the same horizontal padding via
+  `--space-xl` and vertical rhythm from the spacing scale.
+* A real `widgets::EmptyState` that replaces the 3-line
+  `empty.rs` stub. The clipboard page now switches between
+  the list scroller and the empty state based on entry count,
+  with the variant chosen from the current query / filter
+  (`NoResults` when the user has typed something, `NoSensitive`
+  for the sensitive filter, `NoItems` otherwise).
+* A `.item-row-bin` class on the AdwBin wrapper to clamp the
+  empty-list allocation, silencing the `Gtk-WARNING: attempt to
+  allocate … with width -27898` stream that the audit recorded.
+* A `.item-row-cluster` class for the trailing chip cluster
+  on each item row, with explicit spacing and a left margin
+  from the spacing scale.
+* `.empty-state` rules that give the status page generous
+  vertical padding so the illustration feels intentional
+  rather than missing.
+
+Implementation summary:
+
+| File | Change |
+|---|---|
+| `crates/ui-gtk/data/style.css` | Added `.popup-shell`, `.popup-section-*`, `.popup-status`, `.empty-state*`, `.item-row-bin`, `.item-row-cluster`; bumped `.search-entry` and `.chip` `min-height` to align with the spacing scale; replaced hardcoded padding values with `var(--space-*)` |
+| `crates/ui-gtk/src/widgets/empty.rs` | Replaced the stub with a real `EmptyState` widget supporting 4 variants (`NoItems`, `NoResults`, `NoSensitive`, `DaemonDown`); 3 unit tests pin the variant copy |
+| `crates/ui-gtk/src/widgets/filter_bar.rs` | Spacing and margins now read from `theme::spacing::*` constants |
+| `crates/ui-gtk/src/widgets/item_row.rs` | Cached the inner `adw::Bin` frame so `bind` no longer traverses the widget tree; added `.item-row-bin` clamp; uses `theme::spacing::*` for cluster gaps |
+| `crates/ui-gtk/src/widgets/search.rs` | Removed the 200px hardcoded `set_size_request` so the CSS `min-height: 36px` is the only sizing source |
+| `crates/ui-gtk/src/window/popup.rs` | Shell container uses `.popup-shell`; status label moved to `.popup-status` so its top border and font-size come from CSS |
+| `crates/ui-gtk/src/pages/clipboard.rs` | Sectioned shell (`search_section` → `filter_section` → `list_section`); empty state appended to `list_section` and toggled by the refresh closure |
+
+Verification: `cargo test -p author-clipboard-ui-gtk` → 82
+passed, 14 ignored, 0 failed. `cargo clippy -p
+author-clipboard-ui-gtk --all-targets -- -D warnings` clean.
+`cargo fmt --all -- --check` clean. `just ui-smoke` shows the
+new empty state in `docs/UI/snapshots/{popup,manager,clipboard-page}.png`.
+
 ## Rollback
 
 The previous libcosmic applet and the parallel GTK4 hypr-picker

@@ -3,6 +3,11 @@
 //! Each chip is a [`gtk4::ToggleButton`] styled with the `chip`
 //! CSS class. The active chip is set from a [`PickerFilter`]
 //! and changes emit a callback that the parent page handles.
+//!
+//! Spacing between chips is controlled by the `column_spacing`
+//! and `row_spacing` builder calls below, and the per-chip
+//! margins are managed in `data/style.css` under `.filter-bar >
+//! flowboxchild` so they line up with the spacing scale.
 
 use gtk4::prelude::*;
 use gtk4::{glib, Button, FlowBox, FlowBoxChild, Widget};
@@ -27,10 +32,10 @@ impl FilterBar {
             .orientation(gtk4::Orientation::Horizontal)
             .homogeneous(false)
             .selection_mode(gtk4::SelectionMode::None)
-            .column_spacing(6)
-            .row_spacing(6)
-            .margin_top(4)
-            .margin_bottom(4)
+            .column_spacing(crate::theme::spacing::SPACE_MD as u32)
+            .row_spacing(crate::theme::spacing::SPACE_MD as u32)
+            .margin_top(crate::theme::spacing::SPACE_XS)
+            .margin_bottom(crate::theme::spacing::SPACE_XS)
             .build();
         flow.add_css_class("filter-bar");
 

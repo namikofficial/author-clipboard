@@ -1,5 +1,10 @@
 //! Search entry with `/` focus, Esc clear, and 150ms debounced
 //! change emission.
+//!
+//! Visual styling (padding, height, focus ring) lives in
+//! `data/style.css` under the `.search-entry` class. The minimum
+//! height is set via the CSS `min-height: 36px` so this widget
+//! does not need a Rust-side size request.
 
 use gtk4::prelude::*;
 use gtk4::{glib, EventControllerKey, PropagationPhase, SearchEntry, Widget};
@@ -31,7 +36,11 @@ impl SearchEntry2 {
         inner.set_hexpand(true);
         inner.set_halign(gtk4::Align::Fill);
         inner.add_css_class("search-entry");
-        inner.set_size_request(200, -1);
+        // The .search-entry CSS rule sets `min-height: 36px`. We
+        // don't need a Rust size request anymore — letting GTK
+        // honour the CSS keeps the field looking identical in
+        // popup and manager mode.
+        inner.set_size_request(-1, -1);
 
         let debounce_source: Rc<Cell<Option<glib::SourceId>>> = Rc::new(Cell::new(None));
         let pending_query: Rc<RefCell<String>> = Rc::new(RefCell::new(initial.to_string()));

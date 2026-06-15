@@ -95,46 +95,82 @@ scrollbar slider {
 scrollbar slider:hover {
   background: alpha(currentColor, 0.4);
 }
-
-/* ── Item rows (the cute pill-shaped card) ─────────────────── */
-.item-row {
-  border-radius: var(--radius-md);
-  padding: 10px 14px;
-  margin: 2px 0;
+/* ── Popup shell ──────────────────────────────────────────── */
+/* The popup is a vertical stack of: search, filter bar, list,
+ * status. Each section uses spacing tokens so the rhythm is
+ * consistent and feels like one composition. */
+.popup-shell {
+  background: @window_bg_color;
+}
+.popup-section {
+  /* Horizontal padding for every section. Vertical padding is
+   * handled per-section to keep the search field flush with the
+   * list. */
+  padding-left: var(--space-xl);
+  padding-right: var(--space-xl);
+}
+.popup-section-search {
+  padding-top: var(--space-lg);
+  padding-bottom: var(--space-sm);
+}
+.popup-section-filter {
+  padding-bottom: var(--space-md);
+}
+.popup-section-list {
+  /* The list area has no top padding — the filter bar's bottom
+   * margin already separates them. The status bar below is
+   * bordered by `popup-status`. */
   background: transparent;
 }
-.item-row:hover {
-  background: alpha(@accent_bg_color, 0.08);
-}
-.item-row.selected {
-  background: alpha(@accent_bg_color, 0.18);
-  box-shadow: var(--shadow-sm);
-}
-/* Sensitive red left border — set via JS in item_row.rs */
-.item-row.sensitive {
-  border-left: 3px solid var(--danger);
+.popup-status {
+  padding: var(--space-xs) var(--space-xl);
+  border-top: 1px solid @borders_color;
+  font-size: 11px;
+  color: @text-2;
 }
 
-.item-title {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text-0);
+/* ── Search entry ─────────────────────────────────────────── */
+.search-entry {
+  border-radius: var(--radius-pill);
+  padding: var(--space-xs) var(--space-xl);
+  background: @view_bg_color;
+  border: 1px solid @borders_color;
+  min-height: 36px;
 }
-.item-subtitle {
-  font-size: 11px;
-  color: var(--text-2);
+.search-entry:focus-within {
+  border-color: @accent_bg_color;
+  box-shadow: 0 0 0 var(--focus-ring-width) var(--focus-ring-color);
+}
+
+/* ── Filter bar (chip container) ──────────────────────────── */
+.filter-bar {
+  /* The FlowBox is the actual GTK widget; we just add spacing
+   * around it so the chip row breathes. */
+  margin-top: 0;
+  margin-bottom: 0;
+}
+.filter-bar > flowboxchild {
+  /* The pill chips need horizontal and vertical breathing room
+   * from the bar's edge. */
+  margin: var(--space-2xs) var(--space-xs);
+}
+.filter-bar > flowboxchild:first-child {
+  margin-left: 0;
+}
+.filter-bar > flowboxchild:last-child {
+  margin-right: 0;
 }
 
 /* ── Chips (pills) ────────────────────────────────────────── */
 .chip {
   border-radius: var(--radius-pill);
-  padding: 4px 12px;
+  padding: var(--space-sm) var(--space-lg);
   font-size: 11px;
   font-weight: 500;
   background: alpha(@accent_bg_color, 0.12);
   color: @accent_fg_color;
   border: 1px solid transparent;
-  min-height: 22px;
+  min-height: 28px;
   min-width: 0;
 }
 .chip:hover {
@@ -156,19 +192,23 @@ scrollbar slider:hover {
 .chip-warning { background: alpha(@warning_bg_color, 0.15); color: @warning_fg_color; }
 .chip-muted   { background: alpha(currentColor, 0.08);     color: @dim_label_fg_color; }
 
-/* ── Search entry ─────────────────────────────────────────── */
-.search-entry {
-  border-radius: var(--radius-pill);
-  padding: 4px 14px;
-  background: @view_bg_color;
-  border: 1px solid @borders_color;
-  min-height: 32px;
+/* ── List boxes ───────────────────────────────────────────── */
+.clipboard-list,
+.snippet-list {
+  background: transparent;
+  padding: var(--space-xs) var(--space-md);
 }
-.search-entry:focus-within {
-  border-color: @accent_bg_color;
-  box-shadow: 0 0 0 var(--focus-ring-width) var(--focus-ring-color);
+.clipboard-list > row {
+  border-radius: var(--radius-md);
+  margin: var(--space-2xs) 0;
+  padding: 0;
 }
-
+.clipboard-list > row:hover {
+  background: alpha(@accent_bg_color, 0.06);
+}
+.clipboard-list > row:selected {
+  background: alpha(@accent_bg_color, 0.18);
+}
 /* ── Suggested / Destructive buttons ──────────────────────── */
 button.suggested-action {
   border-radius: var(--radius-md);
@@ -196,21 +236,4 @@ button.destructive-action {
 .symbol-cell:hover,
 .kaomoji-cell:hover {
   background: alpha(@accent_bg_color, 0.15);
-}
-
-/* ── List boxes ───────────────────────────────────────────── */
-.clipboard-list,
-.snippet-list {
-  background: transparent;
-}
-.clipboard-list > row {
-  border-radius: var(--radius-md);
-  margin: 2px 0;
-  padding: 0;
-}
-.clipboard-list > row:hover {
-  background: alpha(@accent_bg_color, 0.06);
-}
-.clipboard-list > row:selected {
-  background: alpha(@accent_bg_color, 0.18);
 }

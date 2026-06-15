@@ -4,6 +4,7 @@
 //! * `widgets::SearchEntry2` for debounced full-text search
 //! * `widgets::FilterBar` for the 7 filter chips
 //! * `widgets::ItemRow` for the list of items
+//! * `widgets::EmptyState` for the "nothing to show" view
 //! * `shared::picker::load_entries` to read from the DB
 //! * `IpcClient::send_command(Copy)` to write to clipboard on Enter
 //!
@@ -25,6 +26,7 @@ use author_clipboard_shared::picker::{
 };
 use author_clipboard_shared::Database;
 
+use crate::widgets::empty::{EmptyState, EmptyVariant};
 use crate::widgets::filter_bar::{FilterBar, OnChange as OnFilterChange};
 use crate::widgets::item_row::ItemRow;
 use crate::widgets::search::SearchEntry2;
@@ -72,18 +74,42 @@ type ItemRowTable = Rc<RefCell<Vec<(i64, ItemRow, String)>>>;
 /// `on_copy` is called when the user confirms a copy (Enter on a
 /// selected row). The page is read-only; the window layer decides
 /// what to do with the toast / close-the-window.
+///
+/// Layout is a vertical stack of three CSS-styled sections:
+///
+/// ```text
+///   .popup-section-search   — search entry
+///   .popup-section-filter   — filter chip bar
+///   .popup-section-list     — scrollable list / empty state
+/// ```
+#[allow(clippy::too_many_lines)]
 pub fn build(
     props: &ClipboardPageProps,
     on_copy: impl Fn(ClipboardCopyRequest) + 'static,
 ) -> impl IsA<Widget> {
     let page = GtkBox::builder()
         .orientation(Orientation::Vertical)
-        .spacing(8)
-        .margin_top(12)
-        .margin_bottom(12)
-        .margin_start(12)
-        .margin_end(12)
+        .spacing(0)
         .build();
+
+    // ── Section: search ────────────────────────────────────────
+    let search_section = GtkBox::builder().orientation(Orientation::Vertical).build();
+    search_section.add_css_class("popup-section");
+    search_section.add_css_class("popup-section-search");
+
+    // ── Section: filter ────────────────────────────────────────
+    let filter_section = GtkBox::builder().orientation(Orientation::Vertical).build();
+    filter_section.add_css_class("popup-section");
+    filter_section.add_css_class("popup-section-filter");
+
+    // ── Section: list / empty state ────────────────────────────
+    let list_section = GtkBox::builder()
+        .orientation(Orientation::Vertical)
+        .vexpand(true)
+        .hexpand(true)
+        .build();
+    list_section.add_css_class("popup-section");
+    list_section.add_css_class("popup-section-list");
 
     // ── Search + filter bar ─────────────────────────────────────
     let state = Rc::new(RefCell::new(PageState::from_props(props)));
@@ -98,6 +124,20 @@ pub fn build(
     // called when the underlying data changes.
     let item_rows: ItemRowTable = Rc::new(RefCell::new(Vec::new()));
 
+    // The scrollable list and the empty state both live inside
+    // `list_section`. Only one is visible at a time; the
+    // `refresh` closure toggles between them.
+    let scrolled = gtk4::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk4::PolicyType::Never)
+        .vscrollbar_policy(gtk4::PolicyType::Automatic)
+        .vexpand(true)
+        .hexpand(true)
+        .child(&list_box)
+        .build();
+    scrolled.add_css_class("clipboard-scroll");
+
+    let empty_state = EmptyState::new();
+
     // The list refresh function, captured for the search/filter
     // callbacks to call.
     let list_for_refresh = list_box.clone();
@@ -105,10 +145,19 @@ pub fn build(
     let config_clone = Config::load();
     let config_clone_for_refresh = config_clone.clone();
     let item_rows_for_refresh = item_rows.clone();
+    let scrolled_for_refresh = scrolled.clone();
+    let empty_for_refresh = empty_state.widget().clone();
     let refresh = move || {
         let s = state_for_refresh.borrow();
         let entries = load_entries_for(&config_clone_for_refresh, &s.query, s.filter, s.count);
         rebuild_list(&list_for_refresh, &item_rows_for_refresh, &entries);
+        if entries.is_empty() {
+            scrolled_for_refresh.set_visible(false);
+            empty_for_refresh.set_visible(true);
+        } else {
+            scrolled_for_refresh.set_visible(true);
+            empty_for_refresh.set_visible(false);
+        }
     };
 
     // Search entry.
@@ -119,7 +168,8 @@ pub fn build(
         refresh_for_search();
     });
     let search = SearchEntry2::new("Search clipboard history…", &props.initial_query, on_query);
-    page.append(search.widget());
+    search_section.append(search.widget());
+    page.append(&search_section);
 
     // Filter bar.
     let refresh_for_filter = refresh.clone();
@@ -129,18 +179,17 @@ pub fn build(
         refresh_for_filter();
     });
     let bar = FilterBar::new(props.initial_filter, on_filter);
-    page.append(bar.widget());
+    filter_section.append(bar.widget());
+    page.append(&filter_section);
 
-    // List (scrollable).
-    let scrolled = gtk4::ScrolledWindow::builder()
-        .hscrollbar_policy(gtk4::PolicyType::Never)
-        .vscrollbar_policy(gtk4::PolicyType::Automatic)
-        .vexpand(true)
-        .hexpand(true)
-        .child(&list_box)
-        .build();
-    scrolled.add_css_class("clipboard-scroll");
-    page.append(&scrolled);
+    // The scroller + empty state both live in `list_section`.
+    // The scroller is visible by default; the empty state is
+    // hidden until the initial load or a refresh decides
+    // otherwise.
+    list_section.append(&scrolled);
+    list_section.append(empty_state.widget());
+    empty_state.widget().set_visible(false);
+    page.append(&list_section);
 
     // Copy on Enter: find the selected row's item id and call on_copy.
     let item_rows_for_copy = item_rows.clone();
@@ -165,6 +214,27 @@ pub fn build(
         props.count.max(1),
     );
     rebuild_list(&list_box, &item_rows, &entries);
+    // Set the initial empty-state variant + visibility. The
+    // variant follows the same rule as the refresh closure:
+    // "no results" when the user has typed something,
+    // "no sensitive" when filtered to sensitive, otherwise
+    // "no items".
+    if entries.is_empty() {
+        // Decide which empty-state copy to show. The query takes
+        // precedence ("no results") so a typed search never
+        // shows the bland "clipboard is empty" message.
+        let variant = if props.initial_query.is_empty() {
+            match props.initial_filter {
+                PickerFilter::Sensitive => EmptyVariant::NoSensitive,
+                _ => EmptyVariant::NoItems,
+            }
+        } else {
+            EmptyVariant::NoResults
+        };
+        empty_state.set_variant(variant);
+        scrolled.set_visible(false);
+        empty_state.widget().set_visible(true);
+    }
 
     // Schedule a refresh 200ms after the page is first shown so we
     // pick up any clipboard changes the daemon captured while the

@@ -1,6 +1,18 @@
 //! Layer-shell popup. Uses the global key controller from PR 4
 //! instead of inline `EventControllerKey` handlers for Esc and `/`.
 //! Popup size persisted via `GSettings`.
+//!
+//! The shell is a vertical stack of three CSS-styled sections:
+//!
+//! ```text
+//!   .popup-section-search   ← search entry
+//!   .popup-section-filter   ← filter bar
+//!   .popup-section-list     ← scrollable list / empty state
+//! ```
+//!
+//! A `.popup-status` label sits below the list, separated by a
+//! 1px border. All paddings are driven by the spacing scale in
+//! `data/style.css` so the popup and the manager stay in sync.
 
 use crate::controller::focus::FocusTarget;
 use crate::settings::Settings;
@@ -81,13 +93,14 @@ fn build_popup(app: &adw::Application, config: &PopupConfig) -> anyhow::Result<(
         window_for_copy.close();
     });
 
+    // ── Status hint ───────────────────────────────────────────
     let status = gtk4::Label::new(Some("↑↓ navigate · / search · Enter copy · Esc close"));
-    status.set_margin_top(4);
-    status.set_margin_bottom(4);
     status.set_halign(gtk4::Align::Start);
-    status.set_margin_start(12);
+    status.add_css_class("popup-status");
 
+    // ── Shell: page above, status below ──────────────────────
     let content = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    content.add_css_class("popup-shell");
     content.append(&page);
     content.append(&status);
 
