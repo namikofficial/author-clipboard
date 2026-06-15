@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - "v[0-9]*"
+    branches: [main]
 
 env:
   CARGO_TERM_COLOR: always
@@ -21,7 +22,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Full history needed for git-cliff changelog
+          fetch-depth: 0
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -32,8 +33,17 @@ jobs:
           cache-all-crates: "true"
           key: release-full
 
-      # Full deps including libcosmic requirements
-      - name: Install system dependencies
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            echo "version=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          else
+            VERSION=v$(grep '^version' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Full deps
         run: |
           sudo apt-get install -y --no-install-recommends \
             libwayland-dev libxkbcommon-dev libinput-dev libseat-dev \
@@ -41,7 +51,6 @@ jobs:
             libgtk-4-dev libxcb-render0-dev libxcb-shape0-dev \
             libxcb-xfixes0-dev dpkg-dev fakeroot pkg-config
 
-      # Quick sanity checks before spending time on a full build
       - name: Format check
         run: cargo fmt --all -- --check
 
@@ -57,8 +66,6 @@ jobs:
       - name: Tests
         run: cargo test -p author-clipboard-shared
 
-      # Set SOURCE_DATE_EPOCH for reproducible build metadata.
-      # We use the commit timestamp of the tag's underlying commit.
       - name: Set SOURCE_DATE_EPOCH
         id: sde
         run: |
@@ -66,13 +73,11 @@ jobs:
           echo "epoch=$EPOCH" >> "$GITHUB_OUTPUT"
           echo "SOURCE_DATE_EPOCH=$EPOCH"
 
-      # Full release build (includes applet / libcosmic + hypr-picker)
       - name: Build release binaries
         env:
           SOURCE_DATE_EPOCH: ${{ steps.sde.outputs.epoch }}
         run: cargo build --release --workspace --locked
 
-      # Install cargo-deb and build the .deb package
       - name: Install cargo-deb
         run: cargo install cargo-deb --locked
 
@@ -83,7 +88,7 @@ jobs:
 
       - name: Stage release artifacts
         env:
-          VERSION: ${{ github.ref_name }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
           mkdir -p release-staging
@@ -119,7 +124,6 @@ jobs:
             echo "GPG_PRIVATE_KEY not set; uploading SHA256SUMS without signature"
           fi
 
-      # Generate changelog for this tag using git-cliff
       - name: Generate changelog
         id: changelog
         uses: orhun/git-cliff-action@v3
@@ -130,7 +134,6 @@ jobs:
           OUTPUT: RELEASE_NOTES.md
           GITHUB_REPO: ${{ github.repository }}
 
-      # Stage AUR source files for package maintainers (no makepkg on Ubuntu).
       - name: Stage AUR source files
         run: |
           set -euo pipefail
@@ -147,14 +150,14 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      # Create the GitHub Release with all artifacts
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: ${{ github.ref_name }}
+          name: ${{ steps.version.outputs.version }}
+          tag_name: ${{ steps.version.outputs.version }}
           body_path: RELEASE_NOTES.md
           draft: false
-          prerelease: ${{ contains(github.ref_name, '-') }}
+          prerelease: ${{ contains(steps.version.outputs.version, '-') }}
           files: |
             release-staging/*.deb
             release-staging/*.tar.xz
@@ -181,6 +184,16 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            echo "version=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          else
+            VERSION=v$(grep '^version' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Bootstrap pacman & install build deps
         run: |
           pacman -Sy --noconfirm --needed base-devel rust cargo pkgconf wayland-protocols \
@@ -205,6 +218,7 @@ jobs:
       - name: Upload Arch package to release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.version.outputs.version }}
           files: packaging/arch/*.pkg.tar.zst
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
