@@ -96,7 +96,9 @@ root, but it changes workspace ownership and invokes `makepkg` through
 `runuser -u builder`. Workflow steps use Bash explicitly so strict mode and
 variable handling are consistent inside the container. Git is installed before
 `actions/checkout` so the action creates a real repository instead of falling
-back to an extracted source archive without `.git` metadata.
+back to an extracted source archive without `.git` metadata. The bind-mounted
+workspace is registered as a safe Git directory for the builder account before
+`makepkg` inspects package sources.
 
 ## Failure Modes
 

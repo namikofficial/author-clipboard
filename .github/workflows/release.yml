@@ -172,6 +172,7 @@ jobs:
           runuser -u builder -- env HOME=/home/builder \
             bash --noprofile --norc -c "
               set -euo pipefail
+              git config --global --add safe.directory '$GITHUB_WORKSPACE'
               cd '$GITHUB_WORKSPACE/packaging/arch'
               makepkg --printsrcinfo > .SRCINFO.generated
               diff -u .SRCINFO .SRCINFO.generated
