@@ -1,15 +1,17 @@
 # 023 Unified GTK4 UI — Current State
 
-Generated after PR 0 (audit/fix). Baseline for all subsequent PRs.
+Updated after the feature 023 implementation landed on `dev`.
 
 ## Verification Status
 
-- `just fmt`: ✅ clean
-- `cargo clippy -D warnings`: ✅ clean (0 errors)
-- `cargo test --all`: ✅ 138 tests pass (0 ignored, 0 failed)
-- `cargo build --all`: ✅ all crates build
+- `just verify`: ✅ green
+- `cargo test --all`: ✅ green
+- `cargo build --all`: ✅ green
 
-Logs: `docs/023-audit/clippy.log`, `test.log`, `build.log`
+Latest verification run:
+
+- `author-clipboard-shared`: 158 tests passed
+- `ui_gtk`: 73 tests passed, 14 GTK widget tests ignored because they require GTK init/display
 
 ## Crate Structure
 
@@ -18,9 +20,9 @@ crates/
 ├── ui-gtk/           # GTK4 UI library (libcosmic-free)
 │   └── src/
 │       ├── lib.rs              # Entry: run_popup, run_manager
-│       ├── app.rs              # Shared app setup
-│       ├── model.rs            # AppState reducer (no GTK init needed)
-│       ├── actions.rs          # Action enum + reducer
+│       ├── app.rs              # AppState, Action, Effect, reduce()
+│       ├── actions.rs          # Action dispatch helpers
+│       ├── model.rs            # Clipboard item model objects
 │       ├── theme.rs            # Theme setup
 │       ├── controller/         # Keyboard/input controllers
 │       │   ├── focus.rs        # Focus management, Esc handling
@@ -28,27 +30,27 @@ crates/
 │       │   └── search.rs       # Search debouncing
 │       ├── window/
 │       │   ├── mod.rs
-│       │   ├── popup.rs        # build_popup() → PopupWindow
-│       │   └── manager.rs      # build_manager_window() → ManagerWindow
+│       │   ├── popup.rs        # Popup window builder
+│       │   └── manager.rs      # Manager window builder
 │       ├── pages/
 │       │   ├── mod.rs
 │       │   ├── clipboard.rs    # Main list page
 │       │   ├── settings.rs     # Settings page
-│       │   ├── emoji.rs        # Emoji picker page (stub)
-│       │   ├── kaomoji.rs      # Kaomoji page (stub)
-│       │   ├── snippets.rs     # Snippets page (stub)
-│       │   └── symbols.rs      # Symbols page (stub)
+│       │   ├── emoji.rs        # Emoji picker page
+│       │   ├── kaomoji.rs      # Kaomoji page
+│       │   ├── snippets.rs     # Snippets page
+│       │   └── symbols.rs      # Symbols page
 │       └── widgets/
 │           ├── mod.rs
-│           ├── search.rs        # SearchBar with debounce
-│           ├── filter_bar.rs    # FilterChip row
-│           ├── item_row.rs      # ClipboardItem row
-│           ├── preview.rs       # 3-line stub (→ PreviewPane in PR 5)
-│           ├── picker_grid.rs   # Grid-based picker (unused in popup)
-│           ├── chip.rs          # Filter chip widget
-│           ├── empty.rs         # Empty state widget
+│           ├── search.rs       # SearchEntry with debounce
+│           ├── filter_bar.rs   # Filter chip row
+│           ├── item_row.rs     # Clipboard item row
+│           ├── preview.rs      # PreviewPane
+│           ├── picker_grid.rs  # Grid-based picker helpers
+│           ├── chip.rs         # Filter chip widget
+│           ├── empty.rs        # Empty state widget
 │           ├── shortcuts_overlay.rs  # ? hotkey overlay
-│           └── toast.rs         # Toast notifications
+│           └── toast.rs        # Toast notifications
 └── applet/           # Thin binary, CLI parsing only
 ```
 
@@ -56,42 +58,45 @@ crates/
 
 | Function | File:Line | Purpose |
 |----------|-----------|---------|
-| `run_popup` | `ui-gtk/src/lib.rs:~50` | Popup UI entry |
-| `run_manager` | `ui-gtk/src/lib.rs:~60` | Manager UI entry |
-| `build_popup` | `ui-gtk/src/window/popup.rs:40` | Popup window builder |
-| `build_manager_window` | `ui-gtk/src/window/manager.rs:45` | Manager window builder |
-| `build_clipboard_page` | `ui-gtk/src/pages/clipboard.rs:~50` | Clipboard list page |
-| `build_settings_page` | `ui-gtk/src/pages/settings.rs:~40` | Settings page |
+| `run_popup` | `ui-gtk/src/lib.rs` | Popup UI entry |
+| `run_manager` | `ui-gtk/src/lib.rs` | Manager UI entry |
+| `build_popup` | `ui-gtk/src/window/popup.rs` | Popup window builder |
+| `build_manager_window` | `ui-gtk/src/window/manager.rs` | Manager window builder |
+| `build_clipboard_page` | `ui-gtk/src/pages/clipboard.rs` | Clipboard list page |
+| `build_settings_page` | `ui-gtk/src/pages/settings.rs` | Settings page |
 
-## Known Issues (addressed in PRs 1–7)
+## Completed Surface
 
-| ID | Issue | File | PR |
-|----|-------|------|-----|
-| B1 | `PopupConfig` not propagated to clipboard page builder | `pages/clipboard.rs` | 1 |
-| B2 | `count=0` shows no items but "No items" empty state suppressed | `pages/clipboard.rs` | 1 |
-| B3 | Image copy lacks MIME type → preview broken on re-paste | `pages/clipboard.rs`, `shared/src/ipc.rs` | 1 |
-| B4 | Search debounce uses `Cell<f64>` instead of `RefCell<u64>` | `widgets/search.rs` | 1 |
-| B5 | `filter_entries` name doesn't reflect dual filter+query role | `shared/src/picker.rs` | 2 |
-| UI1 | `AdwNavigationView` + sidebar not wired to model state | `app.rs`, `window/manager.rs` | 3A/3B |
-| UI2 | Manager page list doesn't reflect filter state | `pages/clipboard.rs` | 3A |
-| P1 | Preview pane is a 3-line stub | `widgets/preview.rs` | 5 |
-| W1 | WebKit preview opt-in behind `features = ["webview"]` | `widgets/preview.rs`, `Cargo.toml` | 5.5 |
+- `PopupConfig` now reaches the clipboard page builder and the page uses the configured filter, query, and count.
+- Image copy always uses `CopyMode::Copy` with MIME preserved in the IPC payload.
+- Search debounce uses `Rc<RefCell<...>>` and has a pure unit test for the second-query-wins case.
+- `shared::picker` threads `PickerFilter` through both internal filtering and external picker row generation.
+- `AppState` / `Action` / `Effect` / `reduce()` exist and are covered by pure tests.
+- `PreviewPane` renders text, images, files, and sensitive state; HTML preview is feature-gated behind `webview`.
+- Popup and manager both use the global key controller and GSettings bindings.
+- `justfile` includes `ui-check` and `ui-smoke` as manual-only recipes.
 
 ## Architecture Decisions (D15–D21)
 
 | ID | Decision | Status |
 |----|----------|--------|
 | D15 | Fall back to `gtk::Box` + `gtk::ListBox` if libadwaita sidebar primitives unavailable | Recorded |
-| D16 | Add `mime: Option<String>` to `IpcCommand::Copy` for image MIME preservation | Pending PR 1 |
-| D17 | Rename `filter_entries` → `filter_and_query` in `shared/src/picker.rs` | Pending PR 2 |
+| D16 | Add `mime: Option<String>` to `IpcCommand::Copy` for image MIME preservation | Recorded |
+| D17 | Rename `filter_entries` → `filter_and_query` in `shared/src/picker.rs` | Recorded |
 | D18 | PR 5 ships PreviewPane without WebKit; PR 5.5 adds optional webkit6 | Recorded |
 | D19 | `ui-check` and `ui-smoke` are manual-only, not CI | Recorded |
 | D20 | IPC changes are atomic per PR (all match arms + constructor + test) | Enforced |
 | D21 | Reducer tests must not require GTK init | Enforced |
 
+## Remaining Partials
+
+- `crates/applet/src/main.rs` is still 154 LOC, above the 100 LOC review target.
+- `crates/hypr-picker/src/main.rs` is still 97 LOC, above the 50 LOC review target.
+- The review checklist still has a few manual runtime / packaging boxes that need explicit confirmation.
+
 ## GTK/libadwaita Versions in Use
 
-Checked against `Cargo.lock` and pkg-config at build time.
+Checked against `Cargo.lock` and pkg-config at build time. Reconfirm before any future GTK API work; this snapshot is tied to the current `dev` checkout.
 
 ## Pre-commit Status
 

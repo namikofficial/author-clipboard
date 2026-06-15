@@ -15,6 +15,10 @@
 > Each PR ends with `just verify` green. `ui-check` and `ui-smoke` are
 > manual-only (not wired into CI). Decisions D11–D14 are recorded in
 > `09-decisions.md` as deviations from the original spec are forced.
+>
+> Status update: PR0 through PR7 are landed on `dev`, `just verify` is
+> green, and `docs/023-current-state.md` now reflects the finished state.
+> This document is retained as the execution record and rollback map.
 
 ---
 

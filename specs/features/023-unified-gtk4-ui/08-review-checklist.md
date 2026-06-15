@@ -11,8 +11,8 @@
 ## Architecture
 
 - [x] `crates/ui-gtk/` exists and is the only place widget code lives
-- [ ] `crates/applet/src/main.rs` ≤ 100 LOC (currently 154 — T016 target not fully met)
-- [ ] `crates/hypr-picker/src/main.rs` ≤ 50 LOC (currently 94 — T017 target not fully met)
+- [ ] `crates/applet/src/main.rs` ≤ 100 LOC (currently 154 — T016 target still above target)
+- [ ] `crates/hypr-picker/src/main.rs` ≤ 50 LOC (currently 97 — T017 target still above target)
 - [x] `shared::picker` has the new `PickerFilter` enum
 - [x] `ctl picker` exposes `--filter` and uses the new enum
 - [x] `just verify` is green
@@ -77,8 +77,8 @@
 - [x] `docs/UI.md` exists with tokens, shortcuts, widget catalog
 - [x] `README.md` has inline popup and manager screenshots generated from the real GTK app
 - [x] 6 PNGs in `docs/UI/snapshots/` generated via `just ui-smoke`
-- [ ] `docs/HYPRLAND.md` updated with new `author-clipboard` binary
-- [ ] `CHANGELOG.md` updated under `[Unreleased]`
+- [x] `docs/HYPRLAND.md` updated with new `author-clipboard` binary
+- [x] `CHANGELOG.md` updated under `[Unreleased]`
 
 ## Packaging (maintainer task; not automated)
 

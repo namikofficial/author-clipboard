@@ -3,8 +3,11 @@
 > Development roadmap and technical specifications for the COSMIC-native clipboard manager with wlroots compositor support
 
 **Document Version:** 1.3.1
-**Last Updated:** June 8, 2026
+**Last Updated:** June 15, 2026
 **Project Status:** Phase 19 implementation complete on `dev` — pre-release, targeting `0.6.0`. Latest **released** version: `v0.3.1` on `main`. See [`SECURITY.md`](../SECURITY.md) and [`CHANGELOG.md`](../CHANGELOG.md) for the authoritative split.
+
+> The unified GTK4 UI rewrite tracked in [`specs/features/023-unified-gtk4-ui/`](specs/features/023-unified-gtk4-ui/) is now complete on `dev`, and `just verify` is green.
+> The next tactical pass is UI cohesion/polish, tracked in [`specs/features/024-ui-cohesion-polish/`](specs/features/024-ui-cohesion-polish/).
 
 > **Read first**
 > This document describes the development plan and the implementation

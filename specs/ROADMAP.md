@@ -2,6 +2,9 @@
 
 > High-level project tracking for author-clipboard development.
 
+> Note: the unified GTK4 UI rewrite tracked in `specs/features/023-unified-gtk4-ui/` is complete on `dev`. This roadmap now tracks the remaining product phases and broader maintenance work.
+> The next UI-focused tactical pass is tracked in `specs/features/024-ui-cohesion-polish/`.
+
 ---
 
 ## Vision
@@ -101,4 +104,4 @@ cargo test -p author-clipboard-mcp
 
 ---
 
-**Last Updated**: Phase 16
+**Last Updated**: Phase 19

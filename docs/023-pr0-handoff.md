@@ -1,5 +1,7 @@
 # PR 0 Handoff — Audit Complete
 
+> Historical note: this file captures the PR0 baseline. The feature has since landed on `dev`; use `docs/023-current-state.md` and the task-plan status table for the current truth.
+
 ## What was done
 
 - Fixed all clippy errors across all crates (correctness, suspicious, complexity, perf, style, pedantic warnings elevated to deny)

@@ -524,9 +524,9 @@ grep -c "docs/UI" README.md   # ≥ 2
 
 | Task | Status | Notes |
 |------|--------|-------|
-| T001 | | |
-| T002 | | |
-| T003 | | |
+| T001 | ✅ (PR 0) | GTK4/libadwaita/glib/gio/sourceview5 deps are in workspace Cargo.toml and build inputs. |
+| T002 | ✅ (PR 0) | `crates/ui-gtk` exists with `run_popup` / `run_manager` entry points. |
+| T003 | ✅ (PR 0 + PR 7) | `style.css` has the design tokens and `assets/icons/` contains the symbolic SVG set. |
 | T004 | ✅ (PR 3A + PR 3B) | AppState (plain Rust), Action (29 variants), Effect (14 variants), reduce() with 42 unit tests. No glib::Properties, no GTK deps in tests. |
 | T005 | ✅ (PR 4) | `resolve_escape`, `install_esc_handler`, `FocusChain` in `controller/focus.rs` |
 | T006 | ✅ (PR 4) | GSettings schema + `SettingsBinding` in `settings.rs`; 7 keys bound |
