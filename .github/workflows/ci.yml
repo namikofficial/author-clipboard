@@ -152,12 +152,12 @@ jobs:
           cd packaging/arch
           PKGNAME=$(sed -n 's/^pkgname=//p' PKGBUILD)
           PKGVER=$(sed -n 's/^pkgver=//p' PKGBUILD)
+          git config --system --add safe.directory "$GITHUB_WORKSPACE"
           git -C ../.. archive \
             --format=tar.gz \
             --prefix="$PKGNAME-$PKGVER/" \
             --output="$PWD/$PKGNAME-$PKGVER.tar.gz" \
             HEAD
-          git config --system --add safe.directory "$GITHUB_WORKSPACE"
           chown -R builder:builder "$GITHUB_WORKSPACE"
           runuser -u builder -- env HOME=/home/builder \
             bash --noprofile --norc -c "
