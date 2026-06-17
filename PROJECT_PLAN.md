@@ -542,6 +542,8 @@ CREATE INDEX idx_pinned ON clipboard_items(pinned);
 | SECURITY.md | ✅ Complete | Threat model, encryption details, sensitive detection, disclosure policy |
 | CODEOWNERS | ✅ Complete | `.github/CODEOWNERS` for contribution area ownership |
 | Screen lock detection | ✅ Complete | `loginctl` and D-Bus `org.freedesktop.ScreenSaver` support |
+| Regex denylist (Phase 15) | ✅ Complete | `ContentPatternMode::Regex` via `regex` crate, lazy compile cache, fail-open on invalid patterns. Spec: [`specs/features/025-phase15-denylist/`](../specs/features/025-phase15-denylist/) |
+| Source-app denylist (Phase 15) | ✅ Complete (forward-compatible) | `app_denylist` config + `is_app_denied` matcher; wired into capture path. Currently a no-op because `wlr-data-control` does not expose source-app info. See [`specs/features/025-phase15-denylist/09-decisions.md`](../specs/features/025-phase15-denylist/09-decisions.md) |
 
 ### Completed Milestones
 
@@ -558,6 +560,7 @@ CREATE INDEX idx_pinned ON clipboard_items(pinned);
 - ✅ SECURITY.md, CODEOWNERS, screen lock detection (Phase 14)
 - ✅ Phase 18: Distribution packaging & release artifacts (AUR, Flatpak, AppImage, Nix)
 - ✅ Phase 19: Hyprland-native UX & wlroots polish (Waybar module, AUR package, Nix flake, demo docs)
+- ✅ Phase 15 partial: regex denylist + `app_denylist` (see note above re: Wayland limitation)
 
 ### Next Milestones
 
@@ -702,10 +705,10 @@ The project is committed to remaining open-source and free. The following planne
 
 Planned Deliverables
 - [x] "Never store" rules: MIME type denylist and simple content pattern exclusion rules
-- [ ] Full regex denylist support, if needed beyond the current simple prefix/suffix/substring matching
-- [ ] Clipboard ignore rules by source application (where Wayland allows)
+- [x] Full regex denylist support (`content_pattern_mode: "regex"` — uses `regex` crate, lazy compile cache, fail-open on invalid patterns). See [`specs/features/025-phase15-denylist/`](../specs/features/025-phase15-denylist/).
+- [x] Clipboard ignore rules by source application (`app_denylist` config + `is_app_denied` matcher; **forward-compatible only today** — the `wlr-data-control` protocol does not expose source-app metadata to the daemon, so the rule currently never matches. The matcher is wired into the capture path and will activate as soon as a compositor exposes source-app info via `ext-data-control-v1` or similar. See [`specs/features/025-phase15-denylist/09-decisions.md`](../specs/features/025-phase15-denylist/09-decisions.md).)
 - [ ] Encrypted export/import (password-protected JSON backup)
-- [ ] Snippets & templates with token replacement and preview
+- [ ] Snippets & templates with token replacement and preview (basic CRUD exists via DB + IPC + UI; **token replacement engine not yet implemented**)
 - [ ] Per-item hotkeys and multi-step paste macros
 - [ ] OCR pipeline (Tesseract or Rust bindings) and confidence UI for images
 
