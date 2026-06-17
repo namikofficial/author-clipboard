@@ -46,6 +46,9 @@ fn default_content_denylist() -> Vec<String> {
 fn default_content_pattern_mode() -> ContentPatternMode {
     ContentPatternMode::Substring
 }
+fn default_app_denylist() -> Vec<String> {
+    vec![]
+}
 
 /// Pattern matching mode for content denylist.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -55,9 +58,53 @@ pub enum ContentPatternMode {
     Prefix,
     Suffix,
     Exact,
+    /// Match each entry in `content_denylist` as a regular expression
+    /// against the candidate content. Invalid patterns are logged once
+    /// at load time and treated as non-matching.
+    Regex,
 }
 
-/// Default picker UI mode.
+/// Lazily-compiled regex cache for the `content_pattern_mode = Regex` mode.
+///
+/// Caches compilation results on first call. Always considered equal
+/// across instances so `Config`'s derived `PartialEq` stays usable —
+/// the cache contents are a deterministic function of `content_denylist`,
+/// which IS part of the equality check.
+#[derive(Debug, Default)]
+pub struct CompiledRegexCache {
+    inner: std::sync::OnceLock<Vec<Option<regex::Regex>>>,
+}
+
+impl CompiledRegexCache {
+    /// Compile (if not already) and return a reference to the cached
+    /// compilation results.
+    pub fn get_or_init<F>(&self, compile: F) -> &[Option<regex::Regex>]
+    where
+        F: FnOnce() -> Vec<Option<regex::Regex>>,
+    {
+        self.inner.get_or_init(compile);
+        // SAFETY: `get_or_init` above guaranteed the value is present.
+        self.inner.get().expect("OnceLock just initialized")
+    }
+}
+
+impl PartialEq for CompiledRegexCache {
+    fn eq(&self, _other: &Self) -> bool {
+        // Cache contents are derived from `content_denylist`, which is
+        // itself part of `Config`'s equality. Treating two caches as
+        // always equal keeps `Config`'s derived `PartialEq` well-defined
+        // even though `regex::Regex` does not implement `PartialEq`.
+        true
+    }
+}
+
+impl Clone for CompiledRegexCache {
+    fn clone(&self) -> Self {
+        // A fresh clone has no cached compilations; they'll be rebuilt
+        // lazily on first use.
+        Self::default()
+    }
+}
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum PickerMode {
@@ -156,12 +203,24 @@ pub struct Config {
     /// Content patterns that should never be stored (matched according to `content_pattern_mode`).
     #[serde(default = "default_content_denylist", alias = "content_regex_denylist")]
     pub content_denylist: Vec<String>,
-    /// How to match content patterns: `substring`, `prefix`, `suffix`, or `exact`.
+    /// How to match content patterns: `substring`, `prefix`, `suffix`, `exact`, or `regex`.
     #[serde(default = "default_content_pattern_mode")]
     pub content_pattern_mode: ContentPatternMode,
+    /// Source-app ignore list (basenames, ASCII-case-insensitive).
+    ///
+    /// Items whose `source_app` matches any entry here are dropped
+    /// before storage. Currently a no-op because `wlr-data-control`
+    /// does not expose source-app info — see
+    /// `specs/features/025-phase15-denylist/09-decisions.md`.
+    #[serde(default = "default_app_denylist")]
+    pub app_denylist: Vec<String>,
     /// Configuration for picker UIs.
     #[serde(default)]
     pub picker: PickerConfig,
+    /// Cached compiled regexes for `content_pattern_mode = Regex`. Populated
+    /// lazily on the first call to `is_content_denied`; never serialized.
+    #[serde(skip)]
+    compiled_regex_cache: CompiledRegexCache,
 }
 
 impl Default for Config {
@@ -179,7 +238,9 @@ impl Default for Config {
             mime_denylist: default_mime_denylist(),
             content_denylist: default_content_denylist(),
             content_pattern_mode: default_content_pattern_mode(),
+            app_denylist: default_app_denylist(),
             picker: PickerConfig::default(),
+            compiled_regex_cache: CompiledRegexCache::default(),
         }
     }
 }
@@ -276,14 +337,87 @@ impl Config {
     /// Check if content matches any pattern in the denylist.
     #[must_use]
     pub fn is_content_denied(&self, content: &str) -> bool {
-        self.content_denylist
-            .iter()
-            .any(|pattern| match self.content_pattern_mode {
+        match self.content_pattern_mode {
+            ContentPatternMode::Regex => self.content_denied_by_regex(content),
+            other => self.content_denylist.iter().any(|pattern| match other {
                 ContentPatternMode::Substring => content.contains(pattern),
                 ContentPatternMode::Prefix => content.starts_with(pattern),
                 ContentPatternMode::Suffix => content.ends_with(pattern),
                 ContentPatternMode::Exact => content == pattern,
+                ContentPatternMode::Regex => unreachable!("handled above"),
+            }),
+        }
+    }
+
+    /// Regex-mode content denylist check.
+    ///
+    /// Compiles patterns once on first call and caches the result.
+    /// Invalid patterns are stored as `None` and a single
+    /// `tracing::warn!` is emitted naming the bad pattern — see
+    /// `specs/features/025-phase15-denylist/09-decisions.md` for the
+    /// fail-open rationale.
+    fn content_denied_by_regex(&self, content: &str) -> bool {
+        use regex::Regex;
+
+        let cache = self.compiled_regex_cache.get_or_init(|| {
+            self.content_denylist
+                .iter()
+                .map(|p| Regex::new(p).ok())
+                .collect()
+        });
+
+        cache
+            .iter()
+            .zip(self.content_denylist.iter())
+            .any(|(re_opt, raw)| {
+                if let Some(re) = re_opt {
+                    re.is_match(content)
+                } else {
+                    tracing::warn!(
+                        pattern = raw.as_str(),
+                        "Invalid regex in content_denylist; treating as no-match",
+                    );
+                    false
+                }
             })
+    }
+
+    /// Check if a source app is in the ignore list.
+    ///
+    /// Matching rules:
+    /// - `None` (no source-app info available) always returns `false`.
+    /// - Empty config list returns `false`.
+    /// - The rule is matched against any `/`-separated path component
+    ///   of the source app string (so a rule of `KeePassXC` matches both
+    ///   the bare name `keepassxc` and paths like
+    ///   `/opt/KeePassXC/keepassxc-bin`).
+    /// - Comparison is ASCII-case-insensitive.
+    /// - Empty rule strings never match.
+    ///
+    /// Note: the `wlr-data-control` protocol does not currently expose
+    /// source-app metadata to the daemon, so this is a no-op in
+    /// practice today. See
+    /// `specs/features/025-phase15-denylist/09-decisions.md`.
+    #[must_use]
+    pub fn is_app_denied(&self, source_app: Option<&str>) -> bool {
+        let Some(app) = source_app else {
+            return false;
+        };
+        if self.app_denylist.is_empty() {
+            return false;
+        }
+        let app_lower = app.to_ascii_lowercase();
+        self.app_denylist.iter().any(|rule| {
+            if rule.is_empty() {
+                return false;
+            }
+            let rule_lower = rule.to_ascii_lowercase();
+            // Match the bare app name or any path component.
+            app_lower == rule_lower
+                || app_lower
+                    .split('/')
+                    .any(|component| component == rule_lower)
+        })
     }
 }
 
@@ -318,7 +452,9 @@ mod tests {
             mime_denylist: vec!["application/x-secret".to_string()],
             content_denylist: vec!["SECRET".to_string()],
             content_pattern_mode: ContentPatternMode::Substring,
+            app_denylist: vec!["keepassxc".to_string()],
             picker: PickerConfig::default(),
+            compiled_regex_cache: CompiledRegexCache::default(),
         };
         let json = serde_json::to_string_pretty(&original).unwrap();
         let loaded: Config = serde_json::from_str(&json).unwrap();
@@ -430,5 +566,93 @@ mod tests {
         };
         assert!(config.is_content_denied("PASSWORD"));
         assert!(!config.is_content_denied("PASSWORD123"));
+    }
+
+    #[test]
+    fn test_content_denylist_regex_match() {
+        let config = Config {
+            content_denylist: vec![r"^ghp_[A-Za-z0-9]{36}$".to_string()],
+            content_pattern_mode: ContentPatternMode::Regex,
+            ..Default::default()
+        };
+        assert!(config.is_content_denied("ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789"));
+        assert!(!config.is_content_denied("hello world"));
+    }
+
+    #[test]
+    fn test_content_denylist_regex_no_match() {
+        let config = Config {
+            content_denylist: vec![r"\b\d{3}-\d{2}-\d{4}\b".to_string()],
+            content_pattern_mode: ContentPatternMode::Regex,
+            ..Default::default()
+        };
+        // SSN-shaped pattern should not match arbitrary text
+        assert!(!config.is_content_denied("totally safe content"));
+    }
+
+    #[test]
+    fn test_content_denylist_regex_invalid_pattern_does_not_panic() {
+        // Invalid regex (unclosed character class) must not crash and must
+        // treat the pattern as no-match. See 09-decisions.md.
+        let config = Config {
+            content_denylist: vec!["[unclosed".to_string()],
+            content_pattern_mode: ContentPatternMode::Regex,
+            ..Default::default()
+        };
+        // Doesn't panic on either side of the invalid pattern
+        assert!(!config.is_content_denied("anything"));
+        assert!(!config.is_content_denied("[unclosed"));
+    }
+
+    #[test]
+    fn test_app_denylist_none() {
+        let config = Config::default();
+        assert!(!config.is_app_denied(None));
+        assert!(!config.is_app_denied(Some("firefox")));
+    }
+
+    #[test]
+    fn test_app_denylist_empty_config() {
+        let config = Config {
+            app_denylist: vec![],
+            ..Default::default()
+        };
+        assert!(!config.is_app_denied(Some("keepassxc")));
+    }
+
+    #[test]
+    fn test_app_denylist_match_basename() {
+        let config = Config {
+            app_denylist: vec!["firefox".to_string()],
+            ..Default::default()
+        };
+        // Path basename, exact case
+        assert!(config.is_app_denied(Some("/usr/bin/firefox")));
+        // Already a bare name
+        assert!(config.is_app_denied(Some("firefox")));
+        // Different name
+        assert!(!config.is_app_denied(Some("chromium")));
+    }
+
+    #[test]
+    fn test_app_denylist_case_insensitive() {
+        let config = Config {
+            app_denylist: vec!["KeePassXC".to_string()],
+            ..Default::default()
+        };
+        assert!(config.is_app_denied(Some("keepassxc")));
+        assert!(config.is_app_denied(Some("KEEPASSXC")));
+        assert!(config.is_app_denied(Some("/opt/KeePassXC/keepassxc-bin")));
+        assert!(!config.is_app_denied(Some("firefox")));
+    }
+
+    #[test]
+    fn test_app_denylist_empty_rule_never_matches() {
+        let config = Config {
+            app_denylist: vec![String::new()],
+            ..Default::default()
+        };
+        assert!(!config.is_app_denied(Some("")));
+        assert!(!config.is_app_denied(Some("firefox")));
     }
 }

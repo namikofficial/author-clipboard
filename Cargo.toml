@@ -106,6 +106,7 @@ sha2 = "0.10"
 
 # Utilities
 uuid = { version = "1", features = ["v4"] }
+regex = "1"
 
 # MCP
 mcp-spec = "0.1"

@@ -295,6 +295,12 @@ impl Dispatch<ZwlrDataControlDeviceV1, ()> for AppState {
                                     || state.config.is_content_denied(&html_content)
                                 {
                                     debug!("Content blocked by denylist rules, skipping");
+                                } else if state.config.is_app_denied(None) {
+                                    // wlr-data-control does not currently expose
+                                    // source-app info; this branch is
+                                    // forward-compatible — see
+                                    // specs/features/025-phase15-denylist/09-decisions.md
+                                    debug!("Content blocked by app denylist, skipping");
                                 } else {
                                     let preview = if plain_text.len() > 80 {
                                         format!("{}...", &plain_text[..80])
@@ -336,6 +342,9 @@ impl Dispatch<ZwlrDataControlDeviceV1, ()> for AppState {
                                     || state.config.is_content_denied(&file_list)
                                 {
                                     debug!("Content blocked by denylist rules, skipping");
+                                } else if state.config.is_app_denied(None) {
+                                    // See deviation note above; currently a no-op.
+                                    debug!("Content blocked by app denylist, skipping");
                                 } else {
                                     let file_count = file_list
                                         .lines()
@@ -376,6 +385,9 @@ impl Dispatch<ZwlrDataControlDeviceV1, ()> for AppState {
                                     || state.config.is_content_denied(&content)
                                 {
                                     debug!("Content blocked by denylist rules, skipping");
+                                } else if state.config.is_app_denied(None) {
+                                    // See deviation note above; currently a no-op.
+                                    debug!("Content blocked by app denylist, skipping");
                                 } else {
                                     let preview = if content.len() > 80 {
                                         format!("{}...", &content[..80])
@@ -1093,6 +1105,8 @@ impl IpcHandlerState {
                 "dedup_window_seconds": self.config.dedup_window_seconds,
                 "mime_denylist": self.config.mime_denylist,
                 "content_denylist": self.config.content_denylist,
+                "content_pattern_mode": self.config.content_pattern_mode,
+                "app_denylist": self.config.app_denylist,
                 "picker": {
                     "default_mode": self.config.picker.default_mode,
                     "default_source": self.config.picker.default_source,
