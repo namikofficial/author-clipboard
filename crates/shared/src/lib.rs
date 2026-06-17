@@ -35,6 +35,8 @@ pub mod sensitive;
 pub mod shortcut;
 /// Symbol data organized by category for picker UIs.
 pub mod symbols;
+/// Snippet template rendering with `${name}` variable substitution.
+pub mod template;
 /// Core data types for clipboard items and events.
 pub mod types;
 

@@ -875,6 +875,26 @@ impl Database {
         Ok(())
     }
 
+    /// Fetch a single snippet by id.
+    ///
+    /// Returns `Ok(None)` when no row matches the id (not an error).
+    pub fn get_snippet(&self, id: i64) -> SqlResult<Option<Snippet>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, name, content, updated_at FROM snippets WHERE id = ?1")?;
+        let mut rows = stmt.query([id])?;
+        match rows.next()? {
+            Some(row) => Ok(Some(Snippet {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                content: row.get(2)?,
+                updated_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(3)?)
+                    .map_or_else(|_| chrono::Utc::now(), |dt| dt.with_timezone(&chrono::Utc)),
+            })),
+            None => Ok(None),
+        }
+    }
+
     /// Search snippets by name or content (case-insensitive substring).
     pub fn search_snippets(&self, query: &str) -> SqlResult<Vec<Snippet>> {
         let pattern = format!("%{query}%");

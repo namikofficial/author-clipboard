@@ -259,6 +259,16 @@ pub enum IpcCommand {
     },
     /// Delete a snippet.
     DeleteSnippet { id: i64 },
+    /// Render a snippet template against the daemon's current context.
+    ///
+    /// Response payload on success:
+    /// ```json
+    /// { "content": "<rendered text>", "cursor_offset": <usize or null> }
+    /// ```
+    /// On missing id, returns an error with code `SNIPPET_NOT_FOUND`.
+    ///
+    /// See `specs/features/026-snippet-templates/`.
+    RenderSnippet { id: i64 },
 
     // ── Collections ───────────────────────────────────────────────
     /// List all collections.
@@ -531,6 +541,7 @@ impl IpcClient {
             IpcCommand::ListSnippets => "ListSnippets",
             IpcCommand::UpsertSnippet { .. } => "UpsertSnippet",
             IpcCommand::DeleteSnippet { .. } => "DeleteSnippet",
+            IpcCommand::RenderSnippet { .. } => "RenderSnippet",
             IpcCommand::ToggleStar { .. } => "ToggleStar",
             IpcCommand::ListCollections => "ListCollections",
             IpcCommand::CreateCollection { .. } => "CreateCollection",

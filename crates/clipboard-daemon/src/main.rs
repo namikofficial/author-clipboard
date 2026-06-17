@@ -988,6 +988,46 @@ impl IpcHandlerState {
                 self.broadcast("SnippetDeleted", &serde_json::json!({"id": id}));
                 IpcResponse::ok(serde_json::json!({"deleted_id": id}))
             }
+            IpcCommand::RenderSnippet { id } => {
+                let snippet = {
+                    let db = self.db.lock().unwrap();
+                    match db.get_snippet(id) {
+                        Ok(Some(s)) => s,
+                        Ok(None) => {
+                            return IpcResponse::err(
+                                "SNIPPET_NOT_FOUND",
+                                format!("No snippet with id={id}"),
+                            );
+                        }
+                        Err(e) => {
+                            return IpcResponse::err(
+                                "DB_ERROR",
+                                format!("Failed to load snippet {id}: {e}"),
+                            );
+                        }
+                    }
+                };
+                // `${clipboard}` is not populated here because the IPC
+                // handler doesn't share state with the Wayland capture
+                // loop. Picker preview uses `render_now` (no clipboard)
+                // anyway. A follow-up can plumb `last_content` through
+                // a shared Arc when needed — see
+                // specs/features/026-snippet-templates/09-decisions.md.
+                let ctx = author_clipboard_shared::template::RenderContext {
+                    now: None, // render() falls back to Utc::now()
+                    clipboard: None,
+                    user: std::env::var("USER")
+                        .ok()
+                        .or_else(|| std::env::var("LOGNAME").ok()),
+                    hostname: std::env::var("HOSTNAME").ok(),
+                };
+                let (rendered, cursor_offset) =
+                    author_clipboard_shared::template::render(&snippet.content, &ctx);
+                IpcResponse::ok(serde_json::json!({
+                    "content": rendered,
+                    "cursor_offset": cursor_offset,
+                }))
+            }
 
             // ── Collections ──────────────────────────────────────────────
             IpcCommand::ListCollections => {

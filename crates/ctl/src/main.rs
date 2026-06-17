@@ -101,6 +101,24 @@ enum Command {
     },
     /// Print recommended Hyprland config for keybinds and window rules
     HyprlandConfig,
+    /// Render a snippet template and write the result to the clipboard.
+    ///
+    /// Accepts the snippet name or numeric id. By default, the rendered
+    /// text is copied to the clipboard AND printed to stdout. Use
+    /// `--stdout` to skip the clipboard write, or `--cursor-offset` to
+    /// also print the byte offset of the `${cursor}` marker.
+    ///
+    /// See `specs/features/026-snippet-templates/`.
+    ExpandSnippet {
+        /// Snippet name, or numeric id (e.g. `42`).
+        name_or_id: String,
+        /// Print to stdout only; do not touch the clipboard.
+        #[arg(long)]
+        stdout: bool,
+        /// Also print `text<TAB>offset` after the rendered text.
+        #[arg(long)]
+        cursor_offset: bool,
+    },
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
@@ -365,6 +383,11 @@ fn main() -> Result<()> {
         }
         Command::Doctor => run_doctor(),
         Command::Copy { id } => copy_item_by_id(id)?,
+        Command::ExpandSnippet {
+            name_or_id,
+            stdout,
+            cursor_offset,
+        } => run_expand_snippet(&name_or_id, stdout, cursor_offset)?,
         Command::Picker {
             menu,
             source,
@@ -519,6 +542,117 @@ fn run_doctor() {
             "unsupported"
         }
     );
+}
+
+#[allow(clippy::single_match_else)]
+fn run_expand_snippet(name_or_id: &str, stdout_only: bool, show_cursor_offset: bool) -> Result<()> {
+    // Resolve name → id if the argument isn't numeric.
+    let id = if let Ok(n) = name_or_id.parse::<i64>() {
+        n
+    } else {
+        // List snippets, match by exact name.
+        let client = IpcClient::new();
+        let resp = client
+            .send_command(&IpcCommand::ListSnippets)
+            .context("Failed to list snippets")?;
+        let snippets = resp
+            .data
+            .as_ref()
+            .and_then(|d| d.get("snippets"))
+            .and_then(|s| s.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let mut found: Option<i64> = None;
+        for s in &snippets {
+            let sname = s.get("name").and_then(|n| n.as_str()).unwrap_or("");
+            let sid = s.get("id").and_then(serde_json::Value::as_i64).unwrap_or(0);
+            if sname == name_or_id {
+                found = Some(sid);
+                break;
+            }
+        }
+        match found {
+            Some(id) => id,
+            None => {
+                eprintln!("No snippet named '{name_or_id}'");
+                std::process::exit(3);
+            }
+        }
+    };
+
+    let client = IpcClient::new();
+    let resp = client
+        .send_command(&IpcCommand::RenderSnippet { id })
+        .context("Failed to render snippet")?;
+
+    if !resp.ok {
+        let code = resp.error.as_ref().map_or("UNKNOWN", |e| e.code.as_str());
+        let message = resp
+            .error
+            .as_ref()
+            .map_or("(no detail)", |e| e.message.as_str());
+        if code == "SNIPPET_NOT_FOUND" {
+            eprintln!("Snippet id={id} not found");
+        } else {
+            eprintln!("Error ({code}): {message}");
+        }
+        std::process::exit(4);
+    }
+
+    let data = resp
+        .data
+        .as_ref()
+        .context("RenderSnippet returned no data")?;
+    let content = data
+        .get("content")
+        .and_then(|v| v.as_str())
+        .context("RenderSnippet response missing 'content'")?
+        .to_owned();
+    let cursor = data
+        .get("cursor_offset")
+        .and_then(serde_json::Value::as_u64);
+
+    if show_cursor_offset {
+        // Machine-friendly: text<TAB>offset. Useful for piping into
+        // smart-paste tooling that consumes the offset separately.
+        match cursor {
+            Some(off) => println!("{content}\t{off}"),
+            None => println!("{content}\t"),
+        }
+    } else {
+        println!("{content}");
+    }
+
+    if !stdout_only {
+        // Copy to clipboard via the existing IPC Copy command using a
+        // synthetic data path: write to the system clipboard directly
+        // with wl-copy. This avoids needing a new IPC command for
+        // "set clipboard to arbitrary text".
+        let wlcopy = ProcessCommand::new("wl-copy")
+            .arg("--type")
+            .arg("text/plain")
+            .stdin(Stdio::piped())
+            .spawn();
+        match wlcopy {
+            Ok(mut child) => {
+                if let Some(stdin) = child.stdin.as_mut() {
+                    use std::io::Write;
+                    let _ = stdin.write_all(content.as_bytes());
+                }
+                let status = child.wait().context("wl-copy failed")?;
+                if !status.success() {
+                    eprintln!(
+                        "wl-copy exited with status {status}; rendered text printed but not copied"
+                    );
+                }
+            }
+            Err(e) => {
+                eprintln!("wl-copy not available ({e}); rendered text printed but not copied");
+            }
+        }
+    }
+
+    Ok(())
 }
 
 #[allow(clippy::single_match_else)]

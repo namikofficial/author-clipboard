@@ -470,6 +470,23 @@ pub fn snippet_preview(snippet: Snippet) -> PickerEntry {
     }
 }
 
+/// Render a preview label for a picker entry.
+///
+/// For snippet entries, returns the template-rendered text (capped at
+/// 80 chars). For all other sources, returns the entry's existing
+/// subtitle (or empty string when unset). UI surfaces can call this
+/// without worrying about template syntax — non-snippet entries are
+/// unaffected. See `specs/features/026-snippet-templates/`.
+#[must_use]
+pub fn rendered_preview(entry: &PickerEntry) -> String {
+    if entry.source == PickerSource::Snippets {
+        let (rendered, _) = crate::template::render_now(&entry.content);
+        truncate_plain(&rendered, 80)
+    } else {
+        entry.subtitle.clone().unwrap_or_default()
+    }
+}
+
 // ── Expression entry helpers ──────────────────────────────────────
 
 /// Build picker entries for emoji characters.
@@ -1103,6 +1120,41 @@ mod tests {
         assert_eq!(entry.title, "greeting");
         assert_eq!(entry.content, "hello world");
         assert!(!entry.sensitive);
+    }
+
+    #[test]
+    fn test_rendered_preview_passthrough_for_non_snippet() {
+        let entry = PickerEntry {
+            id: None,
+            source: PickerSource::Emoji,
+            content_type: None,
+            title: "smile".to_string(),
+            subtitle: Some("happy face".to_string()),
+            content: "🙂".to_string(),
+            mime_type: None,
+            sensitive: false,
+            pinned: false,
+            starred: false,
+            timestamp: None,
+        };
+        // For non-snippet entries, rendered_preview returns the subtitle.
+        let preview = rendered_preview(&entry);
+        assert_eq!(preview, "happy face");
+    }
+
+    #[test]
+    fn test_rendered_preview_renders_snippet_template() {
+        let snippet = Snippet {
+            id: 2,
+            name: "today".to_string(),
+            content: "Today is ${date}".to_string(),
+            updated_at: Utc::now(),
+        };
+        let entry = snippet_preview(snippet);
+        let preview = rendered_preview(&entry);
+        // ${date} resolves to today's ISO date (any YYYY-MM-DD).
+        assert!(preview.starts_with("Today is 20"));
+        assert!(!preview.contains("${date}"));
     }
 
     // ── PickerFilter tests ───────────────────────────────────────

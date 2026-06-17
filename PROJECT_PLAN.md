@@ -708,7 +708,7 @@ Planned Deliverables
 - [x] Full regex denylist support (`content_pattern_mode: "regex"` — uses `regex` crate, lazy compile cache, fail-open on invalid patterns). See [`specs/features/025-phase15-denylist/`](../specs/features/025-phase15-denylist/).
 - [x] Clipboard ignore rules by source application (`app_denylist` config + `is_app_denied` matcher; **forward-compatible only today** — the `wlr-data-control` protocol does not expose source-app metadata to the daemon, so the rule currently never matches. The matcher is wired into the capture path and will activate as soon as a compositor exposes source-app info via `ext-data-control-v1` or similar. See [`specs/features/025-phase15-denylist/09-decisions.md`](../specs/features/025-phase15-denylist/09-decisions.md).)
 - [ ] Encrypted export/import (password-protected JSON backup)
-- [ ] Snippets & templates with token replacement and preview (basic CRUD exists via DB + IPC + UI; **token replacement engine not yet implemented**)
+- [x] Snippets & templates with token replacement and preview (`${name}` substitution via `shared::template`, `RenderSnippet` IPC, `author-clipboard-ctl expand-snippet` CLI, live preview in the GTK4 snippets page). See [`specs/features/026-snippet-templates/`](../specs/features/026-snippet-templates/). Interactive prompts for missing variables and shell-style command substitution are intentionally out of scope (see [`09-decisions.md`](../specs/features/026-snippet-templates/09-decisions.md)).
 - [ ] Per-item hotkeys and multi-step paste macros
 - [ ] OCR pipeline (Tesseract or Rust bindings) and confidence UI for images
 
