@@ -248,6 +248,20 @@ impl Database {
             self.set_schema_version(9)?;
         }
 
+        if version < 10 {
+            // v10: Saved filters table for query presets
+            self.conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS saved_filters (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL UNIQUE,
+                    query TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );",
+            )?;
+            self.set_schema_version(10)?;
+        }
+
         Ok(())
     }
 
@@ -1043,6 +1057,82 @@ impl Database {
         })?;
         rows.collect()
     }
+
+    // ── Saved Filters ─────────────────────────────────────────────────
+
+    /// Create or update a saved filter (upsert by name).
+    pub fn upsert_saved_filter(&self, name: &str, query: &str) -> SqlResult<i64> {
+        let now = chrono::Utc::now().to_rfc3339();
+        self.conn.execute(
+            "INSERT INTO saved_filters (name, query, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?3)
+             ON CONFLICT(name) DO UPDATE SET query=excluded.query, updated_at=excluded.updated_at",
+            rusqlite::params![name, query, &now],
+        )?;
+        // Return the id of the inserted/updated row
+        let id: i64 = self.conn.query_row(
+            "SELECT id FROM saved_filters WHERE name = ?1",
+            [name],
+            |row| row.get(0),
+        )?;
+        Ok(id)
+    }
+
+    /// List all saved filters ordered by name.
+    pub fn list_saved_filters(&self) -> SqlResult<Vec<crate::types::SavedFilter>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, name, query, created_at, updated_at FROM saved_filters ORDER BY name ASC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(crate::types::SavedFilter {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                query: row.get(2)?,
+                created_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(3)?)
+                    .map_or_else(|_| chrono::Utc::now(), |dt| dt.with_timezone(&chrono::Utc)),
+                updated_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(4)?)
+                    .map_or_else(|_| chrono::Utc::now(), |dt| dt.with_timezone(&chrono::Utc)),
+            })
+        })?;
+        rows.collect()
+    }
+
+    /// Get a saved filter by name.
+    pub fn get_saved_filter_by_name(
+        &self,
+        name: &str,
+    ) -> SqlResult<Option<crate::types::SavedFilter>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, name, query, created_at, updated_at FROM saved_filters WHERE name = ?1",
+        )?;
+        let mut rows = stmt.query([name])?;
+        match rows.next()? {
+            Some(row) => Ok(Some(crate::types::SavedFilter {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                query: row.get(2)?,
+                created_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(3)?)
+                    .map_or_else(|_| chrono::Utc::now(), |dt| dt.with_timezone(&chrono::Utc)),
+                updated_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(4)?)
+                    .map_or_else(|_| chrono::Utc::now(), |dt| dt.with_timezone(&chrono::Utc)),
+            })),
+            None => Ok(None),
+        }
+    }
+
+    /// Delete a saved filter by id.
+    pub fn delete_saved_filter(&self, id: i64) -> SqlResult<()> {
+        self.conn
+            .execute("DELETE FROM saved_filters WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    /// Delete a saved filter by name.
+    pub fn delete_saved_filter_by_name(&self, name: &str) -> SqlResult<()> {
+        self.conn
+            .execute("DELETE FROM saved_filters WHERE name = ?1", [name])?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -1271,12 +1361,235 @@ mod tests {
             .unwrap());
     }
 
+    // ── Collections ───────────────────────────────────────────────────
+
+    #[test]
+    fn test_collection_create_and_list() {
+        let db = make_db();
+
+        let id1 = db.create_collection("Work").unwrap();
+        assert!(!id1.is_empty());
+
+        let id2 = db.create_collection("Personal").unwrap();
+        assert!(!id2.is_empty());
+
+        let collections = db.list_collections().unwrap();
+        assert_eq!(collections.len(), 2);
+        assert_eq!(collections[0].name, "Personal"); // Ordered by name
+        assert_eq!(collections[1].name, "Work");
+    }
+
+    #[test]
+    fn test_collection_delete() {
+        let db = make_db();
+
+        let id = db.create_collection("ToDelete").unwrap();
+        assert_eq!(db.list_collections().unwrap().len(), 1);
+
+        db.delete_collection(&id).unwrap();
+        assert_eq!(db.list_collections().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn test_collection_rename() {
+        let db = make_db();
+
+        let id = db.create_collection("OldName").unwrap();
+        db.rename_collection(&id, "NewName").unwrap();
+
+        let collections = db.list_collections().unwrap();
+        assert_eq!(collections.len(), 1);
+        assert_eq!(collections[0].name, "NewName");
+    }
+
+    #[test]
+    fn test_add_to_collection() {
+        let db = make_db();
+
+        let item_id = db
+            .insert_item(&ClipboardItem::new_text("test content".to_string()))
+            .unwrap();
+        let collection_id = db.create_collection("My Collection").unwrap();
+
+        db.add_to_collection(&collection_id, item_id).unwrap();
+
+        let items = db.get_collection_items(&collection_id).unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].id, item_id);
+        assert_eq!(items[0].content, "test content");
+    }
+
+    #[test]
+    fn test_remove_from_collection() {
+        let db = make_db();
+
+        let item_id = db
+            .insert_item(&ClipboardItem::new_text("removeme".to_string()))
+            .unwrap();
+        let collection_id = db.create_collection("Temp").unwrap();
+
+        db.add_to_collection(&collection_id, item_id).unwrap();
+        assert_eq!(db.get_collection_items(&collection_id).unwrap().len(), 1);
+
+        db.remove_from_collection(&collection_id, item_id).unwrap();
+        assert_eq!(db.get_collection_items(&collection_id).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn test_get_item_collections() {
+        let db = make_db();
+
+        let item_id = db
+            .insert_item(&ClipboardItem::new_text("shared item".to_string()))
+            .unwrap();
+        let col1 = db.create_collection("Alpha").unwrap();
+        let col2 = db.create_collection("Beta").unwrap();
+
+        db.add_to_collection(&col1, item_id).unwrap();
+        db.add_to_collection(&col2, item_id).unwrap();
+
+        let collections = db.get_item_collections(item_id).unwrap();
+        assert_eq!(collections.len(), 2);
+        assert!(collections.iter().any(|c| c.name == "Alpha"));
+        assert!(collections.iter().any(|c| c.name == "Beta"));
+    }
+
+    #[test]
+    fn test_collection_item_order() {
+        // Items in a collection should be ordered by added_at DESC (newest first)
+        // When items are added in quick succession with identical timestamps,
+        // the order is non-deterministic, so we just verify all items are present.
+        let db = make_db();
+
+        let collection_id = db.create_collection("Ordered").unwrap();
+
+        let id1 = db
+            .insert_item(&ClipboardItem::new_text("first".to_string()))
+            .unwrap();
+        let id2 = db
+            .insert_item(&ClipboardItem::new_text("second".to_string()))
+            .unwrap();
+        let id3 = db
+            .insert_item(&ClipboardItem::new_text("third".to_string()))
+            .unwrap();
+
+        // Add in reverse order
+        db.add_to_collection(&collection_id, id3).unwrap();
+        db.add_to_collection(&collection_id, id2).unwrap();
+        db.add_to_collection(&collection_id, id1).unwrap();
+
+        let items = db.get_collection_items(&collection_id).unwrap();
+        assert_eq!(items.len(), 3);
+        // Verify all items are in the collection
+        let item_ids: Vec<i64> = items.iter().map(|i| i.id).collect();
+        assert!(item_ids.contains(&id1));
+        assert!(item_ids.contains(&id2));
+        assert!(item_ids.contains(&id3));
+    }
+
+    #[test]
+    fn test_collection_cascade_delete() {
+        // When a collection is deleted, memberships should be removed via CASCADE
+        let db = make_db();
+
+        let item_id = db
+            .insert_item(&ClipboardItem::new_text("orphaned".to_string()))
+            .unwrap();
+        let collection_id = db.create_collection("WillBeDeleted").unwrap();
+
+        db.add_to_collection(&collection_id, item_id).unwrap();
+        db.delete_collection(&collection_id).unwrap();
+
+        // Item should still exist
+        assert!(db.get_by_id(item_id).unwrap().is_some());
+        // But membership should be gone
+        assert!(db.get_item_collections(item_id).unwrap().is_empty());
+    }
+
+    // ── Saved Filters ─────────────────────────────────────────────────
+
+    #[test]
+    fn test_saved_filter_upsert_and_list() {
+        let db = make_db();
+
+        let id1 = db
+            .upsert_saved_filter("work", "type:text pinned:true")
+            .unwrap();
+        assert!(id1 > 0);
+
+        let id2 = db.upsert_saved_filter("pics", "type:image").unwrap();
+        assert!(id2 > 0);
+
+        let filters = db.list_saved_filters().unwrap();
+        assert_eq!(filters.len(), 2);
+        assert_eq!(filters[0].name, "pics");
+        assert_eq!(filters[1].name, "work");
+    }
+
+    #[test]
+    fn test_saved_filter_upsert_updates() {
+        let db = make_db();
+
+        let id1 = db.upsert_saved_filter("myfilter", "type:text").unwrap();
+        let id2 = db
+            .upsert_saved_filter("myfilter", "type:image pinned:true")
+            .unwrap();
+
+        // Same name should return same id (upsert, not insert)
+        assert_eq!(id1, id2);
+
+        let filters = db.list_saved_filters().unwrap();
+        assert_eq!(filters.len(), 1);
+        assert_eq!(filters[0].query, "type:image pinned:true");
+    }
+
+    #[test]
+    fn test_get_saved_filter_by_name() {
+        let db = make_db();
+
+        db.upsert_saved_filter("findme", "type:text").unwrap();
+
+        let found = db.get_saved_filter_by_name("findme").unwrap();
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().query, "type:text");
+
+        let not_found = db.get_saved_filter_by_name("nonexistent").unwrap();
+        assert!(not_found.is_none());
+    }
+
+    #[test]
+    fn test_delete_saved_filter() {
+        let db = make_db();
+
+        db.upsert_saved_filter("todelete", "type:files").unwrap();
+        assert_eq!(db.list_saved_filters().unwrap().len(), 1);
+
+        // Delete by id
+        let id = db.get_saved_filter_by_name("todelete").unwrap().unwrap().id;
+        db.delete_saved_filter(id).unwrap();
+        assert_eq!(db.list_saved_filters().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn test_delete_saved_filter_by_name() {
+        let db = make_db();
+
+        db.upsert_saved_filter("by_name", "app:firefox").unwrap();
+        db.upsert_saved_filter("keep", "type:text").unwrap();
+        assert_eq!(db.list_saved_filters().unwrap().len(), 2);
+
+        db.delete_saved_filter_by_name("by_name").unwrap();
+        let filters = db.list_saved_filters().unwrap();
+        assert_eq!(filters.len(), 1);
+        assert_eq!(filters[0].name, "keep");
+    }
+
     #[test]
     fn test_schema_version() {
         let db = make_db();
-        // After init, version should be 9 (latest)
+        // After init, version should be 10 (latest)
         let version = db.get_schema_version();
-        assert_eq!(version, 9);
+        assert_eq!(version, 10);
     }
 
     #[test]

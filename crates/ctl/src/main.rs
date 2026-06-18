@@ -101,6 +101,16 @@ enum Command {
     },
     /// Print recommended Hyprland config for keybinds and window rules
     HyprlandConfig,
+    /// Manage collections (list, create, delete, rename, add/remove items)
+    Collection {
+        #[command(subcommand)]
+        action: CollectionAction,
+    },
+    /// Manage saved filters (list, create, delete)
+    Filter {
+        #[command(subcommand)]
+        action: FilterAction,
+    },
     /// Render a snippet template and write the result to the clipboard.
     ///
     /// Accepts the snippet name or numeric id. By default, the rendered
@@ -166,6 +176,71 @@ impl From<ActionArg> for PickerAction {
             ActionArg::QuickPaste => PickerAction::QuickPaste,
         }
     }
+}
+
+/// Collection management subcommands
+#[derive(Subcommand)]
+enum CollectionAction {
+    /// List all collections
+    List,
+    /// Create a new collection
+    Create {
+        /// Name of the new collection
+        name: String,
+    },
+    /// Delete a collection by ID
+    Delete {
+        /// Collection ID
+        id: String,
+    },
+    /// Rename a collection
+    Rename {
+        /// Collection ID
+        id: String,
+        /// New name for the collection
+        new_name: String,
+    },
+    /// List items in a collection
+    Items {
+        /// Collection ID
+        id: String,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Add a clipboard item to a collection
+    Add {
+        /// Collection ID
+        collection_id: String,
+        /// Clipboard item ID
+        item_id: i64,
+    },
+    /// Remove a clipboard item from a collection
+    Remove {
+        /// Collection ID
+        collection_id: String,
+        /// Clipboard item ID
+        item_id: i64,
+    },
+}
+
+/// Saved filter management subcommands
+#[derive(Subcommand)]
+enum FilterAction {
+    /// List all saved filters
+    List,
+    /// Create or update a saved filter
+    Save {
+        /// Name of the filter
+        name: String,
+        /// Query string (e.g., "type:text pinned:true")
+        query: String,
+    },
+    /// Delete a saved filter by name
+    Delete {
+        /// Name of the filter to delete
+        name: String,
+    },
 }
 
 #[allow(
@@ -406,6 +481,8 @@ fn main() -> Result<()> {
             filter.as_str(),
         )?,
         Command::HyprlandConfig => print_hyprland_config(),
+        Command::Collection { action } => run_collection(action)?,
+        Command::Filter { action } => run_filter(action)?,
     }
     Ok(())
 }
@@ -688,6 +765,277 @@ fn copy_item_by_id(id: i64) -> Result<()> {
             let result = clipboard::set_clipboard_item(&item, &config.data_dir)
                 .with_context(|| format!("Failed to copy item {id}"))?;
             println!("Copied item {id} as {}", result.mime_type);
+            Ok(())
+        }
+    }
+}
+
+#[allow(clippy::too_many_lines, clippy::single_match_else)]
+fn run_collection(action: CollectionAction) -> Result<()> {
+    let client = IpcClient::new();
+
+    match action {
+        CollectionAction::List => {
+            match client.send_command(&IpcCommand::ListCollections) {
+                Ok(resp) => {
+                    if let Some(data) = resp.data {
+                        let collections = data.get("collections").and_then(|v| v.as_array());
+                        if let Some(collections) = collections {
+                            if collections.is_empty() {
+                                println!("No collections.");
+                            } else {
+                                for col in collections {
+                                    let name =
+                                        col.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+                                    let id = col.get("id").and_then(|v| v.as_str()).unwrap_or("?");
+                                    let created = col
+                                        .get("created_at")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("?");
+                                    println!("{id}  {name}  (created: {created})");
+                                }
+                            }
+                        }
+                    }
+                    Ok(())
+                }
+                Err(_) => {
+                    // Fallback to direct DB access
+                    eprintln!("Daemon not running, using direct DB access");
+                    let config = Config::load();
+                    let db =
+                        Database::open(&config.db_path()).context("Failed to open database")?;
+                    let collections = db
+                        .list_collections()
+                        .context("Failed to list collections")?;
+                    if collections.is_empty() {
+                        println!("No collections.");
+                    } else {
+                        for col in collections {
+                            println!("{}  {}  (created: {})", col.id, col.name, col.created_at);
+                        }
+                    }
+                    Ok(())
+                }
+            }
+        }
+        CollectionAction::Create { name } => {
+            match client.send_command(&IpcCommand::CreateCollection { name: name.clone() }) {
+                Ok(resp) => {
+                    if let Some(data) = resp.data {
+                        let id = data.get("id").and_then(|v| v.as_str()).unwrap_or("?");
+                        println!("Created collection '{name}' with id: {id}");
+                    } else {
+                        println!("Created collection '{name}'");
+                    }
+                    Ok(())
+                }
+                Err(_) => {
+                    // Fallback to direct DB access
+                    eprintln!("Daemon not running, using direct DB access");
+                    let config = Config::load();
+                    let db =
+                        Database::open(&config.db_path()).context("Failed to open database")?;
+                    let id = db
+                        .create_collection(&name)
+                        .context("Failed to create collection")?;
+                    println!("Created collection '{name}' with id: {id}");
+                    Ok(())
+                }
+            }
+        }
+        CollectionAction::Delete { id } => {
+            match client.send_command(&IpcCommand::DeleteCollection { id: id.clone() }) {
+                Ok(_) => {
+                    println!("Deleted collection: {id}");
+                    Ok(())
+                }
+                Err(_) => {
+                    // Fallback to direct DB access
+                    eprintln!("Daemon not running, using direct DB access");
+                    let config = Config::load();
+                    let db =
+                        Database::open(&config.db_path()).context("Failed to open database")?;
+                    db.delete_collection(&id)
+                        .context("Failed to delete collection")?;
+                    println!("Deleted collection: {id}");
+                    Ok(())
+                }
+            }
+        }
+        CollectionAction::Rename { id, new_name } => {
+            match client.send_command(&IpcCommand::RenameCollection {
+                id: id.clone(),
+                new_name: new_name.clone(),
+            }) {
+                Ok(_) => {
+                    println!("Renamed collection {id} to '{new_name}'");
+                    Ok(())
+                }
+                Err(_) => {
+                    // Fallback to direct DB access
+                    eprintln!("Daemon not running, using direct DB access");
+                    let config = Config::load();
+                    let db =
+                        Database::open(&config.db_path()).context("Failed to open database")?;
+                    db.rename_collection(&id, &new_name)
+                        .context("Failed to rename collection")?;
+                    println!("Renamed collection {id} to '{new_name}'");
+                    Ok(())
+                }
+            }
+        }
+        CollectionAction::Items { id, json } => {
+            match client.send_command(&IpcCommand::GetCollectionItems { id: id.clone() }) {
+                Ok(resp) => {
+                    if json {
+                        if let Some(data) = resp.data {
+                            let items = data.get("items");
+                            println!(
+                                "{}",
+                                serde_json::to_string_pretty(&items).unwrap_or_default()
+                            );
+                        }
+                    } else if let Some(data) = resp.data {
+                        let items = data.get("items").and_then(|v| v.as_array());
+                        if let Some(items) = items {
+                            if items.is_empty() {
+                                println!("Collection '{id}' is empty.");
+                            } else {
+                                for item in items {
+                                    let content =
+                                        item.get("content").and_then(|v| v.as_str()).unwrap_or("?");
+                                    let item_id = item
+                                        .get("id")
+                                        .and_then(serde_json::Value::as_i64)
+                                        .unwrap_or(0);
+                                    let content_type = item
+                                        .get("content_type")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("text");
+                                    println!(
+                                        "[{item_id}] {content_type}: {}",
+                                        &content[..content.len().min(60)]
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    Ok(())
+                }
+                Err(_) => {
+                    // Fallback to direct DB access
+                    eprintln!("Daemon not running, using direct DB access");
+                    let config = Config::load();
+                    let db =
+                        Database::open(&config.db_path()).context("Failed to open database")?;
+                    let items = db
+                        .get_collection_items(&id)
+                        .context("Failed to get collection items")?;
+                    if json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&items).unwrap_or_default()
+                        );
+                    } else if items.is_empty() {
+                        println!("Collection '{id}' is empty.");
+                    } else {
+                        for item in items {
+                            let preview = if item.content.len() > 60 {
+                                format!("{}...", &item.content[..60])
+                            } else {
+                                item.content.clone()
+                            };
+                            println!("[{}] {}: {}", item.id, item.content_type.as_str(), preview);
+                        }
+                    }
+                    Ok(())
+                }
+            }
+        }
+        CollectionAction::Add {
+            collection_id,
+            item_id,
+        } => {
+            match client.send_command(&IpcCommand::AddToCollection {
+                collection_id: collection_id.clone(),
+                item_id,
+            }) {
+                Ok(_) => {
+                    println!("Added item {item_id} to collection {collection_id}");
+                    Ok(())
+                }
+                Err(_) => {
+                    // Fallback to direct DB access
+                    eprintln!("Daemon not running, using direct DB access");
+                    let config = Config::load();
+                    let db =
+                        Database::open(&config.db_path()).context("Failed to open database")?;
+                    db.add_to_collection(&collection_id, item_id)
+                        .context("Failed to add to collection")?;
+                    println!("Added item {item_id} to collection {collection_id}");
+                    Ok(())
+                }
+            }
+        }
+        CollectionAction::Remove {
+            collection_id,
+            item_id,
+        } => {
+            match client.send_command(&IpcCommand::RemoveFromCollection {
+                collection_id: collection_id.clone(),
+                item_id,
+            }) {
+                Ok(_) => {
+                    println!("Removed item {item_id} from collection {collection_id}");
+                    Ok(())
+                }
+                Err(_) => {
+                    // Fallback to direct DB access
+                    eprintln!("Daemon not running, using direct DB access");
+                    let config = Config::load();
+                    let db =
+                        Database::open(&config.db_path()).context("Failed to open database")?;
+                    db.remove_from_collection(&collection_id, item_id)
+                        .context("Failed to remove from collection")?;
+                    println!("Removed item {item_id} from collection {collection_id}");
+                    Ok(())
+                }
+            }
+        }
+    }
+}
+
+#[allow(clippy::too_many_lines, clippy::single_match_else)]
+fn run_filter(action: FilterAction) -> Result<()> {
+    let config = Config::load();
+    let db = Database::open(&config.db_path()).context("Failed to open database")?;
+
+    match action {
+        FilterAction::List => {
+            let filters = db
+                .list_saved_filters()
+                .context("Failed to list saved filters")?;
+            if filters.is_empty() {
+                println!("No saved filters.");
+            } else {
+                for f in filters {
+                    println!("{}  {}  (query: {})", f.id, f.name, f.query);
+                }
+            }
+            Ok(())
+        }
+        FilterAction::Save { name, query } => {
+            let id = db
+                .upsert_saved_filter(&name, &query)
+                .context("Failed to save filter")?;
+            println!("Saved filter '{name}' (id: {id}) with query: {query}");
+            Ok(())
+        }
+        FilterAction::Delete { name } => {
+            db.delete_saved_filter_by_name(&name)
+                .context("Failed to delete filter")?;
+            println!("Deleted filter: {name}");
             Ok(())
         }
     }

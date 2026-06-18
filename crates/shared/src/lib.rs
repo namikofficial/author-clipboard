@@ -3,6 +3,8 @@
 //! Provides common types, database operations, configuration management,
 //! IPC communication, and utility modules used by both the daemon and applet.
 
+/// Content classification (text, code, URL, path, JSON, SQL, etc.).
+pub mod classify;
 /// Clipboard restore helpers.
 pub mod clipboard;
 /// Compositor and display server detection utilities.
@@ -25,6 +27,8 @@ pub mod ipc;
 pub mod kaomoji;
 /// Shared picker types and logic for external menus and native pickers.
 pub mod picker;
+/// Query string parser for developer filters (type:, app:, project:, collection:).
+pub mod query;
 /// Quick paste via wtype/ydotool with wl-copy copy fallback.
 pub mod quick_paste;
 /// Screen lock detection for clearing sensitive clipboard items.

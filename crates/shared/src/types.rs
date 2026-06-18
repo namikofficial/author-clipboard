@@ -368,3 +368,16 @@ pub struct Collection {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
+
+/// A saved query filter preset.
+///
+/// Allows users to save named filter combinations like
+/// `type:text pinned:true` for quick access.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SavedFilter {
+    pub id: i64,
+    pub name: String,
+    pub query: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
