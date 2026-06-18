@@ -27,6 +27,14 @@ use wayland_protocols_wlr::data_control::v1::client::{
     zwlr_data_control_offer_v1::{self, ZwlrDataControlOfferV1},
 };
 
+fn truncate_preview(content: &str, max_chars: usize) -> String {
+    if content.chars().count() > max_chars {
+        format!("{}...", content.chars().take(max_chars).collect::<String>())
+    } else {
+        content.to_string()
+    }
+}
+
 /// Tracks MIME types offered by a clipboard data offer.
 #[derive(Debug, Default)]
 struct OfferMimeTypes {
@@ -302,12 +310,10 @@ impl Dispatch<ZwlrDataControlDeviceV1, ()> for AppState {
                                     // specs/features/025-phase15-denylist/09-decisions.md
                                     debug!("Content blocked by app denylist, skipping");
                                 } else {
-                                    let preview = if plain_text.len() > 80 {
-                                        format!("{}...", &plain_text[..80])
-                                    } else if plain_text.is_empty() {
+                                    let preview = if plain_text.is_empty() {
                                         "HTML content".to_string()
                                     } else {
-                                        plain_text.clone()
+                                        truncate_preview(&plain_text, 80)
                                     };
 
                                     let item =
@@ -389,11 +395,7 @@ impl Dispatch<ZwlrDataControlDeviceV1, ()> for AppState {
                                     // See deviation note above; currently a no-op.
                                     debug!("Content blocked by app denylist, skipping");
                                 } else {
-                                    let preview = if content.len() > 80 {
-                                        format!("{}...", &content[..80])
-                                    } else {
-                                        content.clone()
-                                    };
+                                    let preview = truncate_preview(&content, 80);
 
                                     let item = ClipboardItem::new_text(content.clone());
 
@@ -1205,11 +1207,7 @@ impl IpcHandlerState {
                 (
                     item.content.clone(),
                     item.plain_text.clone().unwrap_or_default(),
-                    if item.content.len() > 80 {
-                        format!("{}...", &item.content[..80])
-                    } else {
-                        item.content.clone()
-                    },
+                    truncate_preview(&item.content, 80),
                     item.encrypted,
                 )
             };

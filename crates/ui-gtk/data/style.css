@@ -13,6 +13,7 @@
   --surface-0:     @window_bg_color;
   --surface-1:     @card_bg_color;
   --surface-2:     @view_bg_color;
+  --surface-warm:  mix(@accent_bg_color, @window_bg_color, 0.08);
   --text-0:        @window_fg_color;
   --text-1:        @view_fg_color;
   --text-2:        @dim_label_fg_color;
@@ -44,6 +45,7 @@
   --shadow-sm:     0 1px 2px alpha(@window_fg_color, 0.06);
   --shadow-md:     0 4px 12px alpha(@window_fg_color, 0.10);
   --shadow-lg:     0 8px 24px alpha(@window_fg_color, 0.14);
+  --shadow-panel:  0 18px 48px alpha(@window_fg_color, 0.18);
 
   /* ── Focus ring ─────────────────────────────────────────── */
   /* Shared focus halo applied to all focusable custom widgets. */
@@ -101,7 +103,51 @@ scrollbar slider:hover {
  * status. Each section uses spacing tokens so the rhythm is
  * consistent and feels like one composition. */
 .popup-shell {
-  background: @window_bg_color;
+  background:
+    linear-gradient(145deg,
+      alpha(@accent_bg_color, 0.10),
+      alpha(@window_bg_color, 0.96) 32%,
+      @window_bg_color 100%);
+  border: 1px solid alpha(@accent_bg_color, 0.16);
+  box-shadow: var(--shadow-panel);
+}
+.popup-header {
+  padding: var(--space-xl) var(--space-xl) var(--space-md);
+  border-bottom: 1px solid alpha(@borders_color, 0.70);
+  background:
+    linear-gradient(90deg,
+      alpha(@accent_bg_color, 0.14),
+      alpha(@window_bg_color, 0.48));
+}
+.popup-title {
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: var(--text-0);
+}
+.popup-subtitle {
+  font-size: 12px;
+  color: var(--text-2);
+}
+.popup-mode-chip {
+  border-radius: var(--radius-pill);
+  padding: var(--space-sm) var(--space-lg);
+  background: alpha(@accent_bg_color, 0.14);
+  color: @accent_fg_color;
+  border: 1px solid alpha(@accent_bg_color, 0.28);
+  font-size: 11px;
+  font-weight: 700;
+}
+.popup-close-button {
+  min-width: 34px;
+  min-height: 34px;
+  background: alpha(@window_fg_color, 0.06);
+  border: 1px solid alpha(@borders_color, 0.70);
+}
+.popup-close-button:hover {
+  background: alpha(@error_bg_color, 0.16);
+  color: @error_fg_color;
+  border-color: alpha(@error_bg_color, 0.32);
 }
 .popup-section {
   /* Horizontal padding for every section. Vertical padding is
@@ -124,19 +170,21 @@ scrollbar slider:hover {
   background: transparent;
 }
 .popup-status {
-  padding: var(--space-xs) var(--space-xl);
-  border-top: 1px solid @borders_color;
+  padding: var(--space-sm) var(--space-xl);
+  border-top: 1px solid alpha(@borders_color, 0.70);
   font-size: 11px;
-  color: @text-2;
+  color: var(--text-2);
+  background: alpha(@window_fg_color, 0.025);
 }
 
 /* ── Search entry ─────────────────────────────────────────── */
 .search-entry {
   border-radius: var(--radius-pill);
-  padding: var(--space-xs) var(--space-xl);
-  background: @view_bg_color;
-  border: 1px solid @borders_color;
-  min-height: 36px;
+  padding: var(--space-sm) var(--space-xl);
+  background: alpha(@view_bg_color, 0.88);
+  border: 1px solid alpha(@borders_color, 0.86);
+  min-height: 42px;
+  box-shadow: var(--shadow-sm);
 }
 .search-entry:focus-within {
   border-color: @accent_bg_color;
@@ -197,33 +245,38 @@ scrollbar slider:hover {
 .clipboard-list,
 .snippet-list {
   background: transparent;
-  padding: var(--space-xs) var(--space-md);
+  padding: var(--space-sm) var(--space-md) var(--space-lg);
 }
 .clipboard-list > row {
-  border-radius: var(--radius-md);
-  margin: var(--space-2xs) 0;
+  border-radius: var(--radius-lg);
+  margin: var(--space-xs) 0;
   padding: 0;
 }
 .clipboard-list > row:hover {
-  background: alpha(@accent_bg_color, 0.06);
+  background: alpha(@accent_bg_color, 0.08);
 }
 .clipboard-list > row:selected {
-  background: alpha(@accent_bg_color, 0.18);
+  background: alpha(@accent_bg_color, 0.20);
 }
 
 /* ── Item rows (the cute pill-shaped card) ─────────────────── */
 .item-row {
-  border-radius: var(--radius-md);
-  padding: var(--space-md) var(--space-lg);
+  border-radius: var(--radius-lg);
+  padding: var(--space-lg) var(--space-xl);
   margin: 0;
-  background: transparent;
+  background: alpha(@card_bg_color, 0.74);
+  border: 1px solid alpha(@borders_color, 0.62);
+  box-shadow: var(--shadow-sm);
 }
 .item-row:hover {
-  background: alpha(@accent_bg_color, 0.08);
+  background: alpha(@accent_bg_color, 0.10);
+  border-color: alpha(@accent_bg_color, 0.28);
+  box-shadow: var(--shadow-md);
 }
 .item-row.selected {
   background: alpha(@accent_bg_color, 0.18);
-  box-shadow: var(--shadow-sm);
+  border-color: alpha(@accent_bg_color, 0.38);
+  box-shadow: var(--shadow-md);
 }
 /* Sensitive red left border — set via JS in item_row.rs */
 .item-row.sensitive {
@@ -237,13 +290,13 @@ scrollbar slider:hover {
 }
 
 .item-title {
-  font-size: 13px;
-  font-weight: 500;
+  font-size: 14px;
+  font-weight: 650;
   color: var(--text-0);
 }
 .item-subtitle {
   font-size: 11px;
-  color: var(--text-2);
+  color: alpha(@window_fg_color, 0.68);
 }
 .item-row > .item-row-cluster {
   /* Trailing chip cluster uses the spacing scale for gaps. */

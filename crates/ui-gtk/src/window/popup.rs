@@ -47,7 +47,7 @@ pub fn run(config: PopupConfig) -> anyhow::Result<()> {
 #[allow(clippy::unnecessary_wraps, clippy::too_many_lines)]
 fn build_popup(app: &adw::Application, config: &PopupConfig) -> anyhow::Result<()> {
     let settings = Settings::new();
-    let (default_w, default_h) = settings.as_ref().map_or((720, 520), Settings::popup_size);
+    let (default_w, default_h) = settings.as_ref().map_or((780, 620), Settings::popup_size);
 
     let window = adw::Window::builder()
         .application(app)
@@ -56,16 +56,22 @@ fn build_popup(app: &adw::Application, config: &PopupConfig) -> anyhow::Result<(
         .default_height(default_h)
         .resizable(true)
         .build();
+    window.set_size_request(540, 420);
+    let app_for_close = app.clone();
+    window.connect_close_request(move |_| {
+        app_for_close.quit();
+        glib::Propagation::Proceed
+    });
 
     // ── Layer-shell init ─────────────────────────────────────
-    if gtk4_layer_shell::is_supported() {
+    if config.layer_shell && gtk4_layer_shell::is_supported() {
         window.init_layer_shell();
         window.set_layer(gtk4_layer_shell::Layer::Overlay);
         window.set_anchor(gtk4_layer_shell::Edge::Top, true);
         window.set_anchor(gtk4_layer_shell::Edge::Left, true);
         window.set_anchor(gtk4_layer_shell::Edge::Right, true);
         window.set_keyboard_mode(gtk4_layer_shell::KeyboardMode::OnDemand);
-    } else {
+    } else if config.layer_shell {
         tracing::warn!("layer-shell not supported; popup will use XDG window");
     }
 
@@ -94,13 +100,16 @@ fn build_popup(app: &adw::Application, config: &PopupConfig) -> anyhow::Result<(
     });
 
     // ── Status hint ───────────────────────────────────────────
-    let status = gtk4::Label::new(Some("↑↓ navigate · / search · Enter copy · Esc close"));
+    let status = gtk4::Label::new(Some(
+        "↑↓ navigate · / search · Enter copy · Esc or close button to dismiss · resize from window edges",
+    ));
     status.set_halign(gtk4::Align::Start);
     status.add_css_class("popup-status");
 
     // ── Shell: page above, status below ──────────────────────
     let content = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     content.add_css_class("popup-shell");
+    content.append(&build_popup_header(&window, config));
     content.append(&page);
     content.append(&status);
 
@@ -169,6 +178,65 @@ fn build_popup(app: &adw::Application, config: &PopupConfig) -> anyhow::Result<(
 
     window.present();
     Ok(())
+}
+
+fn build_popup_header(window: &adw::Window, config: &PopupConfig) -> gtk4::Box {
+    let header = gtk4::Box::new(
+        gtk4::Orientation::Horizontal,
+        crate::theme::spacing::SPACE_MD,
+    );
+    header.add_css_class("popup-header");
+    header.set_hexpand(true);
+    header.set_valign(gtk4::Align::Center);
+
+    let title_col = gtk4::Box::new(
+        gtk4::Orientation::Vertical,
+        crate::theme::spacing::SPACE_2XS,
+    );
+    title_col.set_hexpand(true);
+
+    let title = gtk4::Label::new(Some("Author Clipboard"));
+    title.add_css_class("popup-title");
+    title.set_halign(gtk4::Align::Start);
+    title.set_xalign(0.0);
+
+    let mode = if config.layer_shell {
+        "Hyprland overlay"
+    } else {
+        "Resizable native window"
+    };
+    let subtitle = gtk4::Label::new(Some(&format!(
+        "{mode} · history, rich text, files, images, snippets"
+    )));
+    subtitle.add_css_class("popup-subtitle");
+    subtitle.set_halign(gtk4::Align::Start);
+    subtitle.set_xalign(0.0);
+    subtitle.set_wrap(true);
+
+    title_col.append(&title);
+    title_col.append(&subtitle);
+
+    let action_chip = gtk4::Label::new(Some(match config.action {
+        crate::PickerAction::Copy => "Copy mode",
+        crate::PickerAction::QuickPaste => "Quick paste",
+    }));
+    action_chip.add_css_class("popup-mode-chip");
+
+    let close = gtk4::Button::builder()
+        .icon_name("window-close-symbolic")
+        .tooltip_text("Close clipboard picker (Esc)")
+        .build();
+    close.add_css_class("popup-close-button");
+    close.add_css_class("circular");
+    let window_for_close = window.clone();
+    close.connect_clicked(move |_| {
+        window_for_close.close();
+    });
+
+    header.append(&title_col);
+    header.append(&action_chip);
+    header.append(&close);
+    header
 }
 
 fn find_search_entry(widget: &gtk4::Widget) -> Option<gtk4::SearchEntry> {

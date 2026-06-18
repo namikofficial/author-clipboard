@@ -294,8 +294,8 @@ fn main() -> Result<()> {
                         println!("No clipboard items.");
                     } else {
                         for item in &items {
-                            let preview = if item.content.len() > 80 {
-                                format!("{}...", &item.content[..80])
+                            let preview = if item.content.chars().count() > 80 {
+                                format!("{}...", item.content.chars().take(80).collect::<String>())
                             } else {
                                 item.content.clone()
                             };

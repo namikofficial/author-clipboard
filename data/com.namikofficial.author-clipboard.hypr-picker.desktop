@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=Author Clipboard Picker
+GenericName=Clipboard History
+Comment=Hyprland native clipboard history picker
+Exec=author-clipboard-hypr-picker
+Icon=com.namikofficial.author-clipboard
+Terminal=false
+Type=Application
+Categories=Utility;
+Keywords=clipboard;paste;copy;history;hyprland;
+StartupNotify=true
+X-GNOME-UsesNotifications=false

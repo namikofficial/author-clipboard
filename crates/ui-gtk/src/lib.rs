@@ -30,6 +30,8 @@ pub mod window;
 /// Configuration passed to [`run_popup`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct PopupConfig {
+    /// Use layer-shell overlay mode instead of a normal resizable window.
+    pub layer_shell: bool,
     /// Initial source for the picker.
     pub source: PickerSource,
     /// Initial filter chip.
@@ -47,6 +49,7 @@ pub struct PopupConfig {
 impl Default for PopupConfig {
     fn default() -> Self {
         Self {
+            layer_shell: false,
             source: PickerSource::History,
             filter: PickerFilter::All,
             query: None,

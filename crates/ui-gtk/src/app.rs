@@ -724,6 +724,7 @@ mod tests {
     fn config_loaded_replaces_state_config() {
         let mut state = fresh_state();
         let new_config = PopupConfig {
+            layer_shell: true,
             source: crate::PickerSource::Snippets,
             filter: crate::PickerFilter::Text,
             query: Some("hello".into()),

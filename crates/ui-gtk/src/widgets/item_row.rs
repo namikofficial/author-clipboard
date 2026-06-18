@@ -26,6 +26,7 @@ pub struct ItemRow {
     pin_chip: Chip,
     star_chip: Chip,
     sensitive_chip: Chip,
+    type_chip: Chip,
     /// The inner `adw::Bin` wrapper. We keep a handle so we can
     /// toggle the `sensitive` CSS class without traversing the
     /// widget tree at every `bind`.
@@ -53,7 +54,7 @@ impl ItemRow {
         title.add_css_class("item-title");
         title.set_xalign(0.0);
         title.set_hexpand(true);
-        title.set_lines(2);
+        title.set_lines(3);
 
         // ── Subtitle (meta line) ────────────────────────────────
         let subtitle = Label::builder()
@@ -64,7 +65,7 @@ impl ItemRow {
         subtitle.add_css_class("item-subtitle");
         subtitle.set_xalign(0.0);
         subtitle.set_hexpand(true);
-        subtitle.set_lines(1);
+        subtitle.set_lines(2);
 
         let text_col = GtkBox::builder()
             .orientation(gtk4::Orientation::Vertical)
@@ -86,6 +87,8 @@ impl ItemRow {
         let pin_chip = Chip::new("📌", ChipStyle::Success);
         let star_chip = Chip::new("⭐", ChipStyle::Warning);
         let sensitive_chip = Chip::new("🔒 sensitive", ChipStyle::Danger);
+        let type_chip = Chip::new("text", ChipStyle::Muted);
+        chips_col.append(type_chip.widget());
         chips_col.append(pin_chip.widget());
         chips_col.append(star_chip.widget());
         chips_col.append(sensitive_chip.widget());
@@ -120,6 +123,7 @@ impl ItemRow {
             pin_chip,
             star_chip,
             sensitive_chip,
+            type_chip,
             frame,
         };
         me.bind(item);
@@ -172,8 +176,8 @@ impl ItemRow {
         };
         self.title.set_text(&display_text);
 
-        // ── Subtitle: content-type · mime · age · chars/words ─
-        let chars = item.content.len();
+        // ── Subtitle: type · age · mime · chars/words ─────────
+        let chars = item.content.chars().count();
         let words = item.content.split_whitespace().count();
         let mime_short = item
             .mime_type
@@ -181,15 +185,25 @@ impl ItemRow {
             .next()
             .unwrap_or(&item.mime_type)
             .to_string();
+        let age = author_clipboard_shared::picker::format_age(&item.timestamp);
+        let type_label = match item.content_type {
+            ContentType::Text => "text",
+            ContentType::Html => "html",
+            ContentType::Image => "image",
+            ContentType::Files => "files",
+        };
         let subtitle = match item.content_type {
             ContentType::Text | ContentType::Html | ContentType::Files => {
-                format!("{mime_short}  ·  {chars} chars  ·  {words} words")
+                format!(
+                    "{type_label}  ·  {age}  ·  {mime_short}  ·  {chars} chars  ·  {words} words"
+                )
             }
-            ContentType::Image => mime_short,
+            ContentType::Image => format!("{type_label}  ·  {age}  ·  {mime_short}"),
         };
         self.subtitle.set_text(&subtitle);
 
         // ── Pin / Star / Sensitive chips ──────────────────────
+        self.type_chip.set_text(type_label);
         if item.pinned {
             self.pin_chip.widget().set_visible(true);
         } else {

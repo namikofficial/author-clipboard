@@ -118,6 +118,7 @@ fn main() -> anyhow::Result<()> {
     match mode {
         Mode::Popup => {
             let cfg = PopupConfig {
+                layer_shell: true,
                 source: args.source.into(),
                 filter,
                 query: args.query,

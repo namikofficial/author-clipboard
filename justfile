@@ -166,8 +166,11 @@ install: build-release
     if [ -d "$HOME/.cargo/bin" ]; then install -Dm755 target/release/author-clipboard-ctl ~/.cargo/bin/author-clipboard-ctl; fi
     if [ -d "$HOME/.cargo/bin" ]; then install -Dm755 target/release/author-clipboard-hypr-picker ~/.cargo/bin/author-clipboard-hypr-picker; fi
     install -Dm644 data/com.namikofficial.author-clipboard.desktop ~/.local/share/applications/com.namikofficial.author-clipboard.desktop
+    install -Dm644 data/com.namikofficial.author-clipboard.hypr-picker.desktop ~/.local/share/applications/com.namikofficial.author-clipboard.hypr-picker.desktop
     install -Dm644 resources/icons/com.namikofficial.author-clipboard.svg ~/.local/share/icons/hicolor/scalable/apps/com.namikofficial.author-clipboard.svg
     install -Dm644 data/author-clipboard-daemon.service ~/.config/systemd/user/author-clipboard-daemon.service
+    install -Dm644 crates/ui-gtk/data/com.namikofficial.author-clipboard.gschema.xml ~/.local/share/glib-2.0/schemas/com.namikofficial.author-clipboard.gschema.xml
+    glib-compile-schemas ~/.local/share/glib-2.0/schemas
     # Install Waybar module and contrib docs
     mkdir -p ~/.local/share/author-clipboard
     install -Dm755 contrib/waybar/clipboard.sh ~/.local/share/author-clipboard/clipboard.sh
@@ -207,8 +210,11 @@ uninstall: disable
     rm -f ~/.cargo/bin/author-clipboard-ctl
     rm -f ~/.cargo/bin/author-clipboard-hypr-picker
     rm -f ~/.local/share/applications/com.namikofficial.author-clipboard.desktop
+    rm -f ~/.local/share/applications/com.namikofficial.author-clipboard.hypr-picker.desktop
     rm -f ~/.local/share/icons/hicolor/scalable/apps/com.namikofficial.author-clipboard.svg
     rm -f ~/.config/systemd/user/author-clipboard-daemon.service
+    rm -f ~/.local/share/glib-2.0/schemas/com.namikofficial.author-clipboard.gschema.xml
+    if [ -d ~/.local/share/glib-2.0/schemas ]; then glib-compile-schemas ~/.local/share/glib-2.0/schemas; fi
     rm -f ~/.local/share/author-clipboard/clipboard.sh
     rm -rf ~/.local/share/doc/author-clipboard-waybar
     systemctl --user daemon-reload

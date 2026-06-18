@@ -32,6 +32,9 @@ struct Args {
     /// Filter chip (all, text, images, files, pinned, starred, sensitive).
     #[arg(short, long, default_value = "all")]
     filter: String,
+    /// Use layer-shell overlay mode instead of a normal resizable window.
+    #[arg(long)]
+    layer_shell: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -85,6 +88,7 @@ fn main() -> anyhow::Result<()> {
 
     let filter = PickerFilter::from_str(&args.filter).unwrap_or(PickerFilter::All);
     let cfg = PopupConfig {
+        layer_shell: args.layer_shell,
         source: args.source.into(),
         filter,
         query: args.query,

@@ -74,18 +74,21 @@ pub fn install(
             let outcome = resolve_escape(st.borrow().focus, st.borrow().search_query.is_empty());
             match outcome {
                 EscOutcome::Close => {
-                    // Runtime will close the window.
+                    let _ = tx.send(crate::Effect::Quit);
                     Propagation::Stop
                 }
                 EscOutcome::ClearSearch => {
-                    // Runtime clears the search entry.
+                    let _ = tx.send(crate::Effect::Quit);
                     Propagation::Stop
                 }
                 EscOutcome::BlurSearch => {
-                    // Runtime blurs search and returns focus to list.
+                    let _ = tx.send(crate::Effect::Quit);
                     Propagation::Stop
                 }
-                EscOutcome::Proceed => Propagation::Proceed,
+                EscOutcome::Proceed => {
+                    let _ = tx.send(crate::Effect::Quit);
+                    Propagation::Stop
+                }
             }
         } else if let Some(action) =
             map_key_extended(key, gdk::ModifierType::from_bits_truncate(mods))

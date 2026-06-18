@@ -275,8 +275,8 @@ impl ClipboardItem {
                     // calling this, but we still produce a safe
                     // preview (first 80 chars) for accidental calls.
                     let trimmed = self.content.trim();
-                    if trimmed.len() > 80 {
-                        format!("{}…", &trimmed[..80])
+                    if trimmed.chars().count() > 80 {
+                        format!("{}…", trimmed.chars().take(80).collect::<String>())
                     } else {
                         trimmed.to_string()
                     }
