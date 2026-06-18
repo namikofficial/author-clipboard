@@ -2,6 +2,13 @@
 
 > A premium clipboard experience that impresses even 10-year veterans of Rust development and OS-level utility creators. Every interaction feels polished, every state is handled gracefully, and the visual design commands respect.
 
+> Status note (2026-06-19): this spec is historical input. The current
+> umbrella revamp plan is
+> [`../027-native-power-user-revamp/`](../027-native-power-user-revamp/),
+> which supersedes this spec's old applet-path implementation details and
+> expands the scope to IPC, CLI, storage, compositor integration, install
+> reliability, and developer workflows.
+
 ---
 
 ## Problem Statement

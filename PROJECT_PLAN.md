@@ -2,12 +2,12 @@
 
 > Development roadmap and technical specifications for the COSMIC-native clipboard manager with wlroots compositor support
 
-**Document Version:** 1.3.1
-**Last Updated:** June 15, 2026
+**Document Version:** 1.3.2
+**Last Updated:** June 19, 2026
 **Project Status:** Phase 19 implementation complete on `dev` — pre-release, targeting `0.6.0`. Latest **released** version: `v0.3.1` on `main`. See [`SECURITY.md`](../SECURITY.md) and [`CHANGELOG.md`](../CHANGELOG.md) for the authoritative split.
 
 > The unified GTK4 UI rewrite tracked in [`specs/features/023-unified-gtk4-ui/`](specs/features/023-unified-gtk4-ui/) is now complete on `dev`, and `just verify` is green.
-> The next tactical pass is UI cohesion/polish, tracked in [`specs/features/024-ui-cohesion-polish/`](specs/features/024-ui-cohesion-polish/).
+> The next tactical pass is the native power-user revamp, tracked in [`specs/features/027-native-power-user-revamp/`](specs/features/027-native-power-user-revamp/). The narrower UI cohesion work in [`specs/features/024-ui-cohesion-polish/`](specs/features/024-ui-cohesion-polish/) remains a visual-system sub-slice of that broader plan.
 
 > **Read first**
 > This document describes the development plan and the implementation
@@ -564,6 +564,7 @@ CREATE INDEX idx_pinned ON clipboard_items(pinned);
 
 ### Next Milestones
 
+- **Immediate revamp track**: Native power-user revamp (`specs/features/027-native-power-user-revamp/`)
 - **Phase 15**: Automation rules, snippets, OCR
 - **Phase 16**: Image enhancements, X11 fallback
 - **Phase 17**: Self-hosted E2EE sync
@@ -691,6 +692,7 @@ CREATE INDEX idx_pinned ON clipboard_items(pinned);
 | Phase 18 | 1 week | Distribution packaging & releases | ✅ Complete |
 | Phase 19 | 1 week | Hyprland-native UX & wlroots polish | ✅ Complete |
 | Phase 20 | TBD | Community & growth | 📋 Planned |
+| Phase 21 | TBD | Native power-user revamp | 📋 Planned |
 
 ---
 
@@ -784,5 +786,5 @@ Planned Deliverables
 - [ ] Accessibility automation tests (a11y CI checks)
 
 **Document Status:** Living document, updated as project evolves
-**Last Review:** Phase 19 complete — Waybar module, AUR package, Nix flake, demo docs (June 8, 2026)
+**Last Review:** Native power-user revamp umbrella spec added in `specs/features/027-native-power-user-revamp/` (June 19, 2026)
 **Maintained by:** Project team
