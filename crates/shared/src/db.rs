@@ -448,7 +448,7 @@ impl Database {
         let mut stmt = self.conn.prepare(
             "SELECT id, content_hash, content, mime_type, content_type, timestamp, pinned, starred, source_app, sensitive, plain_text, encrypted, encryption_version, redacted_preview
              FROM clipboard_items
-             ORDER BY pinned DESC, timestamp DESC
+             ORDER BY pinned DESC, starred DESC, timestamp DESC
              LIMIT ?1",
         )?;
         Self::collect_items(&mut stmt, [limit])
@@ -478,7 +478,7 @@ impl Database {
              FROM clipboard_fts fts
              JOIN clipboard_items ci ON ci.id = fts.rowid
              WHERE clipboard_fts MATCH ?1
-             ORDER BY ci.pinned DESC, ci.timestamp DESC
+             ORDER BY ci.pinned DESC, ci.starred DESC, ci.timestamp DESC
              LIMIT ?2",
         );
 
@@ -502,7 +502,7 @@ impl Database {
             "SELECT id, content_hash, content, mime_type, content_type, timestamp, pinned, starred, source_app, sensitive, plain_text, encrypted, encryption_version, redacted_preview
              FROM clipboard_items
              WHERE (content LIKE ?1 OR plain_text LIKE ?1)
-             ORDER BY pinned DESC, timestamp DESC
+             ORDER BY pinned DESC, starred DESC, timestamp DESC
              LIMIT ?2",
         )?;
         Self::collect_items(&mut stmt, (&pattern as &dyn rusqlite::ToSql, &limit))
@@ -1154,6 +1154,44 @@ mod tests {
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].content, "hello world");
         assert!(items[0].content_hash > 0);
+    }
+
+    #[test]
+    fn starred_items_rank_after_pins_and_before_recent_unstarred_items() {
+        let db = make_db();
+        let plain = db
+            .insert_item(&ClipboardItem::new_text("plain".to_string()))
+            .unwrap();
+        let starred = db
+            .insert_item(&ClipboardItem::new_text("starred".to_string()))
+            .unwrap();
+        let pinned = db
+            .insert_item(&ClipboardItem::new_text("pinned".to_string()))
+            .unwrap();
+        db.set_starred(starred, true).unwrap();
+        db.set_pinned(pinned, true).unwrap();
+        let ids: Vec<_> = db
+            .get_recent(10)
+            .unwrap()
+            .into_iter()
+            .map(|item| item.id)
+            .collect();
+        assert_eq!(ids, vec![pinned, starred, plain]);
+    }
+
+    #[test]
+    fn collection_load_supports_one_thousand_items() {
+        let db = make_db();
+        let collection = db.create_collection("large").unwrap();
+        for index in 0..1_000 {
+            let id = db
+                .insert_item(&ClipboardItem::new_text(format!("item-{index}")))
+                .unwrap();
+            db.add_to_collection(&collection, id).unwrap();
+        }
+        let items = db.get_collection_items(&collection).unwrap();
+        assert_eq!(items.len(), 1_000);
+        assert!(items.iter().all(|item| item.content.starts_with("item-")));
     }
 
     #[test]
