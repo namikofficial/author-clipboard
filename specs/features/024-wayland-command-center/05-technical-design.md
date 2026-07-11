@@ -254,6 +254,20 @@ Add a synthetic 1,000-entry harness. Record:
 
 Do not claim performance targets until measured.
 
+### Foundation Implementation Choice
+
+The first command-center increment uses a keyed snapshot model rather than a
+custom `glib::Object` subclass. `AppState.items` is authoritative, selection is
+stored by database ID, and a pure reconciliation plan identifies retained,
+inserted, removed, and moved rows. GTK rows may be rebound from this plan while
+the pure model remains testable without a display.
+
+History snapshots are requested through the existing versioned IPC `History`
+command. Widgets do not open SQLite. Refresh is explicit: reducers emit
+`RefreshItems`, and the daemon already broadcasts typed mutation events. Capture
+notification is added at the same daemon boundary so polling is no longer the
+source-of-truth mechanism.
+
 ## IPC and Events
 
 ### Constraints

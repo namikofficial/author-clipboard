@@ -113,7 +113,15 @@ author-clipboard-ctl filter delete <id>
 
 author-clipboard-ctl search <query> [--json] [--limit N]
 author-clipboard-ctl health --json
+author-clipboard-ctl doctor [--json] [--fix]
+author-clipboard-ctl hyprland-config [--write <path>]
 ```
+
+`doctor --json` emits a stable object with `healthy`, `checks`, and `fixes`.
+`--fix` may only create application-owned data directories; it never installs
+packages, starts services, or rewrites compositor configuration. Hyprland
+configuration writes are opt-in, replace only the marked Author Clipboard
+managed block, preserve all other bytes, and are idempotent.
 
 ## Query Language
 

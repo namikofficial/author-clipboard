@@ -177,6 +177,9 @@ just verify
 
 **Rollback risk**: Medium — data-flow change.
 
+**Implementation status (2026-07-12)**: In progress — authoritative state and
+IPC snapshot controller implemented in the foundation increment.
+
 ---
 
 ### T003 — Fix ID-Based Selection and Action Targeting
@@ -222,6 +225,9 @@ just verify
 
 **Rollback risk**: Medium.
 
+**Implementation status (2026-07-12)**: In progress — selected ID and pure
+selection helpers implemented with reducer coverage.
+
 ---
 
 ### T004 — Replace Rebuild-on-Refresh Rendering
@@ -237,6 +243,9 @@ just verify
 - `crates/ui-gtk/src/widgets/item_row.rs`
 - `crates/ui-gtk/src/widgets/empty.rs`
 - `crates/ui-gtk/src/window/{popup,manager}.rs`
+
+**Implementation status (2026-07-12)**: In progress — keyed reconciliation
+model selected and covered by a 1,000-item synthetic harness.
 
 **Implementation**:
 
@@ -754,6 +763,9 @@ just verify
 
 **Rollback risk**: Low.
 
+**Shared-layer status (2026-07-12)**: Complete — transform enum, pure
+implementation, privacy gate, safe errors, and tests. Surface adapters remain.
+
 ---
 
 ### T014 — Add Snippet Variables
@@ -801,6 +813,9 @@ just verify
 
 **Rollback risk**: Low.
 
+**Shared-layer status (2026-07-12)**: Complete — strict compatibility syntax,
+escaping, validation, sensitive-source confirmation, and tests. Surface adapters remain.
+
 ---
 
 ### T015 — Safe Import/Export
@@ -845,6 +860,10 @@ just verify
 - Import does not bypass sensitive detection.
 
 **Rollback risk**: Medium.
+
+**Shared-layer status (2026-07-12)**: Complete for history — versioned envelope,
+redacted default, full-export confirmation, preview, re-detection, and tests.
+Snippet/settings serialization remains with their surface adapters.
 
 ---
 

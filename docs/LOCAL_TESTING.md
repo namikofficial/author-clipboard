@@ -211,12 +211,19 @@ just enable
 # Check status
 just status
 
+# Actionable runtime diagnostics (JSON is suitable for bug reports)
+author-clipboard-ctl doctor
+author-clipboard-ctl doctor --json
+
 # View live logs
 just logs
 
 # Uninstall
 just uninstall
 ```
+
+`doctor --fix` only creates a missing application-owned data directory. Runtime
+dependencies and user services remain explicit administrator/user actions.
 
 ## 6. Troubleshooting
 
