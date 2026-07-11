@@ -252,9 +252,26 @@ pkg-config --modversion gtk4-layer-shell
 
 ```bash
 author-clipboard-ctl doctor
+author-clipboard-ctl doctor --json
 hyprctl version
 echo $WAYLAND_DISPLAY
 ```
+
+`doctor --fix` is deliberately narrow: it may create Author Clipboard's own
+data directory, but it does not install packages, start services, or edit your
+Hyprland configuration.
+
+Generate the recommended managed block without changing files, or explicitly
+opt in to an idempotent file update:
+
+```bash
+author-clipboard-ctl hyprland-config
+author-clipboard-ctl hyprland-config --write ~/.config/hypr/hyprland.conf
+```
+
+Only text between the Author Clipboard managed-block markers is replaced.
+Existing binds and comments outside that block are preserved. A malformed
+half-block is rejected instead of being overwritten.
 
 ### Daemon not running
 
