@@ -8,6 +8,10 @@
 | Collection rows retain stable IDs and accurate counts | collections unit tests |
 | Collections page ID round-trips through settings text | app unit tests |
 | GTK crate remains warning-free and builds | `cargo test -p author-clipboard-ui-gtk` |
+| Ctrl+P / Ctrl+Shift+S mutate the selected ID | controller + reducer tests |
+| Ctrl+Shift+P / Ctrl+Shift+A toggle pinned/starred views | controller + reducer tests |
+| Starred items rank ahead of unstarred peers after pins | shared DB ordering test |
+| 1,000-item collection loads completely and keyed reconciliation reuses rows | shared DB + UI model tests |
 
 ## Manual
 
@@ -17,4 +21,3 @@
 4. Rename a collection and verify the sidebar refreshes.
 5. Remove an item and verify it remains in Clipboard history.
 6. Delete a collection, cancel once, then confirm and verify its items remain.
-
