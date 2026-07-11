@@ -73,19 +73,10 @@ pub fn install(
         if key == gdk::Key::Escape {
             let outcome = resolve_escape(st.borrow().focus, st.borrow().search_query.is_empty());
             match outcome {
-                EscOutcome::Close => {
-                    let _ = tx.send(crate::Effect::Quit);
-                    Propagation::Stop
-                }
-                EscOutcome::ClearSearch => {
-                    let _ = tx.send(crate::Effect::Quit);
-                    Propagation::Stop
-                }
-                EscOutcome::BlurSearch => {
-                    let _ = tx.send(crate::Effect::Quit);
-                    Propagation::Stop
-                }
-                EscOutcome::Proceed => {
+                EscOutcome::Close
+                | EscOutcome::ClearSearch
+                | EscOutcome::BlurSearch
+                | EscOutcome::Proceed => {
                     let _ = tx.send(crate::Effect::Quit);
                     Propagation::Stop
                 }

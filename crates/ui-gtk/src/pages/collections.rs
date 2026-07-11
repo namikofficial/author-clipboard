@@ -1,4 +1,4 @@
-//! Native collection manager backed by the shared SQLite database.
+//! Native collection manager backed by the shared `SQLite` database.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -48,7 +48,7 @@ struct PageWidgets {
 }
 
 /// Build the Collections manager page.
-#[allow(deprecated)]
+#[allow(deprecated, clippy::too_many_lines)]
 pub fn build(config: &Config) -> GtkBox {
     let page = GtkBox::new(Orientation::Vertical, 12);
     page.set_margin_top(18);
@@ -161,7 +161,7 @@ pub fn build(config: &Config) -> GtkBox {
             &config_for_select,
             &widgets_for_select,
             &model.id,
-            refresh_for_select.clone(),
+            &refresh_for_select,
         );
     });
 
@@ -313,7 +313,12 @@ fn make_refresh(
     })
 }
 
-fn render_items(config: &Config, widgets: &Rc<PageWidgets>, collection_id: &str, refresh: Refresh) {
+fn render_items(
+    config: &Config,
+    widgets: &Rc<PageWidgets>,
+    collection_id: &str,
+    refresh: &Refresh,
+) {
     while let Some(child) = widgets.items.first_child() {
         widgets.items.remove(&child);
     }

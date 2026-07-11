@@ -240,27 +240,40 @@ async fn handle_method(client: &IpcClient, method: &str, params: Option<Value>) 
                             serde_json::json!({"content": [{"type": "text", "text": serde_json::to_string(&data).unwrap_or_default()}]})
                         }
                         Err(e) => {
-                            serde_json::json!({"isError": true, "content": [{"type": "text", "text": e.to_string()}]})
+                            tool_error("IPC_ERROR", &e.to_string())
                         }
                     }
                 }
 
                 "clipboard.get" => {
                     let id = arguments.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
-                    let include_content = arguments.get("include_content").and_then(Value::as_bool).unwrap_or(false);
-                    let confirmed = arguments.get("confirm_sensitive").and_then(Value::as_bool).unwrap_or(false);
+                    let include_content = arguments
+                        .get("include_content")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false);
+                    let confirmed = arguments
+                        .get("confirm_sensitive")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false);
 
                     match client.send_command(&IpcCommand::GetItem { id }) {
                         Ok(resp) => {
-                            let sensitive = resp.data.as_ref().and_then(|v| v.get("sensitive")).and_then(Value::as_bool).unwrap_or(false);
-                            if include_content && sensitive && !confirmed {
+                            if sensitive_get_requires_confirmation(
+                                resp.data.as_ref(),
+                                include_content,
+                                confirmed,
+                            ) {
                                 return tool_error("SENSITIVE_CONFIRMATION_REQUIRED", "Full sensitive content requires confirm_sensitive=true on this request");
                             }
-                            let data = if include_content && confirmed { resp.data } else { redact_sensitive_mcp_data(resp.data) };
+                            let data = if include_content && confirmed {
+                                resp.data
+                            } else {
+                                redact_sensitive_mcp_data(resp.data)
+                            };
                             serde_json::json!({"content": [{"type": "text", "text": serde_json::to_string(&data).unwrap_or_default()}]})
                         }
                         Err(e) => {
-                            serde_json::json!({"isError": true, "content": [{"type": "text", "text": e.to_string()}]})
+                            tool_error("IPC_ERROR", &e.to_string())
                         }
                     }
                 }
@@ -294,7 +307,7 @@ async fn handle_method(client: &IpcClient, method: &str, params: Option<Value>) 
                                 return tool_error("SENSITIVE_CONFIRMATION_REQUIRED", "Sensitive clipboard copy requires confirm_sensitive=true on this request");
                             }
                             Err(e) => {
-                                return serde_json::json!({"isError": true, "content": [{"type": "text", "text": e.to_string()}]});
+                                return tool_error("IPC_ERROR", &e.to_string());
                             }
                             _ => {}
                         }
@@ -309,7 +322,7 @@ async fn handle_method(client: &IpcClient, method: &str, params: Option<Value>) 
                             serde_json::json!({"content": [{"type": "text", "text": serde_json::to_string(&resp.data).unwrap_or_default()}]})
                         }
                         Err(e) => {
-                            serde_json::json!({"isError": true, "content": [{"type": "text", "text": e.to_string()}]})
+                            tool_error("IPC_ERROR", &e.to_string())
                         }
                     }
                 }
@@ -322,7 +335,7 @@ async fn handle_method(client: &IpcClient, method: &str, params: Option<Value>) 
                             serde_json::json!({"content": [{"type": "text", "text": serde_json::to_string(&resp.data).unwrap_or_default()}]})
                         }
                         Err(e) => {
-                            serde_json::json!({"isError": true, "content": [{"type": "text", "text": e.to_string()}]})
+                            tool_error("IPC_ERROR", &e.to_string())
                         }
                     }
                 }
@@ -335,7 +348,7 @@ async fn handle_method(client: &IpcClient, method: &str, params: Option<Value>) 
                             serde_json::json!({"content": [{"type": "text", "text": serde_json::to_string(&resp.data).unwrap_or_default()}]})
                         }
                         Err(e) => {
-                            serde_json::json!({"isError": true, "content": [{"type": "text", "text": e.to_string()}]})
+                            tool_error("IPC_ERROR", &e.to_string())
                         }
                     }
                 }
@@ -348,7 +361,10 @@ async fn handle_method(client: &IpcClient, method: &str, params: Option<Value>) 
                         .unwrap_or(false);
 
                     if !confirm {
-                        return tool_error("DESTRUCTIVE_CONFIRMATION_REQUIRED", "Delete requires confirm=true on this request");
+                        return tool_error(
+                            "DESTRUCTIVE_CONFIRMATION_REQUIRED",
+                            "Delete requires confirm=true on this request",
+                        );
                     }
 
                     match client.send_command(&IpcCommand::Delete { id }) {
@@ -356,7 +372,7 @@ async fn handle_method(client: &IpcClient, method: &str, params: Option<Value>) 
                             serde_json::json!({"content": [{"type": "text", "text": serde_json::to_string(&resp.data).unwrap_or_default()}]})
                         }
                         Err(e) => {
-                            serde_json::json!({"isError": true, "content": [{"type": "text", "text": e.to_string()}]})
+                            tool_error("IPC_ERROR", &e.to_string())
                         }
                     }
                 }
@@ -366,7 +382,7 @@ async fn handle_method(client: &IpcClient, method: &str, params: Option<Value>) 
                         serde_json::json!({"content": [{"type": "text", "text": serde_json::to_string(&resp.data).unwrap_or_default()}]})
                     }
                     Err(e) => {
-                        serde_json::json!({"isError": true, "content": [{"type": "text", "text": e.to_string()}]})
+                        tool_error("IPC_ERROR", &e.to_string())
                     }
                 },
 
@@ -375,7 +391,7 @@ async fn handle_method(client: &IpcClient, method: &str, params: Option<Value>) 
                         serde_json::json!({"content": [{"type": "text", "text": serde_json::to_string(&resp.data).unwrap_or_default()}]})
                     }
                     Err(e) => {
-                        serde_json::json!({"isError": true, "content": [{"type": "text", "text": e.to_string()}]})
+                        tool_error("IPC_ERROR", &e.to_string())
                     }
                 },
 
@@ -394,7 +410,7 @@ async fn handle_method(client: &IpcClient, method: &str, params: Option<Value>) 
                             serde_json::json!({"content": [{"type": "text", "text": serde_json::to_string(&resp.data).unwrap_or_default()}]})
                         }
                         Err(e) => {
-                            serde_json::json!({"isError": true, "content": [{"type": "text", "text": e.to_string()}]})
+                            tool_error("IPC_ERROR", &e.to_string())
                         }
                     }
                 }
@@ -407,7 +423,10 @@ async fn handle_method(client: &IpcClient, method: &str, params: Option<Value>) 
                         .unwrap_or(false);
 
                     if !confirm {
-                        return tool_error("DESTRUCTIVE_CONFIRMATION_REQUIRED", "Snippet deletion requires confirm=true on this request");
+                        return tool_error(
+                            "DESTRUCTIVE_CONFIRMATION_REQUIRED",
+                            "Snippet deletion requires confirm=true on this request",
+                        );
                     }
 
                     match client.send_command(&IpcCommand::DeleteSnippet { id }) {
@@ -415,7 +434,7 @@ async fn handle_method(client: &IpcClient, method: &str, params: Option<Value>) 
                             serde_json::json!({"content": [{"type": "text", "text": serde_json::to_string(&resp.data).unwrap_or_default()}]})
                         }
                         Err(e) => {
-                            serde_json::json!({"isError": true, "content": [{"type": "text", "text": e.to_string()}]})
+                            tool_error("IPC_ERROR", &e.to_string())
                         }
                     }
                 }
@@ -452,9 +471,7 @@ async fn handle_method(client: &IpcClient, method: &str, params: Option<Value>) 
                         offset: Some(0),
                         filters: None,
                     }) {
-                        Ok(resp) => {
-                            resource_json(uri, redact_sensitive_mcp_data(resp.data))
-                        }
+                        Ok(resp) => resource_json(uri, redact_sensitive_mcp_data(resp.data)),
                         Err(e) => {
                             serde_json::json!({"contents": [{"uri": uri, "mimeType": "application/json", "text": e.to_string()}]})
                         }
@@ -474,18 +491,14 @@ async fn handle_method(client: &IpcClient, method: &str, params: Option<Value>) 
                         limit: Some(100),
                         filters: Some(filters),
                     }) {
-                        Ok(resp) => {
-                            resource_json(uri, redact_sensitive_mcp_data(resp.data))
-                        }
+                        Ok(resp) => resource_json(uri, redact_sensitive_mcp_data(resp.data)),
                         Err(e) => {
                             serde_json::json!({"contents": [{"uri": uri, "mimeType": "application/json", "text": e.to_string()}]})
                         }
                     }
                 }
                 "snippets" => match client.send_command(&IpcCommand::ListSnippets) {
-                    Ok(resp) => {
-                        resource_json(uri, redact_sensitive_mcp_data(resp.data))
-                    }
+                    Ok(resp) => resource_json(uri, redact_sensitive_mcp_data(resp.data)),
                     Err(e) => {
                         serde_json::json!({"contents": [{"uri": uri, "mimeType": "application/json", "text": e.to_string()}]})
                     }
@@ -501,9 +514,7 @@ async fn handle_method(client: &IpcClient, method: &str, params: Option<Value>) 
                 _ if uri_path.starts_with("item/") => {
                     if let Ok(id) = uri_path.strip_prefix("item/").unwrap_or("").parse::<i64>() {
                         match client.send_command(&IpcCommand::GetItem { id }) {
-                            Ok(resp) => {
-                                resource_json(uri, redact_sensitive_mcp_data(resp.data))
-                            }
+                            Ok(resp) => resource_json(uri, redact_sensitive_mcp_data(resp.data)),
                             Err(e) => {
                                 serde_json::json!({"contents": [{"uri": uri, "mimeType": "application/json", "text": e.to_string()}]})
                             }
@@ -628,6 +639,19 @@ fn sensitive_copy_requires_confirmation(
             .unwrap_or(false)
 }
 
+fn sensitive_get_requires_confirmation(
+    item: Option<&Value>,
+    include_content: bool,
+    confirmed: bool,
+) -> bool {
+    include_content
+        && !confirmed
+        && item
+            .and_then(|data| data.get("sensitive"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+}
+
 fn tool_error(code: &str, message: &str) -> Value {
     let error = serde_json::json!({"code": code, "message": message});
     serde_json::json!({
@@ -709,6 +733,14 @@ mod tests {
             CopyMode::Copy,
             false
         ));
+    }
+
+    #[test]
+    fn full_sensitive_get_requires_per_request_confirmation() {
+        let item = serde_json::json!({"sensitive": true});
+        assert!(sensitive_get_requires_confirmation(Some(&item), true, false));
+        assert!(!sensitive_get_requires_confirmation(Some(&item), false, false));
+        assert!(!sensitive_get_requires_confirmation(Some(&item), true, true));
     }
 
     #[test]

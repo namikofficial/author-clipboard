@@ -134,6 +134,7 @@ impl ItemRow {
     /// Re-bind this row to a different [`ClipboardItem`]. Used by
     /// the `gio::ListStore` recycling path so widget churn is zero
     /// during scroll.
+    #[allow(clippy::too_many_lines)]
     pub fn bind(&mut self, item: &ClipboardItem) {
         let view = ItemViewModel::from(item);
         // ── Title ─────────────────────────────────────────────

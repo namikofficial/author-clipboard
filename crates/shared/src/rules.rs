@@ -52,7 +52,7 @@ pub fn validate(rule: &CaptureRule) -> Result<(), RuleError> {
             .mime_prefix
             .as_ref()
             .is_some_and(|v| v.trim().is_empty())
-        || rule.content_contains.as_ref().is_some_and(|v| v.is_empty())
+        || rule.content_contains.as_ref().is_some_and(String::is_empty)
     {
         return Err(RuleError::BlankMatcher);
     }
