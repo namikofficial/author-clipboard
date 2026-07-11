@@ -38,3 +38,10 @@ feature remains an opt-in enhancement.
 - `crates/ui-gtk/src/widgets/preview.rs`
 
 No schema, daemon protocol, or dependency changes are required.
+
+## Implementation Notes
+
+`PreviewPane` uses two small pure helpers so path resolution and file metadata
+labels are testable without a running GTK display. File activation remains a UI
+boundary: parsed metadata drives the label, while the unmodified source URI is
+passed to `gio::AppInfo` so percent encoding and URI semantics are preserved.
