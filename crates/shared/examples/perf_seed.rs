@@ -5,8 +5,7 @@ use author_clipboard_shared::{ClipboardItem, Database};
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let path = std::env::args_os()
         .nth(1)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/tmp/author-clipboard-perf.db"));
+        .map_or_else(|| PathBuf::from("/tmp/author-clipboard-perf.db"), PathBuf::from);
     if path.exists() {
         std::fs::remove_file(&path)?;
     }

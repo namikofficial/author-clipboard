@@ -239,9 +239,7 @@ async fn handle_method(client: &IpcClient, method: &str, params: Option<Value>) 
                             let data = redact_sensitive_mcp_data(resp.data);
                             serde_json::json!({"content": [{"type": "text", "text": serde_json::to_string(&data).unwrap_or_default()}]})
                         }
-                        Err(e) => {
-                            tool_error("IPC_ERROR", &e.to_string())
-                        }
+                        Err(e) => tool_error("IPC_ERROR", &e.to_string()),
                     }
                 }
 
@@ -272,9 +270,7 @@ async fn handle_method(client: &IpcClient, method: &str, params: Option<Value>) 
                             };
                             serde_json::json!({"content": [{"type": "text", "text": serde_json::to_string(&data).unwrap_or_default()}]})
                         }
-                        Err(e) => {
-                            tool_error("IPC_ERROR", &e.to_string())
-                        }
+                        Err(e) => tool_error("IPC_ERROR", &e.to_string()),
                     }
                 }
 
@@ -321,9 +317,7 @@ async fn handle_method(client: &IpcClient, method: &str, params: Option<Value>) 
                         Ok(resp) => {
                             serde_json::json!({"content": [{"type": "text", "text": serde_json::to_string(&resp.data).unwrap_or_default()}]})
                         }
-                        Err(e) => {
-                            tool_error("IPC_ERROR", &e.to_string())
-                        }
+                        Err(e) => tool_error("IPC_ERROR", &e.to_string()),
                     }
                 }
 
@@ -334,9 +328,7 @@ async fn handle_method(client: &IpcClient, method: &str, params: Option<Value>) 
                         Ok(resp) => {
                             serde_json::json!({"content": [{"type": "text", "text": serde_json::to_string(&resp.data).unwrap_or_default()}]})
                         }
-                        Err(e) => {
-                            tool_error("IPC_ERROR", &e.to_string())
-                        }
+                        Err(e) => tool_error("IPC_ERROR", &e.to_string()),
                     }
                 }
 
@@ -347,9 +339,7 @@ async fn handle_method(client: &IpcClient, method: &str, params: Option<Value>) 
                         Ok(resp) => {
                             serde_json::json!({"content": [{"type": "text", "text": serde_json::to_string(&resp.data).unwrap_or_default()}]})
                         }
-                        Err(e) => {
-                            tool_error("IPC_ERROR", &e.to_string())
-                        }
+                        Err(e) => tool_error("IPC_ERROR", &e.to_string()),
                     }
                 }
 
@@ -371,9 +361,7 @@ async fn handle_method(client: &IpcClient, method: &str, params: Option<Value>) 
                         Ok(resp) => {
                             serde_json::json!({"content": [{"type": "text", "text": serde_json::to_string(&resp.data).unwrap_or_default()}]})
                         }
-                        Err(e) => {
-                            tool_error("IPC_ERROR", &e.to_string())
-                        }
+                        Err(e) => tool_error("IPC_ERROR", &e.to_string()),
                     }
                 }
 
@@ -381,18 +369,14 @@ async fn handle_method(client: &IpcClient, method: &str, params: Option<Value>) 
                     Ok(resp) => {
                         serde_json::json!({"content": [{"type": "text", "text": serde_json::to_string(&resp.data).unwrap_or_default()}]})
                     }
-                    Err(e) => {
-                        tool_error("IPC_ERROR", &e.to_string())
-                    }
+                    Err(e) => tool_error("IPC_ERROR", &e.to_string()),
                 },
 
                 "clipboard.list_snippets" => match client.send_command(&IpcCommand::ListSnippets) {
                     Ok(resp) => {
                         serde_json::json!({"content": [{"type": "text", "text": serde_json::to_string(&resp.data).unwrap_or_default()}]})
                     }
-                    Err(e) => {
-                        tool_error("IPC_ERROR", &e.to_string())
-                    }
+                    Err(e) => tool_error("IPC_ERROR", &e.to_string()),
                 },
 
                 "clipboard.upsert_snippet" => {
@@ -409,9 +393,7 @@ async fn handle_method(client: &IpcClient, method: &str, params: Option<Value>) 
                         Ok(resp) => {
                             serde_json::json!({"content": [{"type": "text", "text": serde_json::to_string(&resp.data).unwrap_or_default()}]})
                         }
-                        Err(e) => {
-                            tool_error("IPC_ERROR", &e.to_string())
-                        }
+                        Err(e) => tool_error("IPC_ERROR", &e.to_string()),
                     }
                 }
 
@@ -433,15 +415,11 @@ async fn handle_method(client: &IpcClient, method: &str, params: Option<Value>) 
                         Ok(resp) => {
                             serde_json::json!({"content": [{"type": "text", "text": serde_json::to_string(&resp.data).unwrap_or_default()}]})
                         }
-                        Err(e) => {
-                            tool_error("IPC_ERROR", &e.to_string())
-                        }
+                        Err(e) => tool_error("IPC_ERROR", &e.to_string()),
                     }
                 }
 
-                _ => {
-                    serde_json::json!({"isError": true, "content": [{"type": "text", "text": format!("Unknown tool: {}", tool_name)}]})
-                }
+                _ => tool_error("UNKNOWN_TOOL", &format!("Unknown tool: {tool_name}")),
             }
         }
 
@@ -738,9 +716,21 @@ mod tests {
     #[test]
     fn full_sensitive_get_requires_per_request_confirmation() {
         let item = serde_json::json!({"sensitive": true});
-        assert!(sensitive_get_requires_confirmation(Some(&item), true, false));
-        assert!(!sensitive_get_requires_confirmation(Some(&item), false, false));
-        assert!(!sensitive_get_requires_confirmation(Some(&item), true, true));
+        assert!(sensitive_get_requires_confirmation(
+            Some(&item),
+            true,
+            false
+        ));
+        assert!(!sensitive_get_requires_confirmation(
+            Some(&item),
+            false,
+            false
+        ));
+        assert!(!sensitive_get_requires_confirmation(
+            Some(&item),
+            true,
+            true
+        ));
     }
 
     #[test]

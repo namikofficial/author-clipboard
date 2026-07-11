@@ -62,7 +62,7 @@ impl ContentPresentation {
 
 /// Classify an item with privacy checks before all content parsing.
 pub fn present(item: &ClipboardItem) -> ContentPresentation {
-    if item.sensitive || item.encrypted || matches!(classify(&item.content), ContentClass::Secret) {
+    if item.sensitive || item.encrypted {
         return ContentPresentation::Secret {
             redacted_preview: item
                 .redacted_preview
@@ -73,6 +73,14 @@ pub fn present(item: &ClipboardItem) -> ContentPresentation {
     if item.content.len() > CLASSIFY_LIMIT {
         return ContentPresentation::Unknown {
             preview: bounded(&item.content),
+        };
+    }
+    if matches!(classify(&item.content), ContentClass::Secret) {
+        return ContentPresentation::Secret {
+            redacted_preview: item
+                .redacted_preview
+                .clone()
+                .unwrap_or_else(|| "Sensitive item".to_string()),
         };
     }
     match item.content_type {
