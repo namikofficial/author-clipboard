@@ -39,3 +39,17 @@ just perf-picker
 just ui-check
 ```
 
+## Foundation Evidence — T002–T005
+
+Recorded 2026-07-12 in the development workspace:
+
+- 43 reducer/state tests pass, including unknown-ID, copy, quick-paste,
+  navigation, delete, and snapshot replacement behavior.
+- 2 reconciliation tests pass, including a synthetic 1,000-row one-item insert
+  retaining all existing keyed rows.
+- 4 clipboard adapter tests pass, including versioned IPC item mapping.
+- Daemon and GTK packages pass `cargo check`; daemon unit target passes.
+- `timeout_add_local_once` and `Database::open` are absent from the clipboard
+  result page.
+- Package clippy is blocked by pre-existing/concurrent controller and collections
+  warnings; the foundation-specific cast/pass-by-value findings were fixed.

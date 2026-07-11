@@ -343,6 +343,10 @@ just verify
 
 ### T006 — Implement Shared Content Presentation Model
 
+**Implementation note (2026-07-12)**: The first slice adds the pure bounded
+presentation classifier and privacy-safe item view model before GTK rendering,
+so widgets do not grow independent classification rules.
+
 **Priority**: P1  
 **Depends on**: T001  
 **Goal**: Create one pure representation for recognizable content cards.
@@ -710,6 +714,11 @@ just verify
 - Broken rules can be disabled/reset.
 
 **Rollback risk**: Medium.
+
+**Implementation status (2026-07-12)**: Complete at the supported storage
+boundary — ordered shared rules, validation/reset, daemon ignore and
+force-sensitive enforcement, explicit unsupported tag reporting,
+ignore-next-copy IPC/CLI, config CLI visibility, and tests.
 
 ---
 

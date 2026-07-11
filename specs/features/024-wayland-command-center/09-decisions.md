@@ -51,9 +51,28 @@ edge-triggered signaling and removes the arbitrary 200 ms delayed reload. The
 History/Search responses also expose the revision so a future persistent IPC
 subscription can replace the file bridge without changing snapshot semantics.
 
+## D-024-007: MCP redaction is independent of UI configuration
+
+Every MCP search, resource, safe-get, and generated prompt applies a final
+recursive redaction pass. The daemon's UI preview setting is not trusted as an
+MCP authorization signal. Full sensitive get/copy and destructive tools require
+boolean confirmation on that individual request; confirmation is not cached.
+
 ## D-024-013: Shared workflow primitives
 
 Transforms are pure and return non-content-bearing errors. The existing
 `${name}` template engine stays canonical; strict `{name}` command-center
 syntax is an adapter. Export uses a versioned envelope, redacts sensitive and
 encrypted history by default, and gates full output on explicit confirmation.
+
+## D-024-012: Ignore-next-copy sentinel
+
+Ignore-next-copy is armed through IPC and represented by an application-owned
+sentinel in the data directory. The capture path atomically removes it before
+storage, so one daemon process consumes one eligible capture exactly once.
+
+Capture rules are evaluated in configuration order and the first matching
+enabled rule wins. Supported storage actions are `ignore` and
+`force_sensitive`; `tag` is represented and validated but reported unsupported
+until clipboard items have a persisted tag field. Invalid matchers fail config
+validation instead of silently broadening capture.
