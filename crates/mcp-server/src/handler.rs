@@ -374,7 +374,8 @@ async fn handle_method(client: &IpcClient, method: &str, params: Option<Value>) 
 
                 "clipboard.list_snippets" => match client.send_command(&IpcCommand::ListSnippets) {
                     Ok(resp) => {
-                        serde_json::json!({"content": [{"type": "text", "text": serde_json::to_string(&resp.data).unwrap_or_default()}]})
+                        let data = redact_sensitive_mcp_data(resp.data);
+                        serde_json::json!({"content": [{"type": "text", "text": serde_json::to_string(&data).unwrap_or_default()}]})
                     }
                     Err(e) => tool_error("IPC_ERROR", &e.to_string()),
                 },
