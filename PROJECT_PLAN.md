@@ -599,7 +599,7 @@ CREATE INDEX idx_pinned ON clipboard_items(pinned);
 - [ ] Search results accurate and fast
 - [ ] Global shortcut works in all applications
 - [ ] Image thumbnails display correctly
-- [ ] Expression pickers fully functional
+- [x] Expression pickers fully functional (search, category filtering, copy, persistent recents)
 
 #### Quality
 - [ ] Zero data loss in normal operation
@@ -692,7 +692,10 @@ CREATE INDEX idx_pinned ON clipboard_items(pinned);
 | Phase 18 | 1 week | Distribution packaging & releases | ✅ Complete |
 | Phase 19 | 1 week | Hyprland-native UX & wlroots polish | ✅ Complete |
 | Phase 20 | TBD | Community & growth | 📋 Planned |
-| Phase 21 | TBD | Native power-user revamp | 📋 Planned |
+| Phase 21 | Complete | Collections manager UI | ✅ Complete (automated coverage; compositor smoke pending) |
+| Phase 22 | Complete | Advanced expression pickers | ✅ Complete (automated coverage; compositor smoke pending) |
+| Phase 23 | Complete | Rich-content completion | ✅ Complete (headless coverage; display tests remain environment-dependent) |
+| Phase 25 | In progress | Wayland Clipboard Command Center | 🔄 Integrated core; release checklist/manual compositor evidence pending |
 
 ---
 
