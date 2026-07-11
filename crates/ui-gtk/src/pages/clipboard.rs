@@ -166,6 +166,34 @@ pub fn build(
         }
     };
 
+    let filter_keys = gtk4::EventControllerKey::new();
+    let state_for_filter_keys = state.clone();
+    let refresh_for_filter_keys = refresh.clone();
+    filter_keys.connect_key_pressed(move |_controller, key, _code, modifiers| {
+        let ctrl_shift = modifiers.contains(gdk::ModifierType::CONTROL_MASK)
+            && modifiers.contains(gdk::ModifierType::SHIFT_MASK);
+        let target = if ctrl_shift && key == gdk::Key::p {
+            Some(PickerFilter::Pinned)
+        } else if ctrl_shift && key == gdk::Key::a {
+            Some(PickerFilter::Starred)
+        } else {
+            None
+        };
+        let Some(target) = target else {
+            return glib::Propagation::Proceed;
+        };
+        let mut state = state_for_filter_keys.borrow_mut();
+        state.filter = if state.filter == target {
+            PickerFilter::All
+        } else {
+            target
+        };
+        drop(state);
+        refresh_for_filter_keys();
+        glib::Propagation::Stop
+    });
+    page.add_controller(filter_keys);
+
     // Search entry.
     let refresh_for_search = refresh.clone();
     let state_for_search = state.clone();
