@@ -1,24 +1,31 @@
-# author-clipboard
+# Author Clipboard
 
-> Native COSMIC clipboard manager with wlroots compositor support, including Hyprland and Sway.
+> The private clipboard command center for Wayland.
+
+Search copied content, act on it, protect secrets, manage reusable snippets,
+and safely expose local clipboard context to MCP-compatible AI tools. Author
+Clipboard is keyboard-first, local-only, and built for COSMIC, Hyprland, Sway,
+and other wlroots compositors.
 
 [![CI](https://github.com/namikofficial/author-clipboard/actions/workflows/ci.yml/badge.svg)](https://github.com/namikofficial/author-clipboard/actions)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/namikofficial/author-clipboard)](https://github.com/namikofficial/author-clipboard/releases)
 [![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org/)
 
-> **Branch status**
->
-> - **`main`** — stable. Latest release: **[`v0.3.1`](https://github.com/namikofficial/author-clipboard/releases/tag/v0.3.1)**.
-> - **`dev`** — pre-release, **not supported for production use**. Workspace version `0.6.0`. Pre-release work is documented in [`CHANGELOG.md`](CHANGELOG.md) under `[Unreleased]` and tracked in [`specs/features/022-hardening-pass/`](specs/features/022-hardening-pass/).
-> - For the most accurate "what is actually supported right now", see [`SECURITY.md`](SECURITY.md) → "Supported Versions".
-
-**author-clipboard** is a privacy-focused clipboard manager for COSMIC and wlroots Wayland compositors. It stores clipboard history in a local SQLite database with FTS5 search, detects sensitive content, supports optional encryption for sensitive items, and provides a libcosmic popup UI with emoji, symbol, and kaomoji pickers.
+Author Clipboard stores history in local SQLite, recognizes rich clipboard
+content, redacts sensitive previews, encrypts newly captured secrets by default
+for new profiles, and provides native GTK4 and external-menu picker paths.
 
 The default GUI is COSMIC-native through `libcosmic`. Hyprland and wlroots users have two picker options:
 
 - **External menu picker** (`author-clipboard-ctl picker`) — opens an external dmenu-style menu through `wofi`, `fuzzel`, or `rofi`
 - **First-party native picker** (`author-clipboard-hypr-picker`) — a standalone keyboard-first GTK4 layer-shell popup designed for Hyprland
+
+> **Branch status:** `main` is stable at
+> [`v0.3.1`](https://github.com/namikofficial/author-clipboard/releases/tag/v0.3.1).
+> `dev` is the unsupported `0.6.0` pre-release line. See
+> [`CHANGELOG.md`](CHANGELOG.md) and [`SECURITY.md`](SECURITY.md) for the exact
+> implemented and supported scope.
 
 ---
 
@@ -73,6 +80,8 @@ The default GUI is COSMIC-native through `libcosmic`. Hyprland and wlroots users
 - First-party Hyprland/wlroots native picker (`author-clipboard-hypr-picker`)
 - Waybar / Wayle status module (`contrib/waybar/clipboard.sh` + `author-clipboard-ctl status --json`)
 - AUR package and Nix flake (flake.nix / default.nix)
+- Local stdio MCP server with redacted-safe search and per-request confirmation
+  for sensitive copy operations ([setup and privacy details](docs/MCP.md))
 
 ### Planned
 - Flatpak/AppImage packaging, subject to clipboard sandbox limitations
@@ -235,7 +244,7 @@ Incognito mode flag: `<data_dir>/.incognito`; when present, daemon capture is sk
 | `ttl_seconds` | `604800` | Auto-expire unpinned items. `0` means never expire |
 | `cleanup_interval_seconds` | `300` | How often cleanup runs |
 | `keyboard_shortcut` | `"Super+V"` | Display/reference value; compositor binding is configured separately |
-| `encrypt_sensitive` | `false` | Encrypt sensitive items at rest |
+| `encrypt_sensitive` | `true` for new profiles | Encrypt sensitive items at rest; legacy config files that omitted this key retain their previous disabled behavior |
 | `clear_on_lock` | `true` | Clear sensitive items when the screen locks |
 | `dedup_window_seconds` | `2` | Skip identical content copied within this window |
 | `mime_denylist` | `["application/x-kde-cutselection"]` | MIME prefixes or exact MIME types to skip |
@@ -252,7 +261,7 @@ Default example:
   "ttl_seconds": 604800,
   "cleanup_interval_seconds": 300,
   "keyboard_shortcut": "Super+V",
-  "encrypt_sensitive": false,
+  "encrypt_sensitive": true,
   "clear_on_lock": true,
   "dedup_window_seconds": 2,
   "mime_denylist": [
