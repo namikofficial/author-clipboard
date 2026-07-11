@@ -9,5 +9,6 @@
 - [x] Original MIME types remain intact for copy/restore.
 - [x] Sensitive rich content remains redacted by default.
 - [x] Targeted tests pass (6 headless tests; 14 display-dependent tests remain ignored).
-- [x] `cargo fmt --all -- --check` passes.
-- [ ] Workspace lint passes (currently reports concurrent expression-picker documentation warnings).
+- [x] Rich-content targeted tests pass.
+- [ ] Display-dependent preview tests are run under a supported Wayland compositor.
+- [x] Integrated `just verify` passes in the final review working tree (2026-07-12).
