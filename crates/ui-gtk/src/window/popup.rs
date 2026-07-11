@@ -44,7 +44,7 @@ pub fn run(config: PopupConfig) -> anyhow::Result<()> {
     Ok(())
 }
 
-#[allow(clippy::unnecessary_wraps, clippy::too_many_lines)]
+#[allow(deprecated, clippy::unnecessary_wraps, clippy::too_many_lines)]
 fn build_popup(app: &adw::Application, config: &PopupConfig) -> anyhow::Result<()> {
     let settings = Settings::new();
     let (default_w, default_h) = settings.as_ref().map_or((780, 620), Settings::popup_size);
@@ -112,22 +112,40 @@ fn build_popup(app: &adw::Application, config: &PopupConfig) -> anyhow::Result<(
     content.append(&build_popup_header(&window, config));
     content.append(&page);
     let state_for_rail = state.clone();
+    let window_for_rail = window.clone();
     content.append(&crate::widgets::action_bar::build(move |action| {
         use crate::widgets::action_bar::RailAction;
         use author_clipboard_shared::ipc::{CopyMode, IpcClient, IpcCommand};
-        if action == RailAction::Reveal {
-            crate::app::reduce(
-                &mut state_for_rail.borrow_mut(),
-                crate::app::Action::RevealRedacted,
-            );
-            return;
-        }
         let state = state_for_rail.borrow();
         let Some(id) = state.selected_id else { return };
         let item = state.items.iter().find(|item| item.id == id);
         let Some(selected) = item.cloned() else {
             return;
         };
+        if action == RailAction::Reveal {
+            if !selected.sensitive && !selected.encrypted {
+                return;
+            }
+            drop(state);
+            crate::app::reduce(
+                &mut state_for_rail.borrow_mut(),
+                crate::app::Action::RevealRedacted,
+            );
+            let dialog = gtk4::MessageDialog::builder()
+                .transient_for(&window_for_rail)
+                .modal(true)
+                .text("Protected clipboard item")
+                .secondary_text(&selected.content)
+                .build();
+            dialog.add_button("Hide now", gtk4::ResponseType::Close);
+            dialog.connect_response(|dialog, _| dialog.close());
+            let dialog_for_timeout = dialog.clone();
+            glib::timeout_add_local_once(std::time::Duration::from_secs(5), move || {
+                dialog_for_timeout.close();
+            });
+            dialog.present();
+            return;
+        }
         let command = match action {
             RailAction::Copy => IpcCommand::Copy {
                 id,
