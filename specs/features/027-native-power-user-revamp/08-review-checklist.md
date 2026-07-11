@@ -15,6 +15,14 @@
 - [ ] Collections/saved filters solve real developer workflows.
 - [ ] Snippets/templates feel integrated, not bolted on.
 
+## Delivered Roadmap Slices
+
+- [x] Collections manager supports create, rename, delete, membership inspection, and item assignment/removal.
+- [x] Expression pages share searchable category and recent-use behavior.
+- [x] Rich-content previews use safe HTML fallback and content-aware image/file presentation.
+- [x] Targeted automated tests cover the delivered collection, expression, and rich-content logic.
+- [ ] Collections, expressions, and rich-content workflows are manually smoked on Hyprland, COSMIC, and Sway.
+
 ## Technical
 
 - [ ] No stale references to old `crates/applet/src/*` UI architecture in new
