@@ -151,7 +151,12 @@ pub fn build(
             &mut app_state_for_refresh.borrow_mut(),
             crate::app::Action::ItemsLoaded(items),
         );
-        rebuild_list(&list_for_refresh, &item_rows_for_refresh, &entries);
+        rebuild_list(
+            &list_for_refresh,
+            &item_rows_for_refresh,
+            &entries,
+            s.query.is_empty(),
+        );
         if entries.is_empty() {
             scrolled_for_refresh.set_visible(false);
             empty_for_refresh.set_visible(true);
@@ -247,7 +252,12 @@ pub fn build(
         &mut app_state.borrow_mut(),
         crate::app::Action::ItemsLoaded(entries.iter().map(entry_to_item).collect()),
     );
-    rebuild_list(&list_box, &item_rows, &entries);
+    rebuild_list(
+        &list_box,
+        &item_rows,
+        &entries,
+        props.initial_query.is_empty(),
+    );
     // Set the initial empty-state variant + visibility. The
     // variant follows the same rule as the refresh closure:
     // "no results" when the user has typed something,
@@ -474,7 +484,7 @@ fn ipc_item_to_entry(value: &serde_json::Value) -> Option<PickerEntry> {
 
 /// Rebuild the list with the given entries. Reuses existing
 /// `ItemRow` widgets where possible to minimize churn.
-fn rebuild_list(list: &ListBox, item_rows: &ItemRowTable, entries: &[PickerEntry]) {
+fn rebuild_list(list: &ListBox, item_rows: &ItemRowTable, entries: &[PickerEntry], grouped: bool) {
     let mut old_by_id: std::collections::HashMap<i64, (ItemRow, String)> = item_rows
         .borrow_mut()
         .drain(..)
@@ -488,6 +498,7 @@ fn rebuild_list(list: &ListBox, item_rows: &ItemRowTable, entries: &[PickerEntry
         }
     }
     let mut new_rows = Vec::with_capacity(entries.len());
+    let mut previous_group = None;
     for (index, entry) in entries.iter().enumerate() {
         // Render the entry as a `ClipboardItem` so we can reuse
         // `ItemRow::new`. We map the PickerEntry fields to the
@@ -502,6 +513,16 @@ fn rebuild_list(list: &ListBox, item_rows: &ItemRowTable, entries: &[PickerEntry
                 row
             },
         );
+        let group = result_group(&item);
+        if grouped && previous_group != Some(group) {
+            let header = gtk4::Label::new(Some(group));
+            header.add_css_class("result-group-header");
+            header.set_halign(gtk4::Align::Start);
+            row.row().set_header(Some(&header));
+        } else {
+            row.row().set_header(None::<&gtk4::Widget>);
+        }
+        previous_group = Some(group);
         let wanted = i32::try_from(index).unwrap_or(i32::MAX);
         let current = row.row().index();
         if row.row().parent().is_none() {
@@ -513,6 +534,21 @@ fn rebuild_list(list: &ListBox, item_rows: &ItemRowTable, entries: &[PickerEntry
         new_rows.push((id, row, mime));
     }
     *item_rows.borrow_mut() = new_rows;
+}
+
+fn result_group(item: &author_clipboard_shared::types::ClipboardItem) -> &'static str {
+    use author_clipboard_shared::presentation::ContentPresentation;
+    if item.pinned {
+        return "Pinned";
+    }
+    match author_clipboard_shared::presentation::present(item) {
+        ContentPresentation::Url { .. } => "Links",
+        ContentPresentation::Code { .. } | ContentPresentation::Json { .. } => "Code & data",
+        ContentPresentation::Image { .. } => "Images",
+        ContentPresentation::File { .. } => "Files",
+        ContentPresentation::Secret { .. } => "Protected",
+        _ => "Recent",
+    }
 }
 
 /// Map a [`PickerEntry`] to a minimal [`ClipboardItem`] for the row.
@@ -658,5 +694,19 @@ mod tests {
         assert_eq!(entry.title, "hello");
         assert!(entry.pinned);
         assert!(entry.starred);
+    }
+
+    #[test]
+    fn empty_query_groups_use_shared_presentation_and_pin_priority() {
+        let link = author_clipboard_shared::types::ClipboardItem::new_text(
+            "https://example.com".to_string(),
+        );
+        assert_eq!(result_group(&link), "Links");
+        let mut pinned = link;
+        pinned.pinned = true;
+        assert_eq!(result_group(&pinned), "Pinned");
+        let secret =
+            author_clipboard_shared::types::ClipboardItem::new_text("password=hunter2".to_string());
+        assert_eq!(result_group(&secret), "Protected");
     }
 }
