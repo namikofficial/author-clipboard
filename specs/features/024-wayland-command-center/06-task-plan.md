@@ -501,6 +501,10 @@ just verify
 
 ### T009 — Add Command Popup Shell, Grouping, and Action Bar
 
+**Implementation note (2026-07-12)**: Empty-query groups are row headers derived
+from the shared presentation model, preserving keyed row identity. Transform,
+snippet, and reveal controls reuse daemon IPC and the shared privacy state.
+
 **Priority**: P1  
 **Depends on**: T003, T008  
 **Goal**: Make popup feel like a launcher-style command surface.
@@ -920,6 +924,10 @@ just verify
 
 **Rollback risk**: Medium — client behavior changes.
 
+**Implementation status (2026-07-12)**: Complete — MCP-owned recursive
+redaction, per-request sensitive/destructive confirmation, stable coded errors,
+and raw-secret non-leakage tests are in place.
+
 ---
 
 ### T017 — Document MCP Integrations
@@ -960,6 +968,10 @@ just verify
 - Privacy behavior is clear.
 
 **Rollback risk**: Low.
+
+**Implementation status (2026-07-12)**: Complete — verified stdio invocation,
+Codex and Claude Desktop configuration, privacy boundary, accessible data, and
+safe prompt examples are documented.
 
 ---
 

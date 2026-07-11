@@ -1,4 +1,7 @@
- Feature Brief: Wayland Clipboard Command Center
+# Feature Brief: Wayland Clipboard Command Center
+
+> Numbering designation: **024B / product phase 25**. The directory name is
+> retained for stable links; `024-ui-cohesion-polish` is designated **024A**.
 
 > Turn Author Clipboard from a capable clipboard-history utility into a
 > private, keyboard-first clipboard command center for Wayland power users.

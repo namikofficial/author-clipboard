@@ -1,5 +1,8 @@
 # Feature Brief: UI Cohesion & Dynamic Polish
 
+> Numbering designation: **024A**. The directory name is retained for stable
+> links; `024-wayland-command-center` is **024B** and maps to roadmap phase 25.
+
 > Make the current GTK4 UI feel intentionally designed end-to-end:
 > cleaner hierarchy, tighter spacing, stronger motion language, more
 > legible states, and a more premium manager/popup experience.

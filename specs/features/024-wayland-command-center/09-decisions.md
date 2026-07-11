@@ -17,12 +17,12 @@ stable on subsequent launches.
 
 ## D002 — Feature numbering consolidation
 
-**Status**: Pending
+**Status**: Accepted
 
-The roadmap calls this product phase 25, while implementation specs 024–027
-already exist on `dev`. The command-center requirements will be reconciled
-with feature 027 before final review so the repository does not retain two
-unrelated feature directories with the same numeric identifier.
+The roadmap calls this product phase 25, while two useful implementation specs
+already use directory number 024. To preserve stable links, directories are
+not renamed: `024-ui-cohesion-polish` is designated **024A**, and
+`024-wayland-command-center` is designated **024B / product phase 25**.
 # Foundation Decisions (T002–T005)
 
 ## D-024-004: Keep derived index compatibility during ID migration
