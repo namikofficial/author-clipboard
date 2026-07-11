@@ -74,7 +74,7 @@ pub fn install(
     controller.set_propagation_phase(gtk4::PropagationPhase::Capture);
     let st = state.clone();
     let tx = effects_tx.clone();
-    controller.connect_key_pressed(move |_, key, mods, _| {
+    controller.connect_key_pressed(move |_, key, _keycode, mods| {
         if key == gdk::Key::Escape {
             let outcome = resolve_escape(st.borrow().focus, st.borrow().search_query.is_empty());
             match outcome {
@@ -86,21 +86,45 @@ pub fn install(
                     Propagation::Stop
                 }
             }
-        } else if let Some(action) =
-            map_key_extended(key, gdk::ModifierType::from_bits_truncate(mods))
-        {
+        } else if let Some(action) = map_key_extended(key, mods) {
+            let continue_to_page = matches!(
+                action,
+                Action::TogglePinnedFilter | Action::ToggleStarredFilter
+            );
             let mut s = st.borrow_mut();
             let effects = reduce(&mut s, action);
             for eff in effects {
+                persist_organization_effect(&eff);
                 let _ = tx.send(eff);
             }
-            Propagation::Stop
+            if continue_to_page {
+                Propagation::Proceed
+            } else {
+                Propagation::Stop
+            }
         } else {
             Propagation::Proceed
         }
     });
     window.add_controller(controller.clone());
     controller
+}
+
+fn persist_organization_effect(effect: &crate::Effect) {
+    use author_clipboard_shared::ipc::{IpcClient, IpcCommand};
+    let command = match effect {
+        crate::Effect::PinItem(id) => Some(IpcCommand::Pin { id: *id }),
+        crate::Effect::UnpinItem(id) => Some(IpcCommand::Unpin { id: *id }),
+        crate::Effect::StarItem(id) | crate::Effect::UnstarItem(id) => {
+            Some(IpcCommand::ToggleStar { id: *id })
+        }
+        _ => None,
+    };
+    if let Some(command) = command {
+        if let Err(error) = IpcClient::new().send_command(&command) {
+            tracing::warn!(?error, "keyboard organization action failed");
+        }
+    }
 }
 
 #[cfg(test)]
