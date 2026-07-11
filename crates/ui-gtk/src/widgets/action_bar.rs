@@ -11,6 +11,12 @@ pub enum RailAction {
     QuickPaste,
     /// Copy a formatting-free text representation.
     PlainText,
+    /// Apply a content-aware shared transformation and copy its result.
+    Transform,
+    /// Save the selected content as a snippet.
+    CreateSnippet,
+    /// Explicitly reveal a protected selection for the configured timeout.
+    Reveal,
     /// Toggle retention pinning.
     Pin,
     /// Toggle priority starring.
@@ -29,6 +35,17 @@ pub fn build(on_action: impl Fn(RailAction) + 'static) -> gtk4::Box {
         ("Copy", "Copy selected item (Enter)", RailAction::Copy),
         ("Paste", "Quick paste selected item", RailAction::QuickPaste),
         ("Text", "Copy as plain text", RailAction::PlainText),
+        (
+            "Transform",
+            "Transform selected content",
+            RailAction::Transform,
+        ),
+        (
+            "Snippet",
+            "Create snippet from selection",
+            RailAction::CreateSnippet,
+        ),
+        ("Reveal", "Reveal protected selection", RailAction::Reveal),
         ("Pin", "Pin or unpin selected item", RailAction::Pin),
         ("Star", "Star or unstar selected item", RailAction::Star),
         ("Delete", "Delete selected item", RailAction::Delete),
