@@ -253,8 +253,16 @@ pub enum Action {
     QuickPasteRequested,
     /// Toggle the pinned flag on an item by its database id.
     TogglePin(i64),
+    /// Toggle pinning for the authoritative selected ID.
+    ToggleSelectedPin,
     /// Toggle the starred flag on an item by its database id.
     ToggleStar(i64),
+    /// Toggle starring for the authoritative selected ID.
+    ToggleSelectedStar,
+    /// Toggle the pinned-only quick-access view.
+    TogglePinnedFilter,
+    /// Toggle the starred-only quick-access view.
+    ToggleStarredFilter,
     /// Delete an item by its database id.
     Delete(i64),
     /// User activated the "reveal redacted" action.
@@ -503,6 +511,10 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
             }
         }
 
+        Action::ToggleSelectedPin => state
+            .selected_id
+            .map_or_else(Vec::new, |id| reduce(state, Action::TogglePin(id))),
+
         Action::ToggleStar(id) => {
             let item = state.items.iter_mut().find(|item| item.id == id);
             match item {
@@ -516,6 +528,30 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
                 }
                 None => vec![],
             }
+        }
+
+        Action::ToggleSelectedStar => state
+            .selected_id
+            .map_or_else(Vec::new, |id| reduce(state, Action::ToggleStar(id))),
+
+        Action::TogglePinnedFilter => {
+            state.filter = if state.filter == crate::PickerFilter::Pinned {
+                crate::PickerFilter::All
+            } else {
+                crate::PickerFilter::Pinned
+            };
+            state.select_by_id(None);
+            vec![Effect::RefreshItems, Effect::PersistGSettings]
+        }
+
+        Action::ToggleStarredFilter => {
+            state.filter = if state.filter == crate::PickerFilter::Starred {
+                crate::PickerFilter::All
+            } else {
+                crate::PickerFilter::Starred
+            };
+            state.select_by_id(None);
+            vec![Effect::RefreshItems, Effect::PersistGSettings]
         }
 
         Action::Delete(id) => {
@@ -857,6 +893,29 @@ mod tests {
         let effects = reduce(&mut state, Action::TogglePin(5));
         assert_eq!(effects, vec![Effect::PinItem(5)]);
         assert!(state.items[0].pinned);
+    }
+
+    #[test]
+    fn selected_shortcuts_use_authoritative_id_and_filters_toggle_off() {
+        let mut state = fresh_state();
+        state.items = vec![make_item(5), make_item(9)];
+        state.select_by_id(Some(9));
+        assert_eq!(
+            reduce(&mut state, Action::ToggleSelectedPin),
+            vec![Effect::PinItem(9)]
+        );
+        assert_eq!(
+            reduce(&mut state, Action::ToggleSelectedStar),
+            vec![Effect::StarItem(9)]
+        );
+        reduce(&mut state, Action::TogglePinnedFilter);
+        assert_eq!(state.filter, crate::PickerFilter::Pinned);
+        reduce(&mut state, Action::TogglePinnedFilter);
+        assert_eq!(state.filter, crate::PickerFilter::All);
+        reduce(&mut state, Action::ToggleStarredFilter);
+        assert_eq!(state.filter, crate::PickerFilter::Starred);
+        reduce(&mut state, Action::ToggleStarredFilter);
+        assert_eq!(state.filter, crate::PickerFilter::All);
     }
 
     #[test]

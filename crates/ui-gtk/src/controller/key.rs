@@ -46,6 +46,11 @@ pub fn map_key_extended(key: Key, mods: ModifierType) -> Option<Action> {
         // Page navigation
         (Key::Tab, true, false) => Some(Action::CyclePage(1)), // Ctrl+Tab = next
         (Key::Tab, true, true) => Some(Action::CyclePage(-1)), // Ctrl+Shift+Tab = prev
+        // Collection organization and quick-access filters.
+        (Key::p, true, false) => Some(Action::ToggleSelectedPin),
+        (Key::s, true, true) => Some(Action::ToggleSelectedStar),
+        (Key::p, true, true) => Some(Action::TogglePinnedFilter),
+        (Key::a, true, true) => Some(Action::ToggleStarredFilter),
         // Actions (runtime decides copy vs quick-paste based on mode)
         (Key::Return, false, false) => Some(Action::Focus(FocusTarget::List)), // Enter in list = copy; runtime wires copy
         _ => None,
@@ -216,6 +221,35 @@ mod tests {
         assert_eq!(
             map_key_extended(Key::Page_Down, ModifierType::empty()),
             Some(Action::MovePage(1))
+        );
+    }
+
+    #[test]
+    fn collection_shortcuts_map_to_selected_actions_and_quick_filters() {
+        assert_eq!(
+            map_key_extended(Key::p, ModifierType::CONTROL_MASK),
+            Some(Action::ToggleSelectedPin)
+        );
+        assert_eq!(
+            map_key_extended(
+                Key::s,
+                ModifierType::CONTROL_MASK | ModifierType::SHIFT_MASK
+            ),
+            Some(Action::ToggleSelectedStar)
+        );
+        assert_eq!(
+            map_key_extended(
+                Key::p,
+                ModifierType::CONTROL_MASK | ModifierType::SHIFT_MASK
+            ),
+            Some(Action::TogglePinnedFilter)
+        );
+        assert_eq!(
+            map_key_extended(
+                Key::a,
+                ModifierType::CONTROL_MASK | ModifierType::SHIFT_MASK
+            ),
+            Some(Action::ToggleStarredFilter)
         );
     }
 }
