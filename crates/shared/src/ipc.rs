@@ -234,6 +234,15 @@ pub enum IpcCommand {
         #[serde(default)]
         mime: Option<String>,
     },
+    /// Apply a shared pure transformation without mutating history.
+    Transform {
+        content: String,
+        transform: crate::transform::TransformKind,
+        #[serde(default)]
+        sensitive: bool,
+        #[serde(default)]
+        confirm_sensitive: bool,
+    },
     /// Pin an item.
     Pin { id: i64 },
     /// Unpin an item.
@@ -533,6 +542,7 @@ impl IpcClient {
             IpcCommand::GetStats => "GetStats",
             IpcCommand::GetAuditLog { .. } => "GetAuditLog",
             IpcCommand::Copy { .. } => "Copy",
+            IpcCommand::Transform { .. } => "Transform",
             IpcCommand::Pin { .. } => "Pin",
             IpcCommand::Unpin { .. } => "Unpin",
             IpcCommand::Delete { .. } => "Delete",

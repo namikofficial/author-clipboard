@@ -59,6 +59,8 @@ struct AppState {
     config: Config,
     /// Encryption manager for sensitive content at rest (shared via Arc).
     encryption_manager: Arc<Option<EncryptionManager>>,
+    /// Monotonic snapshot revision shared with the IPC query boundary.
+    revision: Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl AppState {
@@ -66,6 +68,7 @@ impl AppState {
         db: Database,
         config: Config,
         encryption_manager: Arc<Option<EncryptionManager>>,
+        revision: Arc<std::sync::atomic::AtomicU64>,
     ) -> Self {
         Self {
             manager: None,
@@ -76,6 +79,7 @@ impl AppState {
             db,
             config,
             encryption_manager,
+            revision,
         }
     }
 
@@ -92,17 +96,31 @@ impl AppState {
 
     /// Insert a clipboard item, encrypting it at rest if sensitive and encryption is enabled.
     fn insert_item(&self, item: &ClipboardItem) -> anyhow::Result<i64> {
-        if self.config.encrypt_sensitive && item.sensitive {
+        let result = if self.config.encrypt_sensitive && item.sensitive {
             if let Some(ref manager) = *self.encryption_manager {
-                return self
-                    .db
+                self.db
                     .insert_with_encryption(item, manager, true)
-                    .map_err(|e| anyhow::anyhow!("Encryption insert failed: {e}"));
+                    .map_err(|e| anyhow::anyhow!("Encryption insert failed: {e}"))
+            } else {
+                self.db
+                    .insert_or_bump(item, self.config.dedup_window_seconds)
+                    .map_err(|e| anyhow::anyhow!("DB insert failed: {e}"))
             }
+        } else {
+            self.db
+                .insert_or_bump(item, self.config.dedup_window_seconds)
+                .map_err(|e| anyhow::anyhow!("DB insert failed: {e}"))
+        };
+        if result.is_ok() {
+            let revision = self
+                .revision
+                .fetch_add(1, std::sync::atomic::Ordering::Release);
+            let _ = std::fs::write(
+                self.config.data_dir.join(".history_revision"),
+                revision.saturating_add(1).to_string(),
+            );
         }
-        self.db
-            .insert_or_bump(item, self.config.dedup_window_seconds)
-            .map_err(|e| anyhow::anyhow!("DB insert failed: {e}"))
+        result
     }
 
     /// Read raw bytes from a clipboard offer via a pipe.
@@ -524,6 +542,7 @@ struct IpcHandlerState {
     subscriptions: Arc<Mutex<Vec<Subscription>>>,
     next_sub_id: Arc<Mutex<u64>>,
     encryption_manager: Arc<Option<EncryptionManager>>,
+    revision: Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl IpcHandlerState {
@@ -532,6 +551,7 @@ impl IpcHandlerState {
         config: Config,
         data_dir: std::path::PathBuf,
         encryption_manager: Arc<Option<EncryptionManager>>,
+        revision: Arc<std::sync::atomic::AtomicU64>,
     ) -> Self {
         let visibility_path = data_dir.join(".visibility_toggle");
         Self {
@@ -542,6 +562,7 @@ impl IpcHandlerState {
             subscriptions: Arc::new(Mutex::new(Vec::new())),
             next_sub_id: Arc::new(Mutex::new(1)),
             encryption_manager,
+            revision,
         }
     }
 
@@ -711,6 +732,7 @@ impl IpcHandlerState {
                     "offset": offset,
                     "limit": limit,
                     "has_more": offset + items.len() < total,
+                    "revision": self.revision.load(std::sync::atomic::Ordering::Acquire),
                 }))
             }
             IpcCommand::GetItem { id } => {
@@ -751,6 +773,7 @@ impl IpcHandlerState {
                     "offset": 0,
                     "limit": limit.unwrap_or(50),
                     "has_more": false,
+                    "revision": self.revision.load(std::sync::atomic::Ordering::Acquire),
                 }))
             }
             IpcCommand::GetStats => {
@@ -867,6 +890,22 @@ impl IpcHandlerState {
                         }))
                     }
                     Err(e) => IpcResponse::err("COPY_ERROR", format!("Failed to copy: {e}")),
+                }
+            }
+            IpcCommand::Transform {
+                content,
+                transform,
+                sensitive,
+                confirm_sensitive,
+            } => {
+                match author_clipboard_shared::transform::apply(
+                    &content,
+                    &transform,
+                    sensitive,
+                    confirm_sensitive,
+                ) {
+                    Ok(output) => IpcResponse::ok(serde_json::json!({ "output": output })),
+                    Err(error) => IpcResponse::err("transform_failed", error.to_string()),
                 }
             }
             IpcCommand::Pin { id } => {
@@ -1023,8 +1062,16 @@ impl IpcHandlerState {
                         .or_else(|| std::env::var("LOGNAME").ok()),
                     hostname: std::env::var("HOSTNAME").ok(),
                 };
-                let (rendered, cursor_offset) =
-                    author_clipboard_shared::template::render(&snippet.content, &ctx);
+                let (rendered, cursor_offset) = match author_clipboard_shared::snippet_template::expand(
+                    &snippet.content,
+                    &ctx,
+                    None,
+                    false,
+                    false,
+                ) {
+                    Ok(result) => result,
+                    Err(error) => return IpcResponse::err("SNIPPET_TEMPLATE_INVALID", error.to_string()),
+                };
                 IpcResponse::ok(serde_json::json!({
                     "content": rendered,
                     "cursor_offset": cursor_offset,
@@ -1220,6 +1267,7 @@ impl IpcHandlerState {
             "content_type": item.content_type.as_str(),
             "timestamp": item.timestamp.to_rfc3339(),
             "pinned": item.pinned,
+            "starred": item.starred,
             "source_app": item.source_app,
             "sensitive": item.sensitive,
             "encrypted": encrypted,
@@ -1400,11 +1448,13 @@ fn run() -> Result<()> {
         Arc::new(None)
     };
 
+    let revision = Arc::new(std::sync::atomic::AtomicU64::new(0));
     let ipc_state = IpcHandlerState::new(
         ipc_db,
         config.clone(),
         config.data_dir.clone(),
         Arc::clone(&encryption_manager),
+        Arc::clone(&revision),
     );
     spawn_ipc_server(ipc_state);
 
@@ -1418,7 +1468,7 @@ fn run() -> Result<()> {
     let mut event_queue: EventQueue<AppState> = conn.new_event_queue();
     let qh = event_queue.handle();
 
-    let mut state = AppState::new(db, config, Arc::clone(&encryption_manager));
+    let mut state = AppState::new(db, config, Arc::clone(&encryption_manager), revision);
 
     // Trigger global advertisement
     display.get_registry(&qh, ());

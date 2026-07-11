@@ -708,11 +708,22 @@ mod tests {
     // ── Select ──────────────────────────────────────────────────────
 
     #[test]
-    fn select_some_sets_index() {
+    fn select_known_id_sets_id_and_derived_index() {
         let mut state = fresh_state();
+        state.items = vec![make_item(7), make_item(8)];
         let effects = reduce(&mut state, Action::Select(Some(7)));
-        assert_eq!(state.selected_index, Some(0)); // placeholder mapping
+        assert_eq!(state.selected_id, Some(7));
+        assert_eq!(state.selected_index, Some(0));
         assert!(effects.is_empty());
+    }
+
+    #[test]
+    fn select_unknown_id_never_targets_first_row() {
+        let mut state = fresh_state();
+        state.items = vec![make_item(7)];
+        reduce(&mut state, Action::Select(Some(999)));
+        assert_eq!(state.selected_id, None);
+        assert_eq!(state.selected_index, None);
     }
 
     #[test]
@@ -738,7 +749,9 @@ mod tests {
     #[test]
     fn move_to_sets_index() {
         let mut state = fresh_state();
+        state.items = (0..6).map(make_item).collect();
         let effects = reduce(&mut state, Action::MoveTo(5));
+        assert_eq!(state.selected_id, Some(5));
         assert_eq!(state.selected_index, Some(5));
         assert!(effects.is_empty());
     }
@@ -786,7 +799,7 @@ mod tests {
     fn copy_requested_emits_copy_item_effect() {
         let mut state = fresh_state();
         state.items = vec![make_item(42), make_item(99)];
-        state.selected_index = Some(0);
+        state.select_by_id(Some(42));
         let effects = reduce(&mut state, Action::CopyRequested);
         assert_eq!(effects.len(), 1);
         assert_eq!(
@@ -803,7 +816,7 @@ mod tests {
     fn quick_paste_requested_emits_quick_paste_item_effect() {
         let mut state = fresh_state();
         state.items = vec![make_item(7)];
-        state.selected_index = Some(0);
+        state.select_by_id(Some(7));
         let effects = reduce(&mut state, Action::QuickPasteRequested);
         assert_eq!(effects.len(), 1);
         assert_eq!(effects[0], Effect::QuickPasteItem { id: 7, mime: None });

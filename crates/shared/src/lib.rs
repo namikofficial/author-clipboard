@@ -21,6 +21,8 @@ pub mod encryption;
 pub mod file_handler;
 /// Image storage and thumbnail management.
 pub mod image_store;
+/// Versioned privacy-preserving import/export contracts.
+pub mod import_export;
 /// Unix domain socket IPC between daemon and clients.
 pub mod ipc;
 /// Kaomoji (Japanese emoticons) data and search.
@@ -37,10 +39,14 @@ pub mod screen_lock;
 pub mod sensitive;
 /// Keyboard shortcut parsing and conflict detection.
 pub mod shortcut;
+/// Strict command-center snippet variable compatibility layer.
+pub mod snippet_template;
 /// Symbol data organized by category for picker UIs.
 pub mod symbols;
 /// Snippet template rendering with `${name}` variable substitution.
 pub mod template;
+/// Pure developer-oriented clipboard transformations.
+pub mod transform;
 /// Core data types for clipboard items and events.
 pub mod types;
 

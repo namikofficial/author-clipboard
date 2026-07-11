@@ -430,3 +430,11 @@ doctor:
     @ls crates/
     @echo ""
     @echo "✅ Health check complete!"
+
+# Recreate a deterministic 5,000-item synthetic performance database.
+perf-seed:
+    cargo run -p author-clipboard-shared --example perf_seed -- /tmp/author-clipboard-perf.db
+
+# Measure picker loads/searches against the synthetic performance database.
+perf-picker:
+    cargo run -p author-clipboard-shared --example perf_picker -- /tmp/author-clipboard-perf.db

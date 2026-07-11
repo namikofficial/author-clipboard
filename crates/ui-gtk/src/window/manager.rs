@@ -83,12 +83,13 @@ fn build_manager_window(app: &adw::Application) -> anyhow::Result<()> {
         }),
     );
 
-    let clipboard_page_content = crate::pages::clipboard::build(&clipboard_props, move |req| {
-        tracing::info!(id = req.id, mime = %req.mime, "manager copy");
-        if let Err(e) = crate::pages::clipboard::copy_via_ipc(req.id, &req.mime) {
-            tracing::warn!(?e, "manager copy failed");
-        }
-    });
+    let clipboard_page_content =
+        crate::pages::clipboard::build(&clipboard_props, state.clone(), move |req| {
+            tracing::info!(id = req.id, mime = %req.mime, "manager copy");
+            if let Err(e) = crate::pages::clipboard::copy_via_ipc(req.id, &req.mime) {
+                tracing::warn!(?e, "manager copy failed");
+            }
+        });
 
     clipboard_paned.set_start_child(Some(&clipboard_page_content));
     clipboard_paned.set_end_child(Some(preview.widget()));

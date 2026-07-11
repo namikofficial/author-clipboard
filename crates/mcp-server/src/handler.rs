@@ -234,7 +234,8 @@ async fn handle_method(client: &IpcClient, method: &str, params: Option<Value>) 
                         filters: Some(filters),
                     }) {
                         Ok(resp) => {
-                            serde_json::json!({"content": [{"type": "text", "text": serde_json::to_string(&resp.data).unwrap_or_default()}]})
+                            let data = redact_sensitive_mcp_data(resp.data);
+                            serde_json::json!({"content": [{"type": "text", "text": serde_json::to_string(&data).unwrap_or_default()}]})
                         }
                         Err(e) => {
                             serde_json::json!({"isError": true, "content": [{"type": "text", "text": e.to_string()}]})
@@ -247,7 +248,8 @@ async fn handle_method(client: &IpcClient, method: &str, params: Option<Value>) 
 
                     match client.send_command(&IpcCommand::GetItem { id }) {
                         Ok(resp) => {
-                            serde_json::json!({"content": [{"type": "text", "text": serde_json::to_string(&resp.data).unwrap_or_default()}]})
+                            let data = redact_sensitive_mcp_data(resp.data);
+                            serde_json::json!({"content": [{"type": "text", "text": serde_json::to_string(&data).unwrap_or_default()}]})
                         }
                         Err(e) => {
                             serde_json::json!({"isError": true, "content": [{"type": "text", "text": e.to_string()}]})
@@ -626,6 +628,32 @@ fn sensitive_copy_requires_confirmation(
             .unwrap_or(false)
 }
 
+fn redact_sensitive_mcp_data(mut data: Option<Value>) -> Option<Value> {
+    fn visit(value: &mut Value) {
+        match value {
+            Value::Object(map) => {
+                if map.get("sensitive").and_then(Value::as_bool) == Some(true) {
+                    for key in ["content", "plain_text", "preview"] {
+                        if map.contains_key(key) {
+                            map.insert(key.to_string(), Value::String("••••••••".to_string()));
+                        }
+                    }
+                }
+                for child in map.values_mut() {
+                    visit(child);
+                }
+            }
+            Value::Array(values) => values.iter_mut().for_each(visit),
+            _ => {}
+        }
+    }
+
+    if let Some(value) = data.as_mut() {
+        visit(value);
+    }
+    data
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -658,5 +686,24 @@ mod tests {
             CopyMode::Copy,
             false
         ));
+    }
+
+    #[test]
+    fn mcp_output_redacts_sensitive_fields_recursively() {
+        let data = serde_json::json!({
+            "items": [{
+                "id": 7,
+                "sensitive": true,
+                "content": "raw-secret",
+                "plain_text": "raw-secret",
+                "preview": "raw-secret"
+            }]
+        });
+        let redacted = redact_sensitive_mcp_data(Some(data)).unwrap();
+        let item = &redacted["items"][0];
+        assert_eq!(item["content"], "••••••••");
+        assert_eq!(item["plain_text"], "••••••••");
+        assert_eq!(item["preview"], "••••••••");
+        assert_eq!(item["id"], 7);
     }
 }

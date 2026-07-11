@@ -3,9 +3,12 @@ use author_clipboard_shared::clipboard;
 use author_clipboard_shared::compositor::{detect_display_server, probe_wayland_protocols};
 use author_clipboard_shared::config::Config;
 use author_clipboard_shared::db::Database;
+use author_clipboard_shared::import_export::{self, ExportMode};
 use author_clipboard_shared::ipc::{CopyMode, IpcClient, IpcCommand, IpcMessage};
 use author_clipboard_shared::picker::{self, PickerAction, PickerOptions, PickerSource};
+use author_clipboard_shared::transform::TransformKind;
 use clap::{Parser, Subcommand, ValueEnum};
+use std::io::Read as _;
 use std::process::{Command as ProcessCommand, Stdio};
 
 /// CLI control tool for author-clipboard
@@ -65,11 +68,51 @@ enum Command {
         /// Output file path (default: stdout)
         #[arg(short, long)]
         output: Option<String>,
+        /// Export privacy/scope mode.
+        #[arg(long, value_enum, default_value_t = ExportModeArg::Redacted)]
+        mode: ExportModeArg,
+        /// Explicitly acknowledge that full export can contain secrets.
+        #[arg(long)]
+        confirm_sensitive: bool,
+    },
+    /// Preview or import a versioned Author Clipboard export.
+    Import {
+        /// Input JSON file.
+        input: String,
+        /// Validate and report counts without writing.
+        #[arg(long)]
+        dry_run: bool,
+        /// Confirm writing imported items to history.
+        #[arg(long)]
+        confirm: bool,
+    },
+    /// Apply a pure text transformation.
+    Transform {
+        #[arg(value_enum)]
+        kind: TransformArg,
+        /// Input text (reads stdin when omitted).
+        input: Option<String>,
+        /// Language hint for fenced-code output.
+        #[arg(long)]
+        language: Option<String>,
+        /// Treat input as sensitive.
+        #[arg(long)]
+        sensitive: bool,
+        /// Confirm transformation of sensitive input.
+        #[arg(long)]
+        confirm_sensitive: bool,
     },
     /// Show current configuration
     Config,
     /// Probe compositor and clipboard protocol support
-    Doctor,
+    Doctor {
+        /// Emit machine-readable diagnostics.
+        #[arg(long)]
+        json: bool,
+        /// Apply only safe, application-owned directory fixes.
+        #[arg(long)]
+        fix: bool,
+    },
     /// Copy a history item by id
     Copy {
         /// Clipboard item id
@@ -100,7 +143,11 @@ enum Command {
         filter: String,
     },
     /// Print recommended Hyprland config for keybinds and window rules
-    HyprlandConfig,
+    HyprlandConfig {
+        /// Idempotently update the Author Clipboard managed block in this file.
+        #[arg(long, value_name = "PATH")]
+        write: Option<std::path::PathBuf>,
+    },
     /// Manage collections (list, create, delete, rename, add/remove items)
     Collection {
         #[command(subcommand)]
@@ -167,6 +214,35 @@ enum ActionArg {
     Copy,
     #[value(alias = "quick-paste")]
     QuickPaste,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
+enum ExportModeArg {
+    Redacted,
+    Full,
+    Snippets,
+    Settings,
+}
+impl From<ExportModeArg> for ExportMode {
+    fn from(value: ExportModeArg) -> Self {
+        match value {
+            ExportModeArg::Redacted => Self::Redacted,
+            ExportModeArg::Full => Self::FullWithConfirmation,
+            ExportModeArg::Snippets => Self::SnippetsOnly,
+            ExportModeArg::Settings => Self::SettingsOnly,
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
+enum TransformArg {
+    PlainText,
+    MarkdownLink,
+    FencedCode,
+    Quote,
+    JsonPretty,
+    JsonMinified,
+    Redacted,
 }
 
 impl From<ActionArg> for PickerAction {
@@ -411,10 +487,18 @@ fn main() -> Result<()> {
                 }
             }
         }
-        Command::Export { output } => {
+        Command::Export {
+            output,
+            mode,
+            confirm_sensitive,
+        } => {
             let config = Config::load();
             let db = Database::open(&config.db_path()).context("Failed to open database")?;
-            let json = db.export_items().context("Failed to export")?;
+            let items = db
+                .get_recent(i32::MAX as usize)
+                .context("Failed to load history")?;
+            let json = import_export::export_history(&items, mode.into(), confirm_sensitive)
+                .context("Failed to export")?;
             if let Some(path) = output {
                 std::fs::write(&path, &json)
                     .with_context(|| format!("Failed to write to {path}"))?;
@@ -422,6 +506,74 @@ fn main() -> Result<()> {
             } else {
                 println!("{json}");
             }
+        }
+        Command::Import {
+            input,
+            dry_run,
+            confirm,
+        } => {
+            let json = std::fs::read_to_string(&input)
+                .with_context(|| format!("Failed to read {input}"))?;
+            let preview =
+                import_export::preview_import(&json).context("Import validation failed")?;
+            println!(
+                "History: {}, sensitive: {}",
+                preview.history_count, preview.sensitive_count
+            );
+            for warning in &preview.warnings {
+                eprintln!("Warning: {warning}");
+            }
+            if !dry_run {
+                anyhow::ensure!(
+                    confirm,
+                    "Import writes require --confirm (use --dry-run to preview)"
+                );
+                let items =
+                    import_export::validated_history(&json).context("Import validation failed")?;
+                let config = Config::load();
+                let db = Database::open(&config.db_path()).context("Failed to open database")?;
+                let legacy_json =
+                    serde_json::to_string(&items).context("Failed to prepare import")?;
+                let count = db.import_items(&legacy_json).map_err(anyhow::Error::msg)?;
+                println!("Imported {count} items.");
+            }
+        }
+        Command::Transform {
+            kind,
+            input,
+            language,
+            sensitive,
+            confirm_sensitive,
+        } => {
+            let input = match input {
+                Some(value) => value,
+                None => {
+                    let mut value = String::new();
+                    std::io::stdin()
+                        .read_to_string(&mut value)
+                        .context("Failed to read stdin")?;
+                    value
+                }
+            };
+            let kind = match kind {
+                TransformArg::PlainText => TransformKind::PlainText,
+                TransformArg::MarkdownLink => TransformKind::MarkdownLink,
+                TransformArg::FencedCode => TransformKind::FencedCode {
+                    language_hint: language,
+                },
+                TransformArg::Quote => TransformKind::Quote,
+                TransformArg::JsonPretty => TransformKind::JsonPretty,
+                TransformArg::JsonMinified => TransformKind::JsonMinified,
+                TransformArg::Redacted => TransformKind::Redacted,
+            };
+            let output = author_clipboard_shared::transform::apply(
+                &input,
+                &kind,
+                sensitive,
+                confirm_sensitive,
+            )
+            .context("Transform failed")?;
+            println!("{output}");
         }
         Command::Config => {
             let config = Config::load();
@@ -456,7 +608,7 @@ fn main() -> Result<()> {
             println!("data_dir: {}", config.data_dir.display());
             println!("db_path: {}", config.db_path().display());
         }
-        Command::Doctor => run_doctor(),
+        Command::Doctor { json, fix } => run_doctor(json, fix)?,
         Command::Copy { id } => copy_item_by_id(id)?,
         Command::ExpandSnippet {
             name_or_id,
@@ -480,7 +632,7 @@ fn main() -> Result<()> {
             action,
             filter.as_str(),
         )?,
-        Command::HyprlandConfig => print_hyprland_config(),
+        Command::HyprlandConfig { write } => run_hyprland_config(write.as_deref())?,
         Command::Collection { action } => run_collection(action)?,
         Command::Filter { action } => run_filter(action)?,
     }
@@ -580,10 +732,61 @@ fn preview_text(item: &author_clipboard_shared::ClipboardItem) -> String {
     }
 }
 
-fn run_doctor() {
+#[allow(clippy::too_many_lines)]
+fn run_doctor(json: bool, fix: bool) -> Result<()> {
+    let config = Config::load();
+    let mut fixes = Vec::new();
+    if fix && !config.data_dir.exists() {
+        std::fs::create_dir_all(&config.data_dir).with_context(|| {
+            format!(
+                "failed to create application data directory {}",
+                config.data_dir.display()
+            )
+        })?;
+        fixes.push(format!("created {}", config.data_dir.display()));
+    }
     let server = detect_display_server();
     let protocols = probe_wayland_protocols();
+    let daemon = IpcClient::new().send_command(&IpcCommand::Ping).is_ok();
+    let database = Database::open(&config.db_path()).is_ok();
+    let checks = serde_json::json!({
+        "daemon": daemon,
+        "config_loaded": true,
+        "data_dir": config.data_dir.is_dir(),
+        "database": database,
+        "wayland": protocols.wayland,
+        "wlr_data_control": protocols.wlr_data_control,
+        "seat": protocols.seat,
+        "compositor": format!("{server:?}"),
+        "wl_copy": command_exists("wl-copy"),
+        "wtype": command_exists("wtype"),
+        "ydotool": command_exists("ydotool"),
+        "wofi": command_exists("wofi"),
+        "fuzzel": command_exists("fuzzel"),
+        "rofi": command_exists("rofi"),
+    });
+    let healthy = daemon && database && protocols.wayland && protocols.seat;
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "healthy": healthy,
+                "checks": checks,
+                "fixes": fixes,
+                "probe_error": protocols.error,
+            }))?
+        );
+        return Ok(());
+    }
     println!("Display: {server:?}");
+    println!(
+        "Daemon: {}",
+        if daemon { "reachable" } else { "unavailable" }
+    );
+    println!(
+        "Database: {}",
+        if database { "readable" } else { "unavailable" }
+    );
     println!(
         "Wayland: {}",
         if protocols.wayland {
@@ -619,6 +822,27 @@ fn run_doctor() {
             "unsupported"
         }
     );
+    for tool in ["wl-copy", "wtype", "ydotool", "wofi", "fuzzel", "rofi"] {
+        println!(
+            "{tool}: {}",
+            if command_exists(tool) {
+                "available"
+            } else {
+                "missing (optional)"
+            }
+        );
+    }
+    for applied in fixes {
+        println!("Fixed: {applied}");
+    }
+    Ok(())
+}
+
+fn command_exists(name: &str) -> bool {
+    ProcessCommand::new("sh")
+        .args(["-c", "command -v -- \"$1\" >/dev/null 2>&1", "doctor", name])
+        .status()
+        .is_ok_and(|status| status.success())
 }
 
 #[allow(clippy::single_match_else)]
@@ -1110,13 +1334,6 @@ fn detect_menu_backend() -> Option<MenuBackend> {
         .find(|backend| command_exists(backend.command_name()))
 }
 
-fn command_exists(name: &str) -> bool {
-    ProcessCommand::new("which")
-        .arg(name)
-        .output()
-        .is_ok_and(|output| output.status.success())
-}
-
 fn run_menu_backend(backend: MenuBackend, prompt: &str, labels: &[String]) -> Result<String> {
     let mut command = ProcessCommand::new(backend.command_name());
     command.args(backend.args(prompt));
@@ -1169,8 +1386,74 @@ fn hyprland_config_text() -> String {
     .join("\n")
 }
 
-fn print_hyprland_config() {
-    println!("{}", hyprland_config_text());
+const HYPR_BLOCK_START: &str = "# >>> author-clipboard managed block >>>";
+const HYPR_BLOCK_END: &str = "# <<< author-clipboard managed block <<<";
+
+fn hyprland_managed_block() -> String {
+    format!(
+        "{HYPR_BLOCK_START}\n{}\n{HYPR_BLOCK_END}",
+        hyprland_config_text()
+    )
+}
+
+fn merge_hyprland_config(existing: &str) -> Result<String> {
+    let block = hyprland_managed_block();
+    match (
+        existing.find(HYPR_BLOCK_START),
+        existing.find(HYPR_BLOCK_END),
+    ) {
+        (Some(start), Some(end)) if end >= start => {
+            let end = end + HYPR_BLOCK_END.len();
+            Ok(format!(
+                "{}{}{}",
+                &existing[..start],
+                block,
+                &existing[end..]
+            ))
+        }
+        (None, None) => {
+            let separator = if existing.is_empty() || existing.ends_with("\n\n") {
+                ""
+            } else if existing.ends_with('\n') {
+                "\n"
+            } else {
+                "\n\n"
+            };
+            Ok(format!("{existing}{separator}{block}\n"))
+        }
+        _ => anyhow::bail!("refusing to modify malformed Author Clipboard managed block"),
+    }
+}
+
+fn run_hyprland_config(write: Option<&std::path::Path>) -> Result<()> {
+    let Some(path) = write else {
+        println!("{}", hyprland_managed_block());
+        return Ok(());
+    };
+    let existing = match std::fs::read_to_string(path) {
+        Ok(content) => content,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => {
+            return Err(error).with_context(|| format!("failed to read {}", path.display()))
+        }
+    };
+    let merged = merge_hyprland_config(&existing)?;
+    if merged == existing {
+        println!("Hyprland config already up to date: {}", path.display());
+        return Ok(());
+    }
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() && !parent.is_dir() {
+            anyhow::bail!("parent directory does not exist: {}", parent.display());
+        }
+    }
+    std::fs::write(path, merged)
+        .with_context(|| format!("failed to write Hyprland config {}", path.display()))?;
+    println!(
+        "Updated Author Clipboard managed block in {}",
+        path.display()
+    );
+    Ok(())
 }
 
 impl MenuBackend {
@@ -1261,7 +1544,7 @@ fn kill_applet() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::hyprland_config_text;
+    use super::{hyprland_config_text, merge_hyprland_config, HYPR_BLOCK_START};
 
     #[test]
     fn hyprland_config_includes_native_and_external_binds() {
@@ -1269,5 +1552,20 @@ mod tests {
         assert!(output.contains("author-clipboard-ctl picker --menu auto"));
         assert!(output.contains("author-clipboard-hypr-picker"));
         assert!(output.contains("author-clipboard-ctl toggle"));
+    }
+
+    #[test]
+    fn hyprland_managed_block_is_idempotent_and_preserves_user_text() {
+        let original = "# user rule\nbind = SUPER, Q, killactive\n";
+        let once = merge_hyprland_config(original).unwrap();
+        let twice = merge_hyprland_config(&once).unwrap();
+        assert_eq!(once, twice);
+        assert!(once.starts_with(original));
+        assert_eq!(once.matches(HYPR_BLOCK_START).count(), 1);
+    }
+
+    #[test]
+    fn malformed_hyprland_managed_block_is_rejected() {
+        assert!(merge_hyprland_config(HYPR_BLOCK_START).is_err());
     }
 }
