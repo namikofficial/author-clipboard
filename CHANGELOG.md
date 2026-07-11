@@ -99,6 +99,11 @@ and this project adheres to [Conventional Commits](https://www.conventionalcommi
 
 ### 🚀 Features
 
+- **command-center:** add shared privacy-gated transforms, strict snippet variables, safe versioned import/export, capture rules, and ignore-next-copy
+- **collections:** add native GTK collection creation, rename, deletion, membership inspection, and item assignment workflows
+- **expressions:** add searchable categorized emoji, symbol, and kaomoji pickers with persistent recent usage
+- **rich-content:** complete safe HTML fallback, image resolution, file metadata, and MIME-preserving restore behavior
+- **mcp:** enforce redacted-by-default resources and explicit sensitive/destructive confirmations
 - **applet:** enhance header with daemon indicator, item count, and tooltips
 - **applet:** route clipboard operations through IPC daemon with fallback
 - **ci:** add automatic changelog update workflow on push to main
@@ -241,5 +246,4 @@ and this project adheres to [Conventional Commits](https://www.conventionalcommi
 - add image handling and incognito mode support
 - add changelog generation and release tasks to justfile
 - add clipboard daemon and applet with Wayland support
-
 
