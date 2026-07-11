@@ -67,7 +67,7 @@ async fn handle_method(client: &IpcClient, method: &str, params: Option<Value>) 
                 "name": "author-clipboard",
                 "version": "0.1.0"
             },
-            "instructions": "Use clipboard.search to find items, clipboard.get to retrieve details. Sensitive items require confirm_sensitive=true on copy operations."
+            "instructions": "Use clipboard.search to find items and clipboard.get for redacted-safe details. Sensitive copy operations require confirm_sensitive=true."
         }),
 
         "tools/list" => {
@@ -90,12 +90,11 @@ async fn handle_method(client: &IpcClient, method: &str, params: Option<Value>) 
                 }),
                 serde_json::json!({
                     "name": "clipboard.get",
-                    "description": "Get a clipboard item by ID",
+                    "description": "Get redacted-safe clipboard item metadata by ID",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
-                            "id": {"type": "number"},
-                            "include_content": {"type": "boolean"}
+                            "id": {"type": "number"}
                         },
                         "required": ["id"]
                     }
@@ -245,10 +244,6 @@ async fn handle_method(client: &IpcClient, method: &str, params: Option<Value>) 
 
                 "clipboard.get" => {
                     let id = arguments.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
-                    let _include_content = arguments
-                        .get("include_content")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false);
 
                     match client.send_command(&IpcCommand::GetItem { id }) {
                         Ok(resp) => {
@@ -262,6 +257,10 @@ async fn handle_method(client: &IpcClient, method: &str, params: Option<Value>) 
 
                 "clipboard.copy" => {
                     let id = arguments.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
+                    let confirm_sensitive = arguments
+                        .get("confirm_sensitive")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
                     let mode_str = arguments
                         .get("mode")
                         .and_then(|v| v.as_str())
@@ -272,6 +271,30 @@ async fn handle_method(client: &IpcClient, method: &str, params: Option<Value>) 
                         "copy_redacted" => CopyMode::CopyRedacted,
                         _ => CopyMode::Copy,
                     };
+
+                    if !matches!(mode, CopyMode::CopyRedacted) {
+                        match client.send_command(&IpcCommand::GetItem { id }) {
+                            Ok(resp)
+                                if sensitive_copy_requires_confirmation(
+                                    resp.data.as_ref(),
+                                    mode,
+                                    confirm_sensitive,
+                                ) =>
+                            {
+                                return serde_json::json!({
+                                    "isError": true,
+                                    "content": [{
+                                        "type": "text",
+                                        "text": "Sensitive clipboard copy requires confirm_sensitive=true"
+                                    }]
+                                });
+                            }
+                            Err(e) => {
+                                return serde_json::json!({"isError": true, "content": [{"type": "text", "text": e.to_string()}]});
+                            }
+                            _ => {}
+                        }
+                    }
 
                     match client.send_command(&IpcCommand::Copy {
                         id,
@@ -587,5 +610,53 @@ async fn handle_method(client: &IpcClient, method: &str, params: Option<Value>) 
         }
 
         _ => serde_json::json!({"error": format!("Unknown method: {}", method)}),
+    }
+}
+
+fn sensitive_copy_requires_confirmation(
+    item: Option<&Value>,
+    mode: CopyMode,
+    confirmed: bool,
+) -> bool {
+    !matches!(mode, CopyMode::CopyRedacted)
+        && !confirmed
+        && item
+            .and_then(|data| data.get("sensitive"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sensitive_copy_requires_per_request_confirmation() {
+        let item = serde_json::json!({"sensitive": true});
+        assert!(sensitive_copy_requires_confirmation(
+            Some(&item),
+            CopyMode::Copy,
+            false
+        ));
+        assert!(!sensitive_copy_requires_confirmation(
+            Some(&item),
+            CopyMode::Copy,
+            true
+        ));
+        assert!(!sensitive_copy_requires_confirmation(
+            Some(&item),
+            CopyMode::CopyRedacted,
+            false
+        ));
+    }
+
+    #[test]
+    fn ordinary_copy_does_not_require_sensitive_confirmation() {
+        let item = serde_json::json!({"sensitive": false});
+        assert!(!sensitive_copy_requires_confirmation(
+            Some(&item),
+            CopyMode::Copy,
+            false
+        ));
     }
 }

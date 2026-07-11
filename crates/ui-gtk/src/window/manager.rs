@@ -124,6 +124,7 @@ fn build_manager_window(app: &adw::Application) -> anyhow::Result<()> {
     fn sidebar_icon_for(page: PageId) -> &'static str {
         match page {
             PageId::Clipboard => "edit-paste-symbolic",
+            PageId::Collections => "folder-symbolic",
             PageId::Emoji => "smiley-symbolic",
             PageId::Symbols => "insert-symbol-symbolic",
             PageId::Kaomoji => "face-smile-symbolic",
@@ -134,6 +135,7 @@ fn build_manager_window(app: &adw::Application) -> anyhow::Result<()> {
 
     let page_labels: &[(PageId, &str)] = &[
         (PageId::Clipboard, "Clipboard"),
+        (PageId::Collections, "Collections"),
         (PageId::Emoji, "Emoji"),
         (PageId::Symbols, "Symbols"),
         (PageId::Kaomoji, "Kaomoji"),
@@ -150,6 +152,7 @@ fn build_manager_window(app: &adw::Application) -> anyhow::Result<()> {
 
         let content_widget: gtk4::Widget = match page_id {
             PageId::Clipboard => clipboard_paned.clone().upcast(),
+            PageId::Collections => crate::pages::collections::build(&shared_config).upcast(),
             PageId::Emoji => crate::pages::emoji::build().upcast(),
             PageId::Symbols => crate::pages::symbols::build().upcast(),
             PageId::Kaomoji => crate::pages::kaomoji::build().upcast(),

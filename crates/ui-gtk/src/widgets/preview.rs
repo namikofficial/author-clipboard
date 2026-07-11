@@ -20,6 +20,24 @@ use sourceview5::prelude::*;
 
 use crate::AppState;
 
+fn resolve_image_path(data_dir: &std::path::Path, stored: &str) -> std::path::PathBuf {
+    let path = std::path::Path::new(stored);
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        author_clipboard_shared::image_store::image_path(data_dir, stored)
+    }
+}
+
+fn file_subtitle(file: &author_clipboard_shared::file_handler::FileInfo) -> String {
+    let size = author_clipboard_shared::file_handler::format_file_size(file.size);
+    if file.exists {
+        format!("{} · {size}", file.mime_type)
+    } else {
+        format!("{} · unavailable", file.mime_type)
+    }
+}
+
 /// Callback when the user clicks "Reveal".
 pub type OnReveal = Rc<dyn Fn()>;
 
@@ -246,6 +264,7 @@ impl PreviewPane {
 
     /// Show the text content.
     fn show_text(&self, item: &ClipboardItem) {
+        self.empty_state.set_visible(false);
         self.image_picture.set_visible(false);
         self.files_box.set_visible(false);
         self.text_view.set_visible(true);
@@ -258,15 +277,19 @@ impl PreviewPane {
 
     /// Show the image preview.
     fn show_image(&self, item: &ClipboardItem) {
+        self.empty_state.set_visible(false);
         self.text_view.set_visible(false);
         self.files_box.set_visible(false);
         self.image_picture.set_visible(true);
         self.redacted_overlay.set_visible(false);
 
-        // ClipboardItem stores the relative path in `content` for images.
-        let path = std::path::Path::new(&item.content);
+        // Captured images are stored as filenames beneath data_dir/images.
+        // Absolute paths remain supported for imported and legacy records.
+        self.image_picture.set_pixbuf(None);
+        let config = author_clipboard_shared::config::Config::load();
+        let path = resolve_image_path(&config.data_dir, &item.content);
         if path.exists() {
-            if let Ok(pixbuf) = gdk_pixbuf::Pixbuf::from_file_at_scale(path, 800, 600, true) {
+            if let Ok(pixbuf) = gdk_pixbuf::Pixbuf::from_file_at_scale(&path, 800, 600, true) {
                 self.image_picture.set_pixbuf(Some(&pixbuf));
             }
         }
@@ -274,6 +297,7 @@ impl PreviewPane {
 
     /// Show the file list.
     fn show_files(&self, item: &ClipboardItem) {
+        self.empty_state.set_visible(false);
         self.text_view.set_visible(false);
         self.image_picture.set_visible(false);
         self.files_box.set_visible(true);
@@ -284,13 +308,18 @@ impl PreviewPane {
             self.files_box.remove(&child);
         }
 
-        let content = &item.content;
-        for line in content.lines() {
-            let line = line.trim();
-            if line.is_empty() || line.starts_with('#') {
-                continue;
-            }
-            let row = adw::ActionRow::builder().title(line).build();
+        let uris = item
+            .content
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty() && !line.starts_with('#'));
+        let files = author_clipboard_shared::file_handler::parse_uri_list(&item.content);
+        for (line, file) in uris.zip(files) {
+            let row = adw::ActionRow::builder()
+                .title(&file.name)
+                .subtitle(file_subtitle(&file))
+                .activatable(true)
+                .build();
             // Click to open with default handler.
             let line_clone = line.to_string();
             row.connect_activated(move |_| {
@@ -307,6 +336,7 @@ impl PreviewPane {
 
     /// Show the sensitive redaction overlay.
     fn show_redacted(&self, item: &ClipboardItem) {
+        self.empty_state.set_visible(false);
         self.text_view.set_visible(false);
         self.image_picture.set_visible(false);
         self.files_box.set_visible(false);
@@ -335,6 +365,7 @@ impl PreviewPane {
         self.image_picture.set_visible(false);
         self.files_box.set_visible(false);
         self.redacted_overlay.set_visible(false);
+        self.image_picture.set_pixbuf(None);
         self.empty_state.set_visible(true);
     }
 
@@ -393,6 +424,31 @@ mod tests {
     }
     use author_clipboard_shared::types::ClipboardItem;
     use chrono::Utc;
+    use std::path::Path;
+
+    #[test]
+    fn relative_image_path_resolves_under_image_directory() {
+        assert_eq!(
+            resolve_image_path(Path::new("/data/author-clipboard"), "abc.png"),
+            Path::new("/data/author-clipboard/images/abc.png")
+        );
+    }
+
+    #[test]
+    fn absolute_image_path_is_preserved() {
+        assert_eq!(
+            resolve_image_path(Path::new("/data/author-clipboard"), "/tmp/import.png"),
+            Path::new("/tmp/import.png")
+        );
+    }
+
+    #[test]
+    fn file_metadata_subtitle_marks_missing_files() {
+        let file = author_clipboard_shared::file_handler::resolve_file_info(Path::new(
+            "/definitely/missing/rich-content.txt",
+        ));
+        assert_eq!(file_subtitle(&file), "text/plain · unavailable");
+    }
 
     fn make_text_item(content: &str) -> ClipboardItem {
         let mut item = ClipboardItem::new_text(content.to_string());

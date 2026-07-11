@@ -29,7 +29,7 @@ fn default_keyboard_shortcut() -> String {
     "Super+V".to_string()
 }
 fn default_encrypt_sensitive() -> bool {
-    false
+    true
 }
 fn default_clear_on_lock() -> bool {
     true
@@ -267,8 +267,25 @@ impl Config {
         let path = Self::config_path();
         std::fs::read_to_string(&path).map_or_else(
             |_| Self::default(),
-            |contents| serde_json::from_str(&contents).unwrap_or_default(),
+            |contents| Self::from_existing_json(&contents),
         )
+    }
+
+    /// Deserialize an existing configuration while preserving the historical
+    /// disabled-encryption behavior for files created before
+    /// `encrypt_sensitive` was introduced.
+    fn from_existing_json(contents: &str) -> Self {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(contents) else {
+            return Self::default();
+        };
+        let had_encrypt_setting = value.get("encrypt_sensitive").is_some();
+        let Ok(mut config) = serde_json::from_value::<Self>(value) else {
+            return Self::default();
+        };
+        if !had_encrypt_setting {
+            config.encrypt_sensitive = false;
+        }
+        config
     }
 
     /// Serialize this configuration to JSON and write it to the config file.
@@ -433,7 +450,7 @@ mod tests {
         assert_eq!(cfg.ttl_seconds, 7 * 24 * 3600);
         assert_eq!(cfg.cleanup_interval_seconds, 300);
         assert_eq!(cfg.keyboard_shortcut, "Super+V");
-        assert!(!cfg.encrypt_sensitive);
+        assert!(cfg.encrypt_sensitive);
         assert!(cfg.clear_on_lock);
     }
 
@@ -471,8 +488,23 @@ mod tests {
         assert_eq!(cfg.ttl_seconds, 7 * 24 * 3600);
         assert_eq!(cfg.cleanup_interval_seconds, 300);
         assert_eq!(cfg.keyboard_shortcut, "Super+V");
-        assert!(!cfg.encrypt_sensitive);
+        assert!(cfg.encrypt_sensitive);
         assert!(cfg.clear_on_lock);
+    }
+
+    #[test]
+    fn test_existing_json_without_encrypt_setting_preserves_legacy_default() {
+        let cfg = Config::from_existing_json(r#"{ "max_items": 50 }"#);
+        assert_eq!(cfg.max_items, 50);
+        assert!(!cfg.encrypt_sensitive);
+    }
+
+    #[test]
+    fn test_existing_json_preserves_explicit_encrypt_setting() {
+        let disabled = Config::from_existing_json(r#"{ "encrypt_sensitive": false }"#);
+        let enabled = Config::from_existing_json(r#"{ "encrypt_sensitive": true }"#);
+        assert!(!disabled.encrypt_sensitive);
+        assert!(enabled.encrypt_sensitive);
     }
 
     #[test]

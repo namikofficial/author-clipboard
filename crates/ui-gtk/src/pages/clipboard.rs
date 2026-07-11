@@ -13,7 +13,7 @@
 //! data flow only.
 
 use gtk4::prelude::*;
-use gtk4::{glib, Box as GtkBox, ListBox, Orientation, SelectionMode, Widget};
+use gtk4::{gdk, glib, Box as GtkBox, ListBox, Orientation, SelectionMode, Widget};
 use libadwaita as adw;
 use libadwaita::prelude::*;
 use std::cell::RefCell;
@@ -206,6 +206,32 @@ pub fn build(
         }
     });
 
+    // Ctrl+Shift+C opens the collection chooser for the selected history row.
+    let collection_keys = gtk4::EventControllerKey::new();
+    let list_for_collection = list_box.clone();
+    let rows_for_collection = item_rows.clone();
+    let page_for_collection = page.clone();
+    let config_for_collection = config_clone.clone();
+    collection_keys.connect_key_pressed(move |_controller, key, _code, modifiers| {
+        let requested = key == gdk::Key::c
+            && modifiers.contains(gdk::ModifierType::CONTROL_MASK)
+            && modifiers.contains(gdk::ModifierType::SHIFT_MASK);
+        if !requested {
+            return glib::Propagation::Proceed;
+        }
+        let Some(index) = list_for_collection
+            .selected_row()
+            .and_then(|row| usize::try_from(row.index()).ok())
+        else {
+            return glib::Propagation::Stop;
+        };
+        if let Some((item_id, _, _)) = rows_for_collection.borrow().get(index) {
+            show_collection_chooser(&page_for_collection, &config_for_collection, *item_id);
+        }
+        glib::Propagation::Stop
+    });
+    page.add_controller(collection_keys);
+
     // Initial load.
     let entries = load_entries_for(
         &config_clone,
@@ -245,6 +271,66 @@ pub fn build(
     });
 
     page
+}
+
+// GtkDialog remains the compatibility path for distributions shipping GTK
+// 4.8/4.10; the replacement AlertDialog is not available across our floor.
+#[allow(deprecated)]
+fn show_collection_chooser(parent: &GtkBox, config: &Config, item_id: i64) {
+    let Some(window) = parent
+        .root()
+        .and_then(|root| root.downcast::<gtk4::Window>().ok())
+    else {
+        return;
+    };
+    let dialog = gtk4::Dialog::builder()
+        .title("Add to collection")
+        .transient_for(&window)
+        .modal(true)
+        .default_width(360)
+        .build();
+    dialog.add_button("Cancel", gtk4::ResponseType::Cancel);
+    let list = ListBox::builder()
+        .selection_mode(SelectionMode::Single)
+        .build();
+    list.add_css_class("boxed-list");
+    let collections = Database::open(&config.db_path())
+        .and_then(|db| db.list_collections())
+        .unwrap_or_default();
+    if collections.is_empty() {
+        let empty = gtk4::Label::new(Some("Create a collection in the Collections page first."));
+        empty.set_margin_top(18);
+        empty.set_margin_bottom(18);
+        dialog.content_area().append(&empty);
+    } else {
+        for collection in &collections {
+            let label = gtk4::Label::new(Some(&collection.name));
+            label.set_halign(gtk4::Align::Start);
+            label.set_margin_top(10);
+            label.set_margin_bottom(10);
+            label.set_margin_start(10);
+            label.set_margin_end(10);
+            list.append(&label);
+        }
+        let config = config.clone();
+        let dialog_for_row = dialog.clone();
+        list.connect_row_activated(move |_list, row| {
+            let Some(index) = usize::try_from(row.index()).ok() else {
+                return;
+            };
+            let Some(collection) = collections.get(index) else {
+                return;
+            };
+            if let Ok(db) = Database::open(&config.db_path()) {
+                if db.add_to_collection(&collection.id, item_id).is_ok() {
+                    dialog_for_row.close();
+                }
+            }
+        });
+        dialog.content_area().append(&list);
+    }
+    dialog.connect_response(|dialog, _| dialog.close());
+    dialog.present();
 }
 
 #[derive(Debug)]
@@ -337,7 +423,9 @@ fn entry_to_item(entry: &PickerEntry) -> author_clipboard_shared::types::Clipboa
             item.content_type = ContentType::Image;
             item
         }
-        Some(ContentType::Html) => ClipboardItem::new_html(entry.content.clone(), mime),
+        Some(ContentType::Html) => {
+            ClipboardItem::new_html(entry.content.clone(), entry.title.clone())
+        }
         Some(ContentType::Files) => ClipboardItem::new_files(entry.content.clone()),
         _ => ClipboardItem::new_text(entry.content.clone()),
     };
@@ -425,5 +513,26 @@ mod tests {
         let item = entry_to_item(&entry);
         assert!(item.pinned);
         assert!(item.starred);
+    }
+
+    #[test]
+    fn entry_to_item_preserves_html_and_plain_text_fallback() {
+        let entry = PickerEntry {
+            id: Some(8),
+            source: PickerSource::History,
+            content_type: Some(author_clipboard_shared::types::ContentType::Html),
+            title: "Formatted heading".to_string(),
+            subtitle: None,
+            content: "<h1>Formatted heading</h1>".to_string(),
+            mime_type: Some("text/html".to_string()),
+            sensitive: false,
+            pinned: false,
+            starred: false,
+            timestamp: Some(chrono::Utc::now()),
+        };
+        let item = entry_to_item(&entry);
+        assert_eq!(item.content, "<h1>Formatted heading</h1>");
+        assert_eq!(item.mime_type, "text/html");
+        assert_eq!(item.plain_text.as_deref(), Some("Formatted heading"));
     }
 }

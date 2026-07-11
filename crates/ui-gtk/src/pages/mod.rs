@@ -3,6 +3,7 @@
 #![allow(dead_code, unused_imports)]
 
 pub mod clipboard;
+pub mod collections;
 pub mod emoji;
 pub mod kaomoji;
 pub mod settings;

@@ -19,6 +19,8 @@ pub enum PageId {
     /// Clipboard history page.
     #[default]
     Clipboard,
+    /// Named clipboard collections manager.
+    Collections,
     /// Emoji picker page.
     Emoji,
     /// Symbol picker page.
@@ -35,6 +37,7 @@ impl PageId {
     /// All known pages, in navigation order.
     pub const ALL: &'static [PageId] = &[
         PageId::Clipboard,
+        PageId::Collections,
         PageId::Emoji,
         PageId::Symbols,
         PageId::Kaomoji,
@@ -47,6 +50,7 @@ impl Display for PageId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
             PageId::Clipboard => "clipboard",
+            PageId::Collections => "collections",
             PageId::Emoji => "emoji",
             PageId::Symbols => "symbols",
             PageId::Kaomoji => "kaomoji",
@@ -63,6 +67,7 @@ impl FromStr for PageId {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "clipboard" => Ok(PageId::Clipboard),
+            "collections" => Ok(PageId::Collections),
             "emoji" => Ok(PageId::Emoji),
             "symbols" => Ok(PageId::Symbols),
             "kaomoji" => Ok(PageId::Kaomoji),
@@ -115,6 +120,8 @@ pub struct AppState {
     pub search_query: String,
     /// Selected row index in the current page's item list.
     pub selected_index: Option<usize>,
+    /// Authoritative database ID of the selected clipboard item.
+    pub selected_id: Option<i64>,
     /// Current focus target.
     pub focus: FocusTarget,
     /// Popup-specific configuration (source, filter, action, …).
@@ -144,6 +151,7 @@ impl Default for AppState {
             sort: SortOrder::NewestFirst,
             search_query: String::new(),
             selected_index: None,
+            selected_id: None,
             focus: FocusTarget::default(),
             config: PopupConfig::default(),
             manager_config: ManagerConfig::default(),
@@ -222,7 +230,7 @@ pub enum Action {
     ///
     /// The reducer maps this to a `selected_index` via a lookup placeholder;
     /// the runtime fills in the real lookup in PR 3B.
-    Select(Option<u32>),
+    Select(Option<i64>),
     /// Move selection by `d` rows (negative = up, positive = down).
     MoveBy(i32),
     /// Jump to an absolute row index.
@@ -309,6 +317,44 @@ pub enum Effect {
     HideRedacted,
 }
 
+impl AppState {
+    /// Select an item by database ID. Unknown IDs clear selection.
+    pub fn select_by_id(&mut self, id: Option<i64>) {
+        self.selected_id = id.filter(|wanted| self.items.iter().any(|item| item.id == *wanted));
+        self.selected_index = self
+            .selected_id
+            .and_then(|wanted| self.items.iter().position(|item| item.id == wanted));
+    }
+
+    /// Return the selected item from the current authoritative snapshot.
+    pub fn selected_item(&self) -> Option<&ClipboardItem> {
+        let id = self.selected_id?;
+        self.items.iter().find(|item| item.id == id)
+    }
+
+    /// Move selection by a signed row delta, clamped to the snapshot.
+    pub fn move_selection(&mut self, delta: i32) {
+        if self.items.is_empty() {
+            self.select_by_id(None);
+            return;
+        }
+        let current = self.selected_index.unwrap_or(0);
+        let last = self.items.len() - 1;
+        let next = if delta.is_negative() {
+            current.saturating_sub(delta.unsigned_abs() as usize)
+        } else {
+            current.saturating_add(delta as usize).min(last)
+        };
+        self.select_by_id(Some(self.items[next].id));
+    }
+
+    fn replace_items_preserving_selection(&mut self, items: Vec<ClipboardItem>) {
+        let selected = self.selected_id;
+        self.items = items;
+        self.select_by_id(selected);
+    }
+}
+
 /// Pure state reducer. Deterministic — no I/O, no async, no `GLib`.
 ///
 /// # Panics
@@ -320,7 +366,7 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
         Action::QueryChanged(s) => {
             if s.is_empty() {
                 state.search_query = String::new();
-                state.selected_index = None;
+                state.select_by_id(None);
                 vec![Effect::RefreshItems]
             } else {
                 state.search_query = s;
@@ -330,19 +376,19 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
 
         Action::QueryCleared => {
             state.search_query = String::new();
-            state.selected_index = None;
+            state.select_by_id(None);
             vec![Effect::RefreshItems]
         }
 
         Action::FilterChanged(f) => {
             state.filter = f;
-            state.selected_index = None;
+            state.select_by_id(None);
             vec![Effect::RefreshItems, Effect::PersistGSettings]
         }
 
         Action::PageChanged(p) => {
             state.active_page = p;
-            state.selected_index = None;
+            state.select_by_id(None);
             vec![Effect::PersistGSettings]
         }
 
@@ -367,51 +413,30 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
             vec![]
         }
 
-        Action::Select(Some(_)) => {
-            // Placeholder: PR 3B fills in the real id→index lookup.
-            // For the foundation, any non-None id maps to index 0.
-            state.selected_index = Some(0);
+        Action::Select(Some(id)) => {
+            state.select_by_id(Some(id));
             vec![]
         }
 
         Action::Select(None) => {
-            state.selected_index = None;
+            state.select_by_id(None);
             vec![]
         }
 
         Action::MoveBy(d) => {
-            let Some(i) = state.selected_index else {
-                // Empty selection — no-op, no panic.
-                return vec![];
-            };
-            let i_i32 = i32::try_from(i).unwrap_or(i32::MAX);
-            let new_i = i_i32.saturating_add(d);
-            if new_i < 0 {
-                state.selected_index = Some(0);
-            } else {
-                state.selected_index = Some(usize::try_from(new_i).unwrap_or(usize::MAX));
-            }
+            state.move_selection(d);
             vec![]
         }
 
         Action::MoveTo(i) => {
-            state.selected_index = Some(i);
+            state.select_by_id(state.items.get(i).map(|item| item.id));
             vec![]
         }
 
         Action::MovePage(d) => {
             // One page = 10 rows.
             const PAGE_SIZE: i32 = 10;
-            let Some(i) = state.selected_index else {
-                return vec![];
-            };
-            let i_i32 = i32::try_from(i).unwrap_or(i32::MAX);
-            let new_i = i_i32.saturating_add(d * PAGE_SIZE);
-            if new_i < 0 {
-                state.selected_index = Some(0);
-            } else {
-                state.selected_index = Some(usize::try_from(new_i).unwrap_or(usize::MAX));
-            }
+            state.move_selection(d.saturating_mul(PAGE_SIZE));
             vec![]
         }
 
@@ -427,17 +452,14 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
 
         // ── PR 3B arms ──────────────────────────────────────────────
         Action::CopyRequested => {
-            let Some(idx) = state.selected_index else {
+            let Some(item) = state.selected_item() else {
                 return vec![];
             };
-            if idx >= state.items.len() {
-                return vec![];
-            }
-            let id = state.items[idx].id;
-            let mime = if state.items[idx].mime_type == "text/plain" {
+            let id = item.id;
+            let mime = if item.mime_type == "text/plain" {
                 None
             } else {
-                Some(state.items[idx].mime_type.clone())
+                Some(item.mime_type.clone())
             };
             vec![Effect::CopyItem {
                 id,
@@ -447,17 +469,14 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
         }
 
         Action::QuickPasteRequested => {
-            let Some(idx) = state.selected_index else {
+            let Some(item) = state.selected_item() else {
                 return vec![];
             };
-            if idx >= state.items.len() {
-                return vec![];
-            }
-            let id = state.items[idx].id;
-            let mime = if state.items[idx].mime_type == "text/plain" {
+            let id = item.id;
+            let mime = if item.mime_type == "text/plain" {
                 None
             } else {
-                Some(state.items[idx].mime_type.clone())
+                Some(item.mime_type.clone())
             };
             vec![Effect::QuickPasteItem { id, mime }]
         }
@@ -497,6 +516,12 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
             match pos {
                 Some(idx) => {
                     state.items.remove(idx);
+                    let next = state
+                        .items
+                        .get(idx)
+                        .or_else(|| idx.checked_sub(1).and_then(|i| state.items.get(i)))
+                        .map(|item| item.id);
+                    state.select_by_id(next);
                     vec![Effect::DeleteItem(id)]
                 }
                 None => vec![],
@@ -533,7 +558,7 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
         }
 
         Action::ItemsLoaded(items) => {
-            state.items = items;
+            state.replace_items_preserving_selection(items);
             vec![]
         }
 
