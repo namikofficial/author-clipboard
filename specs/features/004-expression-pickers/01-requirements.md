@@ -42,6 +42,17 @@
 - Given I use emoji, when I switch tabs and back, then used emoji appear in Recently Used
 - Given I restart the app, when I open a picker, then Recently Used still shows past items
 
+### US-005: Fast keyboard-oriented discovery
+**As a** user
+**I want to** search or narrow expressions by category
+**So that** large expression libraries remain quick to use
+
+**Acceptance Criteria**:
+- Given a picker is open, when I type a category or item description, then only matching expressions remain visible
+- Given I select a category chip, then only expressions in that category remain visible
+- Given no expression matches, then the picker shows a clear empty result message
+- Given I activate an expression, then it is copied as plain text and its usage is persisted
+
 ---
 
 ## Out of Scope
@@ -51,4 +62,4 @@
 
 ---
 
-**Last Updated**: Phase 4 Complete
+**Last Updated**: 2026-07-12

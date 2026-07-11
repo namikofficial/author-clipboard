@@ -23,4 +23,4 @@ Tabbed UI with dedicated pickers for emoji, symbols, kaomoji, and user-defined s
 ---
 
 **Created**: Phase 4 Complete
-**Status**: Implemented v0.5.0 (GIF search deferred)
+**Status**: Complete (GIF search deferred)
