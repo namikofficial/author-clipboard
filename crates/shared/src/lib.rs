@@ -29,6 +29,8 @@ pub mod ipc;
 pub mod kaomoji;
 /// Shared picker types and logic for external menus and native pickers.
 pub mod picker;
+/// Pure content presentation classification for user-facing adapters.
+pub mod presentation;
 /// Query string parser for developer filters (type:, app:, project:, collection:).
 pub mod query;
 /// Quick paste via wtype/ydotool with wl-copy copy fallback.
@@ -49,6 +51,8 @@ pub mod template;
 pub mod transform;
 /// Core data types for clipboard items and events.
 pub mod types;
+/// Privacy-safe item view models.
+pub mod view;
 
 pub use config::Config;
 pub use db::Database;

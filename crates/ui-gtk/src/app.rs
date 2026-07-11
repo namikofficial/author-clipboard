@@ -343,7 +343,9 @@ impl AppState {
         let next = if delta.is_negative() {
             current.saturating_sub(delta.unsigned_abs() as usize)
         } else {
-            current.saturating_add(delta as usize).min(last)
+            current
+                .saturating_add(usize::try_from(delta).unwrap_or(usize::MAX))
+                .min(last)
         };
         self.select_by_id(Some(self.items[next].id));
     }

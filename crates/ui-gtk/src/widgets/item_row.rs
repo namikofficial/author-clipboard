@@ -15,6 +15,7 @@ use libadwaita as adw;
 use libadwaita::prelude::*;
 
 use author_clipboard_shared::types::{ClipboardItem, ContentType};
+use author_clipboard_shared::view::ItemViewModel;
 
 use super::chip::{Chip, ChipStyle};
 
@@ -134,6 +135,7 @@ impl ItemRow {
     /// the `gio::ListStore` recycling path so widget churn is zero
     /// during scroll.
     pub fn bind(&mut self, item: &ClipboardItem) {
+        let view = ItemViewModel::from(item);
         // ── Title ─────────────────────────────────────────────
         let display_text = if item.sensitive {
             item.redacted_preview
@@ -203,7 +205,48 @@ impl ItemRow {
         self.subtitle.set_text(&subtitle);
 
         // ── Pin / Star / Sensitive chips ──────────────────────
-        self.type_chip.set_text(type_label);
+        self.type_chip.set_text(view.presentation.label());
+        self.frame.set_tooltip_text(Some(&format!(
+            "{} clipboard item · {}",
+            view.presentation.label(),
+            if view.sensitive { "protected" } else { "local" }
+        )));
+        for class in [
+            "content-url",
+            "content-color",
+            "content-code",
+            "content-json",
+            "content-file",
+            "content-image",
+            "content-secret",
+        ] {
+            self.frame.remove_css_class(class);
+        }
+        let presentation_class = match view.presentation {
+            author_clipboard_shared::presentation::ContentPresentation::Url { .. } => "content-url",
+            author_clipboard_shared::presentation::ContentPresentation::Color { .. } => {
+                "content-color"
+            }
+            author_clipboard_shared::presentation::ContentPresentation::Code { .. } => {
+                "content-code"
+            }
+            author_clipboard_shared::presentation::ContentPresentation::Json { .. } => {
+                "content-json"
+            }
+            author_clipboard_shared::presentation::ContentPresentation::File { .. } => {
+                "content-file"
+            }
+            author_clipboard_shared::presentation::ContentPresentation::Image { .. } => {
+                "content-image"
+            }
+            author_clipboard_shared::presentation::ContentPresentation::Secret { .. } => {
+                "content-secret"
+            }
+            _ => "",
+        };
+        if !presentation_class.is_empty() {
+            self.frame.add_css_class(presentation_class);
+        }
         if item.pinned {
             self.pin_chip.widget().set_visible(true);
         } else {

@@ -255,6 +255,8 @@ pub enum IpcCommand {
     ClearUnpinned,
     /// Delete all items including pinned.
     ClearAll,
+    /// Skip the next eligible clipboard capture exactly once.
+    IgnoreNextCopy,
 
     // ── Snippets ──────────────────────────────────────────────────
     /// List all snippets.
@@ -548,6 +550,7 @@ impl IpcClient {
             IpcCommand::Delete { .. } => "Delete",
             IpcCommand::ClearUnpinned => "ClearUnpinned",
             IpcCommand::ClearAll => "ClearAll",
+            IpcCommand::IgnoreNextCopy => "IgnoreNextCopy",
             IpcCommand::ListSnippets => "ListSnippets",
             IpcCommand::UpsertSnippet { .. } => "UpsertSnippet",
             IpcCommand::DeleteSnippet { .. } => "DeleteSnippet",

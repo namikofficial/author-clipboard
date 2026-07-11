@@ -89,7 +89,7 @@ fn build_popup(app: &adw::Application, config: &PopupConfig) -> anyhow::Result<(
         count: config.count,
     };
     let window_for_copy = window.clone();
-    let page = crate::pages::clipboard::build(&props, state.clone(), move |req| {
+    let page = crate::pages::clipboard::build(&props, &state, move |req| {
         tracing::info!(id = req.id, mime = %req.mime, "popup copy");
         if let Err(e) = crate::pages::clipboard::copy_via_ipc(req.id, &req.mime) {
             tracing::warn!(?e, "popup copy failed");

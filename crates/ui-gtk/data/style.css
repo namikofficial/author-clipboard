@@ -477,3 +477,8 @@ list.sidebar > row image {
 .preview-pane .preview-redacted button.suggested-action:hover {
   background: alpha(@error_bg_color, 0.22);
 }
+.item-row.content-url { border-left: 3px solid @accent_color; }
+.item-row.content-color { border-left: 3px solid #c061cb; }
+.item-row.content-code, .item-row.content-json { border-left: 3px solid #33d17a; }
+.item-row.content-file, .item-row.content-image { border-left: 3px solid #f6d32d; }
+.item-row.content-secret { border-left: 3px solid @error_color; }

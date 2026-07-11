@@ -214,6 +214,14 @@ impl PreviewPane {
         };
         drop(state);
 
+        let presentation = author_clipboard_shared::presentation::present(&item);
+        self.widget.set_tooltip_text(Some(&format!(
+            "{} · {} · {}",
+            presentation.label(),
+            item.mime_type,
+            item.source_app.as_deref().unwrap_or("unknown source")
+        )));
+
         // ── Content-type branch ───────────────────────────────────────
         match item.content_type {
             ContentType::Text => self.show_text(&item),

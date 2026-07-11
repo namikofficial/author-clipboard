@@ -63,6 +63,8 @@ enum Command {
     },
     /// Clear all unpinned clipboard items
     Clear,
+    /// Skip the next eligible clipboard capture exactly once.
+    IgnoreNextCopy,
     /// Export clipboard history to JSON
     Export {
         /// Output file path (default: stdout)
@@ -486,6 +488,13 @@ fn main() -> Result<()> {
                     println!("Cleared {count} unpinned items.");
                 }
             }
+        }
+        Command::IgnoreNextCopy => {
+            let response = IpcClient::new()
+                .send_command(&IpcCommand::IgnoreNextCopy)
+                .context("Daemon unavailable; ignore-next-copy was not armed")?;
+            anyhow::ensure!(response.ok, "Daemon rejected ignore-next-copy request");
+            println!("The next eligible clipboard capture will be ignored.");
         }
         Command::Export {
             output,

@@ -84,7 +84,7 @@ fn build_manager_window(app: &adw::Application) -> anyhow::Result<()> {
     );
 
     let clipboard_page_content =
-        crate::pages::clipboard::build(&clipboard_props, state.clone(), move |req| {
+        crate::pages::clipboard::build(&clipboard_props, &state, move |req| {
             tracing::info!(id = req.id, mime = %req.mime, "manager copy");
             if let Err(e) = crate::pages::clipboard::copy_via_ipc(req.id, &req.mime) {
                 tracing::warn!(?e, "manager copy failed");

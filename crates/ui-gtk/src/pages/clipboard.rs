@@ -81,7 +81,7 @@ type ItemRowTable = Rc<RefCell<Vec<(i64, ItemRow, String)>>>;
 #[allow(clippy::too_many_lines)]
 pub fn build(
     props: &ClipboardPageProps,
-    app_state: Rc<RefCell<crate::app::AppState>>,
+    app_state: &Rc<RefCell<crate::app::AppState>>,
     on_copy: impl Fn(ClipboardCopyRequest) + 'static,
 ) -> impl IsA<Widget> {
     let page = GtkBox::builder()

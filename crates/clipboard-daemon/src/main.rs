@@ -96,6 +96,11 @@ impl AppState {
 
     /// Insert a clipboard item, encrypting it at rest if sensitive and encryption is enabled.
     fn insert_item(&self, item: &ClipboardItem) -> anyhow::Result<i64> {
+        let ignore_path = self.config.data_dir.join(".ignore-next-copy");
+        if ignore_path.exists() && std::fs::remove_file(&ignore_path).is_ok() {
+            info!("Consumed ignore-next-copy request");
+            return Ok(0);
+        }
         let result = if self.config.encrypt_sensitive && item.sensitive {
             if let Some(ref manager) = *self.encryption_manager {
                 self.db
@@ -969,6 +974,16 @@ impl IpcHandlerState {
                 );
                 IpcResponse::ok(serde_json::json!({"deleted_count": count}))
             }
+            IpcCommand::IgnoreNextCopy => {
+                let path = self.config.data_dir.join(".ignore-next-copy");
+                match std::fs::write(path, "armed") {
+                    Ok(()) => IpcResponse::ok(serde_json::json!({ "armed": true })),
+                    Err(error) => IpcResponse::err(
+                        "IO_ERROR",
+                        format!("Failed to arm ignore-next-copy: {error}"),
+                    ),
+                }
+            }
 
             // ── Snippets ──────────────────────────────────────────────────
             IpcCommand::ListSnippets => {
@@ -1062,16 +1077,19 @@ impl IpcHandlerState {
                         .or_else(|| std::env::var("LOGNAME").ok()),
                     hostname: std::env::var("HOSTNAME").ok(),
                 };
-                let (rendered, cursor_offset) = match author_clipboard_shared::snippet_template::expand(
-                    &snippet.content,
-                    &ctx,
-                    None,
-                    false,
-                    false,
-                ) {
-                    Ok(result) => result,
-                    Err(error) => return IpcResponse::err("SNIPPET_TEMPLATE_INVALID", error.to_string()),
-                };
+                let (rendered, cursor_offset) =
+                    match author_clipboard_shared::snippet_template::expand(
+                        &snippet.content,
+                        &ctx,
+                        None,
+                        false,
+                        false,
+                    ) {
+                        Ok(result) => result,
+                        Err(error) => {
+                            return IpcResponse::err("SNIPPET_TEMPLATE_INVALID", error.to_string())
+                        }
+                    };
                 IpcResponse::ok(serde_json::json!({
                     "content": rendered,
                     "cursor_offset": cursor_offset,
@@ -1365,6 +1383,7 @@ impl Drop for PidFileGuard {
     }
 }
 
+#[allow(clippy::too_many_lines)]
 fn run() -> Result<()> {
     Config::save_default_if_missing().context("Failed to initialize config file")?;
     let config = Config::load();
