@@ -5,9 +5,10 @@ use author_clipboard_shared::picker::{load_entries, PickerAction, PickerOptions,
 use author_clipboard_shared::Database;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let path = std::env::args_os()
-        .nth(1)
-        .map_or_else(|| PathBuf::from("/tmp/author-clipboard-perf.db"), PathBuf::from);
+    let path = std::env::args_os().nth(1).map_or_else(
+        || PathBuf::from("/tmp/author-clipboard-perf.db"),
+        PathBuf::from,
+    );
     let db = Database::open(&path)?;
     let config = Config::default();
     for query in [None, Some("cargo".to_string()), Some("Wayland".to_string())] {
