@@ -12,6 +12,10 @@
 **Acceptance Criteria**:
 - Given I copy an image, when I open the picker, then I see a thumbnail of the image
 - Given I select an image, when I paste, then the image is restored correctly
+- Given an image is stored by relative filename, when it is previewed, then the
+  filename is resolved beneath the configured image directory
+- Given an image cannot be decoded or no longer exists, when it is previewed,
+  then the UI shows an unavailable state rather than a stale previous image
 
 ### US-002: HTML Clipboard
 **As a** user
@@ -21,6 +25,10 @@
 **Acceptance Criteria**:
 - Given I copy HTML content, when I search for text, then the content is findable
 - Given I select an HTML item, when I paste in a rich text editor, then formatting is preserved
+- Given an HTML item is shown in history, when rendered as a compact row, then
+  its searchable plain-text fallback is shown instead of its MIME type
+- Given WebKit rendering is disabled, when HTML is previewed, then its source is
+  displayed safely without executing remote or embedded content
 
 ### US-003: File URI List
 **As a** user
@@ -30,6 +38,22 @@
 **Acceptance Criteria**:
 - Given I copy files in a file manager, when I open the picker, then I see file names and icons
 - Given I select a file item, when I paste, then the file URI is restored
+- Given a URI list contains comments, percent-encoded names, missing files, or
+  multiple files, when previewed, then comments are omitted and each file is
+  shown with decoded name, existence, MIME, and size metadata
+- Given a file preview row is activated, when the URI is valid, then the system
+  default handler is asked to open that URI
+
+### US-004: Private Rich Preview
+**As a** user
+**I want to** keep sensitive rich items redacted in previews
+**So that** opening the manager does not disclose private clipboard data
+
+**Acceptance Criteria**:
+- Given a rich item is marked sensitive, when selected, then its image, HTML, or
+  file details remain hidden until the existing timed reveal action is used
+- Given preview selection changes or becomes empty, when the pane updates, then
+  content from the previous item is not left visible
 
 ---
 
@@ -52,4 +76,4 @@
 
 ---
 
-**Last Updated**: Phase 3 Complete
+**Last Updated**: 2026-07-12 — completion criteria clarified for GTK rich previews
