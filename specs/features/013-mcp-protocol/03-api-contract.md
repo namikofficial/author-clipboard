@@ -14,7 +14,7 @@
   "mcpServers": {
     "author-clipboard": {
       "command": "author-clipboard-mcp",
-      "args": ["serve", "--transport", "stdio"]
+      "args": ["--transport", "stdio"]
     }
   }
 }
@@ -26,29 +26,14 @@
   "mcp": {
     "author-clipboard": {
       "type": "local",
-      "command": ["author-clipboard-mcp", "serve", "--transport", "stdio"],
+      "command": ["author-clipboard-mcp", "--transport", "stdio"],
       "enabled": true
     }
   }
 }
 ```
 
-### HTTP Transport (OpenCode remote)
-
-```json
-// OpenCode remote config
-{
-  "mcp": {
-    "author-clipboard": {
-      "type": "remote",
-      "url": "http://127.0.0.1:8765/mcp",
-      "headers": {},
-      "timeout_ms": 30000,
-      "enabled": true
-    }
-  }
-}
-```
+HTTP transport is not implemented. The shipped server accepts local stdio only.
 
 ---
 
@@ -140,11 +125,20 @@ Get a single clipboard item by ID.
     "include_content": {
       "type": "boolean",
       "description": "Include full content (default: false, masked by default)"
+    },
+    "confirm_sensitive": {
+      "type": "boolean",
+      "description": "Required per request when include_content exposes a sensitive item"
     }
   },
   "required": ["id"]
 }
 ```
+
+Search, resources, and prompt payloads always pass through the MCP redaction
+boundary regardless of `picker.show_sensitive_previews`. Confirmation is never
+remembered between requests. Errors use stable uppercase `code` values and do
+not echo clipboard content.
 
 **Output**:
 ```json
