@@ -43,6 +43,7 @@ A world-class clipboard manager for Linux that captures everything, organizes in
 | 22 | Expression Pickers | Medium | Advanced picker UI with expressions |
 | 23 | Rich Content | Medium | HTML, images, file handling |
 | 24 | Packaging | High | Systemd unit, AppImage, distribution |
+| 25 | Wayland Clipboard Command Center | High | Product positioning, premium UX, rich previews, private-by-default MCP |
 
 ---
 
