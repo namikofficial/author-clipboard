@@ -2,6 +2,7 @@
 
 #![allow(clippy::doc_markdown, dead_code, unused_imports)]
 
+pub mod action_bar;
 pub mod chip;
 pub mod empty;
 pub mod filter_bar;

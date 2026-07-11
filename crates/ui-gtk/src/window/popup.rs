@@ -111,6 +111,39 @@ fn build_popup(app: &adw::Application, config: &PopupConfig) -> anyhow::Result<(
     content.add_css_class("popup-shell");
     content.append(&build_popup_header(&window, config));
     content.append(&page);
+    let state_for_rail = state.clone();
+    content.append(&crate::widgets::action_bar::build(move |action| {
+        use crate::widgets::action_bar::RailAction;
+        use author_clipboard_shared::ipc::{CopyMode, IpcClient, IpcCommand};
+        let state = state_for_rail.borrow();
+        let Some(id) = state.selected_id else { return };
+        let item = state.items.iter().find(|item| item.id == id);
+        let command = match action {
+            RailAction::Copy => IpcCommand::Copy {
+                id,
+                mode: CopyMode::Copy,
+                mime: None,
+            },
+            RailAction::QuickPaste => IpcCommand::Copy {
+                id,
+                mode: CopyMode::QuickPaste,
+                mime: None,
+            },
+            RailAction::PlainText => IpcCommand::Copy {
+                id,
+                mode: CopyMode::CopyPlainText,
+                mime: None,
+            },
+            RailAction::Pin if item.is_some_and(|item| item.pinned) => IpcCommand::Unpin { id },
+            RailAction::Pin => IpcCommand::Pin { id },
+            RailAction::Star => IpcCommand::ToggleStar { id },
+            RailAction::Delete => IpcCommand::Delete { id },
+        };
+        drop(state);
+        if let Err(error) = IpcClient::new().send_command(&command) {
+            tracing::warn!(?error, "popup action failed");
+        }
+    }));
     content.append(&status);
 
     window.set_content(Some(&content));

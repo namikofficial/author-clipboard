@@ -43,7 +43,7 @@ fn build_manager_window(app: &adw::Application) -> anyhow::Result<()> {
 
     let window = adw::ApplicationWindow::builder()
         .application(app)
-        .title("Clipboard Manager")
+        .title("Author Clipboard")
         .default_width(default_w)
         .default_height(default_h)
         .build();
@@ -57,7 +57,7 @@ fn build_manager_window(app: &adw::Application) -> anyhow::Result<()> {
 
     // ── Header ────────────────────────────────────────────────
     let header = adw::HeaderBar::builder()
-        .title_widget(&gtk4::Label::new(Some("Clipboard Manager")))
+        .title_widget(&gtk4::Label::new(Some("Author Clipboard")))
         .build();
 
     // ── Content pages (built once, cached) ────────────────────
@@ -124,6 +124,7 @@ fn build_manager_window(app: &adw::Application) -> anyhow::Result<()> {
 
     fn sidebar_icon_for(page: PageId) -> &'static str {
         match page {
+            PageId::Home => "go-home-symbolic",
             PageId::Clipboard => "edit-paste-symbolic",
             PageId::Collections => "folder-symbolic",
             PageId::Emoji => "smiley-symbolic",
@@ -135,6 +136,7 @@ fn build_manager_window(app: &adw::Application) -> anyhow::Result<()> {
     }
 
     let page_labels: &[(PageId, &str)] = &[
+        (PageId::Home, "Home"),
         (PageId::Clipboard, "Clipboard"),
         (PageId::Collections, "Collections"),
         (PageId::Emoji, "Emoji"),
@@ -152,6 +154,7 @@ fn build_manager_window(app: &adw::Application) -> anyhow::Result<()> {
         sidebar_list.append(&row);
 
         let content_widget: gtk4::Widget = match page_id {
+            PageId::Home => crate::pages::home::build(&shared_config).upcast(),
             PageId::Clipboard => clipboard_paned.clone().upcast(),
             PageId::Collections => crate::pages::collections::build(&shared_config).upcast(),
             PageId::Emoji => crate::pages::emoji::build().upcast(),

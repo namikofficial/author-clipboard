@@ -597,6 +597,13 @@ fn main() -> Result<()> {
             println!("mime_denylist: {:?}", config.mime_denylist);
             println!("content_denylist: {:?}", config.content_denylist);
             println!("content_pattern_mode: {:?}", config.content_pattern_mode);
+            println!("capture_rules: {}", config.capture_rules.len());
+            for (index, rule) in config.capture_rules.iter().enumerate() {
+                match author_clipboard_shared::rules::validate(rule) {
+                    Ok(()) => println!("  {}: {} ({:?})", index + 1, rule.name, rule.action),
+                    Err(error) => println!("  {}: INVALID {}: {error}", index + 1, rule.name),
+                }
+            }
             println!("picker.default_source: {}", config.picker.default_source);
             println!("picker.default_mode: {}", config.picker.default_mode);
             println!("picker.max_results: {}", config.picker.max_results);

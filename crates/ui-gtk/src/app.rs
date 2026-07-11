@@ -16,6 +16,8 @@ use crate::{ManagerConfig, PopupConfig};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum PageId {
+    /// Runtime and privacy dashboard.
+    Home,
     /// Clipboard history page.
     #[default]
     Clipboard,
@@ -36,6 +38,7 @@ pub enum PageId {
 impl PageId {
     /// All known pages, in navigation order.
     pub const ALL: &'static [PageId] = &[
+        PageId::Home,
         PageId::Clipboard,
         PageId::Collections,
         PageId::Emoji,
@@ -49,6 +52,7 @@ impl PageId {
 impl Display for PageId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
+            PageId::Home => "home",
             PageId::Clipboard => "clipboard",
             PageId::Collections => "collections",
             PageId::Emoji => "emoji",
@@ -66,6 +70,7 @@ impl FromStr for PageId {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
+            "home" => Ok(PageId::Home),
             "clipboard" => Ok(PageId::Clipboard),
             "collections" => Ok(PageId::Collections),
             "emoji" => Ok(PageId::Emoji),
@@ -674,7 +679,7 @@ mod tests {
         let mut state = fresh_state();
         state.active_page = PageId::Settings;
         let effects = reduce(&mut state, Action::CyclePage(1));
-        assert_eq!(state.active_page, PageId::Clipboard);
+        assert_eq!(state.active_page, PageId::Home);
         assert!(effects.contains(&Effect::PersistGSettings));
     }
 
@@ -683,7 +688,7 @@ mod tests {
         let mut state = fresh_state();
         state.active_page = PageId::Clipboard;
         let effects = reduce(&mut state, Action::CyclePage(-1));
-        assert_eq!(state.active_page, PageId::Settings);
+        assert_eq!(state.active_page, PageId::Home);
         assert!(effects.contains(&Effect::PersistGSettings));
     }
 

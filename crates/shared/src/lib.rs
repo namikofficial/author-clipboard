@@ -35,6 +35,8 @@ pub mod presentation;
 pub mod query;
 /// Quick paste via wtype/ydotool with wl-copy copy fallback.
 pub mod quick_paste;
+/// Ordered clipboard capture-rule evaluation.
+pub mod rules;
 /// Screen lock detection for clearing sensitive clipboard items.
 pub mod screen_lock;
 /// Sensitive content detection (passwords, tokens, keys).

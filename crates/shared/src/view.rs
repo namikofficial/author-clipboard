@@ -21,6 +21,7 @@ pub enum ItemAction {
 
 /// A safe-by-construction clipboard representation for UI, CLI, and MCP.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct ItemViewModel {
     pub id: i64,
     pub presentation: ContentPresentation,

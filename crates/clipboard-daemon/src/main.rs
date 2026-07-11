@@ -101,6 +101,26 @@ impl AppState {
             info!("Consumed ignore-next-copy request");
             return Ok(0);
         }
+        let mut ruled_item = item.clone();
+        match author_clipboard_shared::rules::evaluate(
+            &self.config.capture_rules,
+            &item.content,
+            &item.mime_type,
+            item.source_app.as_deref(),
+        ) {
+            Some(author_clipboard_shared::rules::CaptureRuleAction::Ignore) => {
+                info!("Clipboard capture ignored by configured rule");
+                return Ok(0);
+            }
+            Some(author_clipboard_shared::rules::CaptureRuleAction::ForceSensitive) => {
+                ruled_item.sensitive = true;
+            }
+            Some(author_clipboard_shared::rules::CaptureRuleAction::Tag { tag }) => {
+                warn!(tag, "Capture-rule tags are not persisted by this schema");
+            }
+            None => {}
+        }
+        let item = &ruled_item;
         let result = if self.config.encrypt_sensitive && item.sensitive {
             if let Some(ref manager) = *self.encryption_manager {
                 self.db

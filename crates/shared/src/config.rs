@@ -214,6 +214,9 @@ pub struct Config {
     /// `specs/features/025-phase15-denylist/09-decisions.md`.
     #[serde(default = "default_app_denylist")]
     pub app_denylist: Vec<String>,
+    /// Ordered capture rules; the first enabled matching rule wins.
+    #[serde(default)]
+    pub capture_rules: Vec<crate::rules::CaptureRule>,
     /// Configuration for picker UIs.
     #[serde(default)]
     pub picker: PickerConfig,
@@ -239,6 +242,7 @@ impl Default for Config {
             content_denylist: default_content_denylist(),
             content_pattern_mode: default_content_pattern_mode(),
             app_denylist: default_app_denylist(),
+            capture_rules: Vec::new(),
             picker: PickerConfig::default(),
             compiled_regex_cache: CompiledRegexCache::default(),
         }
@@ -285,6 +289,13 @@ impl Config {
         if !had_encrypt_setting {
             config.encrypt_sensitive = false;
         }
+        config.capture_rules.retain(|rule| {
+            let valid = crate::rules::validate(rule).is_ok();
+            if !valid {
+                tracing::warn!(rule = %rule.name, "Ignoring invalid capture rule from configuration");
+            }
+            valid
+        });
         config
     }
 
@@ -470,6 +481,7 @@ mod tests {
             content_denylist: vec!["SECRET".to_string()],
             content_pattern_mode: ContentPatternMode::Substring,
             app_denylist: vec!["keepassxc".to_string()],
+            capture_rules: Vec::new(),
             picker: PickerConfig::default(),
             compiled_regex_cache: CompiledRegexCache::default(),
         };
@@ -490,6 +502,16 @@ mod tests {
         assert_eq!(cfg.keyboard_shortcut, "Super+V");
         assert!(cfg.encrypt_sensitive);
         assert!(cfg.clear_on_lock);
+    }
+
+    #[test]
+    fn invalid_capture_rules_are_reset_during_load() {
+        let json = r#"{
+            "encrypt_sensitive": true,
+            "capture_rules": [{"name":"", "action":"ignore"}]
+        }"#;
+        let config = Config::from_existing_json(json);
+        assert!(config.capture_rules.is_empty());
     }
 
     #[test]

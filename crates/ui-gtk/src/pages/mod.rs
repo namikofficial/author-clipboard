@@ -5,6 +5,7 @@
 pub mod clipboard;
 pub mod collections;
 pub mod emoji;
+pub mod home;
 pub mod kaomoji;
 pub mod settings;
 pub mod snippets;
