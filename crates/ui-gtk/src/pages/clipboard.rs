@@ -71,10 +71,8 @@ pub struct ClipboardCopyRequest {
     pub mode: CopyMode,
 }
 
-/// Side-table mapping row index → `(id, ItemRow, mime)`. Kept outside
-/// the GTK list so the row-activated callback can recover the data
-/// that was current at build time.
-type ItemRowTable = Rc<RefCell<Vec<(i64, ItemRow, String)>>>;
+/// Reusable row widgets. Each row carries its own stable database ID.
+type ItemRowTable = Rc<RefCell<Vec<ItemRow>>>;
 
 /// Build the clipboard page widget.
 ///
@@ -121,6 +119,7 @@ pub fn build(
 
     // ── Search + filter bar ─────────────────────────────────────
     let state = Rc::new(RefCell::new(PageState::from_props(props)));
+    app_state.borrow_mut().config.action = props.action;
     let list_box = ListBox::builder()
         .selection_mode(SelectionMode::Single)
         .show_separators(false)
@@ -170,10 +169,19 @@ pub fn build(
         );
         // Select the first row after refresh, so GTK ListBox selection
         // is always authoritative and connected to AppState.
-        if entries.is_empty() {
+        let selected_id = app_state_for_refresh.borrow().selected_id;
+        if let Some(id) = selected_id {
+            if let Some(row) = item_rows_for_refresh
+                .borrow()
+                .iter()
+                .find(|row| row.id() == id)
+            {
+                list_for_refresh.select_row(Some(row.row()));
+            } else {
+                list_for_refresh.unselect_all();
+            }
+        } else {
             list_for_refresh.unselect_all();
-        } else if let Some(row) = list_for_refresh.row_at_index(0) {
-            list_for_refresh.select_row(Some(&row));
         }
         if entries.is_empty() {
             scrolled_for_refresh.set_visible(false);
@@ -219,14 +227,9 @@ pub fn build(
     // GTK selection is authoritative. When the user navigates with
     // Up/Down/Home/End/PageUp/PageDown (via ListBox), we update
     // AppState to match.
-    let item_rows_for_sync = item_rows.clone();
     let app_state_for_sync = app_state.clone();
     list_box.connect_row_selected(move |_list, row| {
-        let id = row.and_then(|r| {
-            let idx = usize::try_from(r.index()).ok()?;
-            let rows = item_rows_for_sync.borrow();
-            rows.get(idx).map(|(id, _, _)| *id)
-        });
+        let id = row.and_then(ItemRow::id_from_row);
         app_state_for_sync.borrow_mut().select_by_id(id);
     });
 
@@ -234,25 +237,31 @@ pub fn build(
     let on_copy = Rc::new(on_copy);
 
     // ── Copy on Enter: find the selected row's item id and call on_copy.
-    let item_rows_for_copy = item_rows.clone();
     let state_for_copy = state.clone();
+    let app_state_for_copy = app_state.clone();
     let on_copy_for_activate = on_copy.clone();
     list_box.connect_row_activated(move |_list, row| {
-        let index = usize::try_from(row.index()).ok();
-        if let Some(idx) = index {
-            if let Some((id, _row, mime)) = item_rows_for_copy.borrow().get(idx) {
-                let action_mode = state_for_copy.borrow().action;
-                let mode = match action_mode {
-                    PickerAction::Copy => CopyMode::Copy,
-                    PickerAction::QuickPaste => CopyMode::QuickPaste,
-                };
-                on_copy_for_activate(ClipboardCopyRequest {
-                    id: *id,
-                    mime: mime.clone(),
-                    mode,
-                });
-            }
-        }
+        let Some(id) = ItemRow::id_from_row(row) else {
+            return;
+        };
+        let Some(item) = app_state_for_copy
+            .borrow()
+            .items
+            .iter()
+            .find(|item| item.id == id)
+            .cloned()
+        else {
+            return;
+        };
+        let mode = match state_for_copy.borrow().action {
+            PickerAction::Copy => CopyMode::Copy,
+            PickerAction::QuickPaste => CopyMode::QuickPaste,
+        };
+        on_copy_for_activate(ClipboardCopyRequest {
+            id,
+            mime: item.mime_type.clone(),
+            mode,
+        });
     });
 
     // ── Page-level key handlers ───────────────────────────────
@@ -265,10 +274,9 @@ pub fn build(
     // Ctrl+Shift+A — toggle starred filter
     // Ctrl+Shift+C — collection chooser
     // Ctrl+Enter — alternate activation
-    let list_for_page = list_box.clone();
-    let rows_for_page = item_rows.clone();
     let page_for_page = page.clone();
     let state_for_page = state.clone();
+    let app_state_for_page = app_state.clone();
     let refresh_for_page = refresh.clone();
     let on_copy_for_page = on_copy.clone();
     page_keys.connect_key_pressed(move |_controller, key, _code, modifiers| {
@@ -303,35 +311,25 @@ pub fn build(
 
         // Ctrl+Shift+C: collection chooser
         if ctrl && shift && key == gdk::Key::c {
-            let Some(index) = list_for_page
-                .selected_row()
-                .and_then(|row| usize::try_from(row.index()).ok())
-            else {
+            let Some(item_id) = app_state_for_page.borrow().selected_id else {
                 return glib::Propagation::Stop;
             };
-            if let Some((item_id, _, _)) = rows_for_page.borrow().get(index) {
-                show_collection_chooser(&page_for_page, *item_id);
-            }
+            show_collection_chooser(&page_for_page, item_id);
             return glib::Propagation::Stop;
         }
 
         // Ctrl+Enter: alternate activation (quick-paste if copy mode, etc.)
         if ctrl && !shift && key == gdk::Key::Return {
-            if let Some(row) = list_for_page.selected_row() {
-                let index = usize::try_from(row.index()).ok();
-                if let Some(idx) = index {
-                    if let Some((id, _, mime)) = rows_for_page.borrow().get(idx) {
-                        let mode = match state_for_page.borrow().action {
-                            PickerAction::Copy => CopyMode::QuickPaste,
-                            PickerAction::QuickPaste => CopyMode::Copy,
-                        };
-                        on_copy_for_page(ClipboardCopyRequest {
-                            id: *id,
-                            mime: mime.clone(),
-                            mode,
-                        });
-                    }
-                }
+            if let Some(item) = app_state_for_page.borrow().selected_item().cloned() {
+                let mode = match state_for_page.borrow().action {
+                    PickerAction::Copy => CopyMode::QuickPaste,
+                    PickerAction::QuickPaste => CopyMode::Copy,
+                };
+                on_copy_for_page(ClipboardCopyRequest {
+                    id: item.id,
+                    mime: item.mime_type,
+                    mode,
+                });
             }
             return glib::Propagation::Stop;
         }
@@ -417,9 +415,15 @@ fn show_collection_chooser(parent: &GtkBox, item_id: i64) {
     else {
         return;
     };
+    show_collection_chooser_for_window(&window, item_id);
+}
+
+/// Open the collection chooser for a stable selected item ID.
+#[allow(deprecated)]
+pub fn show_collection_chooser_for_window(window: &impl IsA<gtk4::Window>, item_id: i64) {
     let dialog = gtk4::Dialog::builder()
         .title("Add to collection")
-        .transient_for(&window)
+        .transient_for(window)
         .modal(true)
         .default_width(360)
         .build();
@@ -692,14 +696,14 @@ fn ipc_item_to_entry(value: &serde_json::Value) -> Option<PickerEntry> {
 /// Rebuild the list with the given entries. Reuses existing
 /// `ItemRow` widgets where possible to minimize churn.
 fn rebuild_list(list: &ListBox, item_rows: &ItemRowTable, entries: &[PickerEntry], grouped: bool) {
-    let mut old_by_id: std::collections::HashMap<i64, (ItemRow, String)> = item_rows
+    let mut old_by_id: std::collections::HashMap<i64, ItemRow> = item_rows
         .borrow_mut()
         .drain(..)
-        .map(|(id, row, mime)| (id, (row, mime)))
+        .map(|row| (row.id(), row))
         .collect();
     let new_ids: std::collections::HashSet<i64> =
         entries.iter().filter_map(|entry| entry.id).collect();
-    for (id, (row, _)) in &old_by_id {
+    for (id, row) in &old_by_id {
         if !new_ids.contains(id) {
             list.remove(row.row());
         }
@@ -712,10 +716,9 @@ fn rebuild_list(list: &ListBox, item_rows: &ItemRowTable, entries: &[PickerEntry
         // `ClipboardItem` shape; sensitive + pinned are preserved.
         let item = entry_to_item(entry);
         let id = entry.id.unwrap_or(0);
-        let mime = entry_mime(entry);
         let row = old_by_id.remove(&id).map_or_else(
             || ItemRow::new(&item),
-            |(mut row, _)| {
+            |mut row| {
                 row.bind(&item);
                 row
             },
@@ -738,7 +741,7 @@ fn rebuild_list(list: &ListBox, item_rows: &ItemRowTable, entries: &[PickerEntry
             list.remove(row.row());
             list.insert(row.row(), wanted);
         }
-        new_rows.push((id, row, mime));
+        new_rows.push(row);
     }
     *item_rows.borrow_mut() = new_rows;
 }

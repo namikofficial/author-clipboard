@@ -123,8 +123,6 @@ pub struct AppState {
     pub sort: SortOrder,
     /// Live search query string.
     pub search_query: String,
-    /// Selected row index in the current page's item list.
-    pub selected_index: Option<usize>,
     /// Authoritative database ID of the selected clipboard item.
     pub selected_id: Option<i64>,
     /// Current focus target.
@@ -155,7 +153,6 @@ impl Default for AppState {
             filter: crate::PickerFilter::All,
             sort: SortOrder::NewestFirst,
             search_query: String::new(),
-            selected_index: None,
             selected_id: None,
             focus: FocusTarget::default(),
             config: PopupConfig::default(),
@@ -179,6 +176,51 @@ pub enum SortOrder {
     OldestFirst,
     /// Most frequently used first. (Not yet implemented.)
     MostUsed,
+}
+
+/// Typed commands that may target the current selected clipboard item.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelectedItemCommand {
+    /// Copy using the native representation.
+    Copy,
+    /// Copy and type into the previously focused window.
+    QuickPaste,
+    /// Copy the plain-text representation.
+    CopyPlainText,
+    /// Transform and copy the content.
+    Transform,
+    /// Toggle pinning.
+    Pin,
+    /// Toggle starring.
+    Star,
+    /// Delete the item.
+    Delete,
+    /// Reveal protected content.
+    Reveal,
+    /// Open the collection chooser.
+    AddToCollection,
+    /// Create a snippet from the item.
+    CreateSnippet,
+}
+
+/// Whether a contextual command can be dispatched for the current selection.
+pub fn selected_command_available(state: &AppState, command: SelectedItemCommand) -> bool {
+    let Some(item) = state.selected_item() else {
+        return false;
+    };
+    let protected = item.sensitive || item.encrypted;
+    match command {
+        SelectedItemCommand::Reveal => protected,
+        SelectedItemCommand::CreateSnippet => !protected,
+        SelectedItemCommand::Copy
+        | SelectedItemCommand::QuickPaste
+        | SelectedItemCommand::CopyPlainText
+        | SelectedItemCommand::Transform
+        | SelectedItemCommand::Pin
+        | SelectedItemCommand::Star
+        | SelectedItemCommand::Delete
+        | SelectedItemCommand::AddToCollection => true,
+    }
 }
 
 impl SortOrder {
@@ -233,12 +275,11 @@ pub enum Action {
     Focus(FocusTarget),
     /// Select a row by its database id.
     ///
-    /// The reducer maps this to a `selected_index` via a lookup placeholder;
-    /// the runtime fills in the real lookup in PR 3B.
+    /// The ID is validated against the current visible snapshot.
     Select(Option<i64>),
     /// Move selection by `d` rows (negative = up, positive = down).
     MoveBy(i32),
-    /// Jump to an absolute row index.
+    /// Select the item currently at an absolute visible position.
     MoveTo(usize),
     /// Move by one "page" worth of rows.
     MovePage(i32),
@@ -338,9 +379,6 @@ impl AppState {
     /// Select an item by database ID. Unknown IDs clear selection.
     pub fn select_by_id(&mut self, id: Option<i64>) {
         self.selected_id = id.filter(|wanted| self.items.iter().any(|item| item.id == *wanted));
-        self.selected_index = self
-            .selected_id
-            .and_then(|wanted| self.items.iter().position(|item| item.id == wanted));
     }
 
     /// Return the selected item from the current authoritative snapshot.
@@ -355,7 +393,10 @@ impl AppState {
             self.select_by_id(None);
             return;
         }
-        let current = self.selected_index.unwrap_or(0);
+        let current = self
+            .selected_id
+            .and_then(|id| self.items.iter().position(|item| item.id == id))
+            .unwrap_or(0);
         let last = self.items.len() - 1;
         let next = if delta.is_negative() {
             current.saturating_sub(delta.unsigned_abs() as usize)
@@ -370,7 +411,11 @@ impl AppState {
     fn replace_items_preserving_selection(&mut self, items: Vec<ClipboardItem>) {
         let selected = self.selected_id;
         self.items = items;
-        self.select_by_id(selected);
+        self.selected_id = match (selected, self.items.first()) {
+            (Some(id), _) if self.items.iter().any(|item| item.id == id) => Some(id),
+            (Some(_), _) | (None, None) => None,
+            (None, Some(item)) => Some(item.id),
+        };
     }
 }
 
@@ -678,24 +723,24 @@ mod tests {
     #[test]
     fn query_changed_empty_clears_selection() {
         let mut state = fresh_state();
-        state.selected_index = Some(5);
+        state.selected_id = Some(5);
         reduce(&mut state, Action::QueryChanged(String::new()));
-        assert_eq!(state.selected_index, None);
+        assert_eq!(state.selected_id, None);
     }
 
     #[test]
     fn query_changed_empty_is_equivalent_to_query_cleared() {
         let mut s1 = fresh_state();
         let mut s2 = fresh_state();
-        s1.selected_index = Some(3);
-        s2.selected_index = Some(3);
+        s1.selected_id = Some(3);
+        s2.selected_id = Some(3);
 
         reduce(&mut s1, Action::QueryChanged(String::new()));
         reduce(&mut s2, Action::QueryCleared);
 
-        // Both should clear search_query and selected_index.
+        // Both should clear search_query and selected_id.
         assert_eq!(s1.search_query, s2.search_query);
-        assert_eq!(s1.selected_index, s2.selected_index);
+        assert_eq!(s1.selected_id, s2.selected_id);
     }
 
     // ── FilterChanged ───────────────────────────────────────────────
@@ -715,9 +760,9 @@ mod tests {
     #[test]
     fn filter_changed_clears_selection() {
         let mut state = fresh_state();
-        state.selected_index = Some(7);
+        state.selected_id = Some(7);
         reduce(&mut state, Action::FilterChanged(crate::PickerFilter::All));
-        assert_eq!(state.selected_index, None);
+        assert_eq!(state.selected_id, None);
     }
 
     // ── PageChanged ─────────────────────────────────────────────────
@@ -778,7 +823,7 @@ mod tests {
         state.items = vec![make_item(7), make_item(8)];
         let effects = reduce(&mut state, Action::Select(Some(7)));
         assert_eq!(state.selected_id, Some(7));
-        assert_eq!(state.selected_index, Some(0));
+        assert_eq!(state.selected_item().map(|item| item.id), Some(7));
         assert!(effects.is_empty());
     }
 
@@ -788,15 +833,15 @@ mod tests {
         state.items = vec![make_item(7)];
         reduce(&mut state, Action::Select(Some(999)));
         assert_eq!(state.selected_id, None);
-        assert_eq!(state.selected_index, None);
+        assert_eq!(state.selected_id, None);
     }
 
     #[test]
     fn select_none_clears_index() {
         let mut state = fresh_state();
-        state.selected_index = Some(4);
+        state.selected_id = Some(7);
         let effects = reduce(&mut state, Action::Select(None));
-        assert_eq!(state.selected_index, None);
+        assert_eq!(state.selected_id, None);
         assert!(effects.is_empty());
     }
 
@@ -805,9 +850,9 @@ mod tests {
     #[test]
     fn move_by_on_empty_selection_is_noop() {
         let mut state = fresh_state();
-        state.selected_index = None;
+        state.selected_id = None;
         let effects = reduce(&mut state, Action::MoveBy(3));
-        assert_eq!(state.selected_index, None);
+        assert_eq!(state.selected_id, None);
         assert!(effects.is_empty());
     }
 
@@ -817,7 +862,7 @@ mod tests {
         state.items = (0..6).map(make_item).collect();
         let effects = reduce(&mut state, Action::MoveTo(5));
         assert_eq!(state.selected_id, Some(5));
-        assert_eq!(state.selected_index, Some(5));
+        assert_eq!(state.selected_id, Some(5));
         assert!(effects.is_empty());
     }
 
@@ -890,7 +935,7 @@ mod tests {
     #[test]
     fn copy_requested_with_no_items_is_noop() {
         let mut state = fresh_state();
-        state.selected_index = Some(0);
+        state.selected_id = Some(1);
         let effects = reduce(&mut state, Action::CopyRequested);
         assert!(effects.is_empty());
     }
@@ -1006,7 +1051,7 @@ mod tests {
     fn delete_item_removes_from_items_and_emits_delete_item() {
         let mut state = fresh_state();
         state.items = vec![make_item(1), make_item(2), make_item(3)];
-        state.selected_index = Some(1);
+        state.selected_id = Some(2);
         let effects = reduce(&mut state, Action::Delete(2));
         assert_eq!(effects, vec![Effect::DeleteItem(2)]);
         assert_eq!(state.items.len(), 2);
@@ -1205,9 +1250,72 @@ mod tests {
     fn move_by_works_when_items_are_loaded() {
         let mut state = fresh_state();
         state.items = vec![make_item(1), make_item(2), make_item(3)];
-        state.selected_index = Some(1);
+        state.selected_id = Some(2);
         let effects = reduce(&mut state, Action::MoveBy(1));
-        assert_eq!(state.selected_index, Some(2));
+        assert_eq!(state.selected_id, Some(3));
         assert!(effects.is_empty());
+    }
+
+    #[test]
+    fn refresh_preserves_selected_id_across_reordering() {
+        let mut state = fresh_state();
+        state.items = vec![make_item(1), make_item(2)];
+        state.selected_id = Some(2);
+        reduce(
+            &mut state,
+            Action::ItemsLoaded(vec![make_item(2), make_item(1)]),
+        );
+        assert_eq!(state.selected_id, Some(2));
+        assert_eq!(state.selected_item().map(|item| item.id), Some(2));
+    }
+
+    #[test]
+    fn refresh_clears_selected_id_when_filtered_out() {
+        let mut state = fresh_state();
+        state.items = vec![make_item(1), make_item(2)];
+        state.selected_id = Some(2);
+        reduce(&mut state, Action::ItemsLoaded(vec![make_item(1)]));
+        assert_eq!(state.selected_id, None);
+    }
+
+    #[test]
+    fn initial_refresh_selects_first_visible_item() {
+        let mut state = fresh_state();
+        reduce(
+            &mut state,
+            Action::ItemsLoaded(vec![make_item(9), make_item(10)]),
+        );
+        assert_eq!(state.selected_id, Some(9));
+    }
+
+    #[test]
+    fn deleting_last_selected_item_selects_previous() {
+        let mut state = fresh_state();
+        state.items = vec![make_item(1), make_item(2)];
+        state.selected_id = Some(2);
+        reduce(&mut state, Action::Delete(2));
+        assert_eq!(state.selected_id, Some(1));
+    }
+
+    #[test]
+    fn selected_command_availability_is_id_authoritative() {
+        let mut state = fresh_state();
+        assert!(!selected_command_available(
+            &state,
+            SelectedItemCommand::Copy
+        ));
+        let mut protected = make_item(4);
+        protected.sensitive = true;
+        state.items = vec![protected];
+        state.selected_id = Some(4);
+        assert!(selected_command_available(
+            &state,
+            SelectedItemCommand::Reveal
+        ));
+        assert!(!selected_command_available(
+            &state,
+            SelectedItemCommand::CreateSnippet
+        ));
+        assert!(selected_command_available(&state, SelectedItemCommand::Pin));
     }
 }

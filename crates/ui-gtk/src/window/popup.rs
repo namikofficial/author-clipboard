@@ -157,6 +157,11 @@ fn build_popup(app: &adw::Application, config: &PopupConfig) -> anyhow::Result<(
             dialog.present();
             return;
         }
+        if action == RailAction::AddToCollection {
+            drop(state);
+            crate::pages::clipboard::show_collection_chooser_for_window(&window_for_rail, id);
+            return;
+        }
         let command = match action {
             RailAction::Copy => IpcCommand::Copy {
                 id,
@@ -203,6 +208,7 @@ fn build_popup(app: &adw::Application, config: &PopupConfig) -> anyhow::Result<(
             RailAction::Pin => IpcCommand::Pin { id },
             RailAction::Star => IpcCommand::ToggleStar { id },
             RailAction::Delete => IpcCommand::Delete { id },
+            RailAction::AddToCollection => unreachable!("handled before IPC command mapping"),
             RailAction::Reveal => unreachable!("handled before selection lookup"),
         };
         drop(state);

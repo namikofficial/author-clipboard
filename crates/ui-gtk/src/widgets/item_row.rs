@@ -21,6 +21,7 @@ use super::chip::{Chip, ChipStyle};
 
 /// Cute display row for a single clipboard item.
 pub struct ItemRow {
+    id: i64,
     row: ListBoxRow,
     title: Label,
     subtitle: Label,
@@ -36,12 +37,16 @@ pub struct ItemRow {
 
 impl ItemRow {
     /// Build a new row from a [`ClipboardItem`].
+    #[allow(unsafe_code)]
     pub fn new(item: &ClipboardItem) -> Self {
         let row = ListBoxRow::new();
         row.set_hexpand(true);
         row.set_vexpand(false);
         row.set_selectable(true);
         row.set_activatable(true);
+        // Keep the stable database identity on the GTK row itself. This is
+        // deliberately independent of the row's transient ListBox index.
+        unsafe { row.set_data("author-clipboard-item-id", item.id) };
 
         // ── Title (top line) ────────────────────────────────────
         let title = Label::builder()
@@ -118,6 +123,7 @@ impl ItemRow {
         row.set_child(Some(&frame));
 
         let mut me = Self {
+            id: item.id,
             row,
             title,
             subtitle,
@@ -275,6 +281,17 @@ impl ItemRow {
     /// Borrow the underlying [`ListBoxRow`] for adding to a list.
     pub fn row(&self) -> &ListBoxRow {
         &self.row
+    }
+
+    /// Stable database ID carried by this row.
+    pub fn id(&self) -> i64 {
+        self.id
+    }
+
+    /// Read the stable database ID carried by a GTK row.
+    #[allow(unsafe_code)]
+    pub fn id_from_row(row: &ListBoxRow) -> Option<i64> {
+        unsafe { row.data::<i64>("author-clipboard-item-id") }.map(|id| unsafe { *id.as_ref() })
     }
 }
 

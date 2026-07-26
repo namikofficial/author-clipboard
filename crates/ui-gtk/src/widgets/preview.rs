@@ -193,22 +193,19 @@ impl PreviewPane {
 
     /// Called by the runtime after IPC returns with a fresh item list.
     pub fn on_items_loaded(&self, items: Vec<ClipboardItem>) {
-        let mut state = self.state.borrow_mut();
-        state.items = items;
-        drop(state);
+        crate::app::reduce(
+            &mut self.state.borrow_mut(),
+            crate::app::Action::ItemsLoaded(items),
+        );
         // Re-evaluate the preview with the new items.
         self.update_preview();
     }
 
-    /// Re-evaluate the preview from current `state.selected_index`.
+    /// Re-evaluate the preview from the authoritative selected database ID.
     /// Called whenever the selection changes.
     pub fn update_preview(&self) {
         let state = self.state.borrow();
-        let Some(idx) = state.selected_index else {
-            self.show_empty();
-            return;
-        };
-        let Some(item) = state.items.get(idx).cloned() else {
+        let Some(item) = state.selected_item().cloned() else {
             self.show_empty();
             return;
         };
@@ -624,7 +621,7 @@ mod tests {
     fn update_preview_with_text_item_shows_text() {
         let state = Rc::new(RefCell::new(AppState::default()));
         state.borrow_mut().items = vec![make_text_item("preview me")];
-        state.borrow_mut().selected_index = Some(0);
+        state.borrow_mut().selected_id = Some(0);
         gtk_test_init();
         let pane = PreviewPane::new(state, Rc::new(|| {}));
         pane.update_preview();
@@ -636,7 +633,7 @@ mod tests {
     fn update_preview_with_sensitive_shows_redacted() {
         let st = AppState {
             items: vec![make_sensitive_item("secret")],
-            selected_index: Some(0),
+            selected_id: Some(0),
             show_redacted: false,
             ..Default::default()
         };
