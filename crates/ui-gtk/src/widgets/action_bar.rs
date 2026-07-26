@@ -1,6 +1,6 @@
 //! Selected-result command rail for the popup.
 
-use gtk4::prelude::*;
+use gtk4::{glib, prelude::*};
 
 use crate::app::{selected_command_available, AppState, SelectedItemCommand};
 
