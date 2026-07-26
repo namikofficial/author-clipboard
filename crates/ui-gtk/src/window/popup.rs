@@ -124,111 +124,114 @@ fn build_popup(app: &adw::Application, config: &PopupConfig) -> anyhow::Result<(
     content.append(&page);
     let state_for_rail = state.clone();
     let window_for_rail = window.clone();
-    content.append(&crate::widgets::action_bar::build(move |action| {
-        use crate::widgets::action_bar::RailAction;
-        use author_clipboard_shared::ipc::{CopyMode, IpcClient, IpcCommand};
-        let state = state_for_rail.borrow();
-        let Some(id) = state.selected_id else { return };
-        let item = state.items.iter().find(|item| item.id == id);
-        let Some(selected) = item.cloned() else {
-            return;
-        };
-        if action == RailAction::Reveal {
-            if !selected.sensitive && !selected.encrypted {
+    content.append(&crate::widgets::action_bar::build_with_state(
+        state.clone(),
+        move |action| {
+            use crate::widgets::action_bar::RailAction;
+            use author_clipboard_shared::ipc::{CopyMode, IpcClient, IpcCommand};
+            let state = state_for_rail.borrow();
+            let Some(id) = state.selected_id else { return };
+            let item = state.items.iter().find(|item| item.id == id);
+            let Some(selected) = item.cloned() else {
                 return;
-            }
-            drop(state);
-            crate::app::reduce(
-                &mut state_for_rail.borrow_mut(),
-                crate::app::Action::RevealRedacted,
-            );
-            let dialog = gtk4::MessageDialog::builder()
-                .transient_for(&window_for_rail)
-                .modal(true)
-                .text("Protected clipboard item")
-                .secondary_text(&selected.content)
-                .build();
-            dialog.add_button("Hide now", gtk4::ResponseType::Close);
-            dialog.connect_response(|dialog, _| dialog.close());
-            let dialog_for_timeout = dialog.clone();
-            glib::timeout_add_local_once(std::time::Duration::from_secs(5), move || {
-                dialog_for_timeout.close();
-            });
-            dialog.present();
-            return;
-        }
-        if action == RailAction::AddToCollection {
-            drop(state);
-            crate::pages::clipboard::show_collection_chooser_for_window(&window_for_rail, id);
-            return;
-        }
-        let command = match action {
-            RailAction::Copy => IpcCommand::Copy {
-                id,
-                mode: CopyMode::Copy,
-                mime: None,
-            },
-            RailAction::QuickPaste => IpcCommand::Copy {
-                id,
-                mode: CopyMode::QuickPaste,
-                mime: None,
-            },
-            RailAction::PlainText => IpcCommand::Copy {
-                id,
-                mode: CopyMode::CopyPlainText,
-                mime: None,
-            },
-            RailAction::Transform => {
-                let transform = if matches!(
-                    author_clipboard_shared::presentation::present(&selected),
-                    author_clipboard_shared::presentation::ContentPresentation::Json { .. }
-                ) {
-                    author_clipboard_shared::transform::TransformKind::JsonPretty
-                } else {
-                    author_clipboard_shared::transform::TransformKind::Quote
-                };
-                IpcCommand::Transform {
-                    content: selected.content.clone(),
-                    transform,
-                    sensitive: selected.sensitive || selected.encrypted,
-                    confirm_sensitive: false,
+            };
+            if action == RailAction::Reveal {
+                if !selected.sensitive && !selected.encrypted {
+                    return;
                 }
-            }
-            RailAction::CreateSnippet if selected.sensitive || selected.encrypted => {
-                tracing::warn!(
-                    "refusing to create snippet from protected content without confirmation"
+                drop(state);
+                crate::app::reduce(
+                    &mut state_for_rail.borrow_mut(),
+                    crate::app::Action::RevealRedacted,
                 );
+                let dialog = gtk4::MessageDialog::builder()
+                    .transient_for(&window_for_rail)
+                    .modal(true)
+                    .text("Protected clipboard item")
+                    .secondary_text(&selected.content)
+                    .build();
+                dialog.add_button("Hide now", gtk4::ResponseType::Close);
+                dialog.connect_response(|dialog, _| dialog.close());
+                let dialog_for_timeout = dialog.clone();
+                glib::timeout_add_local_once(std::time::Duration::from_secs(5), move || {
+                    dialog_for_timeout.close();
+                });
+                dialog.present();
                 return;
             }
-            RailAction::CreateSnippet => IpcCommand::UpsertSnippet {
-                name: format!("clipboard-{id}"),
-                content: selected.content.clone(),
-            },
-            RailAction::Pin if item.is_some_and(|item| item.pinned) => IpcCommand::Unpin { id },
-            RailAction::Pin => IpcCommand::Pin { id },
-            RailAction::Star => IpcCommand::ToggleStar { id },
-            RailAction::Delete => IpcCommand::Delete { id },
-            RailAction::AddToCollection => unreachable!("handled before IPC command mapping"),
-            RailAction::Reveal => unreachable!("handled before selection lookup"),
-        };
-        drop(state);
-        match IpcClient::new().send_command(&command) {
-            Ok(response) if action == RailAction::Transform && response.ok => {
-                if let Some(output) = response
-                    .data
-                    .as_ref()
-                    .and_then(|data| data.get("output"))
-                    .and_then(serde_json::Value::as_str)
-                {
-                    if let Some(display) = gdk::Display::default() {
-                        display.clipboard().set_text(output);
+            if action == RailAction::AddToCollection {
+                drop(state);
+                crate::pages::clipboard::show_collection_chooser_for_window(&window_for_rail, id);
+                return;
+            }
+            let command = match action {
+                RailAction::Copy => IpcCommand::Copy {
+                    id,
+                    mode: CopyMode::Copy,
+                    mime: None,
+                },
+                RailAction::QuickPaste => IpcCommand::Copy {
+                    id,
+                    mode: CopyMode::QuickPaste,
+                    mime: None,
+                },
+                RailAction::PlainText => IpcCommand::Copy {
+                    id,
+                    mode: CopyMode::CopyPlainText,
+                    mime: None,
+                },
+                RailAction::Transform => {
+                    let transform = if matches!(
+                        author_clipboard_shared::presentation::present(&selected),
+                        author_clipboard_shared::presentation::ContentPresentation::Json { .. }
+                    ) {
+                        author_clipboard_shared::transform::TransformKind::JsonPretty
+                    } else {
+                        author_clipboard_shared::transform::TransformKind::Quote
+                    };
+                    IpcCommand::Transform {
+                        content: selected.content.clone(),
+                        transform,
+                        sensitive: selected.sensitive || selected.encrypted,
+                        confirm_sensitive: false,
                     }
                 }
+                RailAction::CreateSnippet if selected.sensitive || selected.encrypted => {
+                    tracing::warn!(
+                        "refusing to create snippet from protected content without confirmation"
+                    );
+                    return;
+                }
+                RailAction::CreateSnippet => IpcCommand::UpsertSnippet {
+                    name: format!("clipboard-{id}"),
+                    content: selected.content.clone(),
+                },
+                RailAction::Pin if item.is_some_and(|item| item.pinned) => IpcCommand::Unpin { id },
+                RailAction::Pin => IpcCommand::Pin { id },
+                RailAction::Star => IpcCommand::ToggleStar { id },
+                RailAction::Delete => IpcCommand::Delete { id },
+                RailAction::AddToCollection => unreachable!("handled before IPC command mapping"),
+                RailAction::Reveal => unreachable!("handled before selection lookup"),
+            };
+            drop(state);
+            match IpcClient::new().send_command(&command) {
+                Ok(response) if action == RailAction::Transform && response.ok => {
+                    if let Some(output) = response
+                        .data
+                        .as_ref()
+                        .and_then(|data| data.get("output"))
+                        .and_then(serde_json::Value::as_str)
+                    {
+                        if let Some(display) = gdk::Display::default() {
+                            display.clipboard().set_text(output);
+                        }
+                    }
+                }
+                Ok(_) => {}
+                Err(error) => tracing::warn!(?error, "popup action failed"),
             }
-            Ok(_) => {}
-            Err(error) => tracing::warn!(?error, "popup action failed"),
-        }
-    }));
+        },
+    ));
     content.append(&status);
 
     window.set_content(Some(&content));
