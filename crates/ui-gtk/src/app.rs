@@ -247,6 +247,10 @@ pub enum Action {
     /// `GSettings` has loaded new `ManagerConfig`.
     ManagerConfigLoaded(ManagerConfig),
     // ── PR 3B variants ──────────────────────────────────────────────
+    // ── PR 4 keyboard variants ──────────────────────────────────
+    /// Alternate activation (Ctrl+Enter) — quick-paste or copy
+    /// depending on mode.
+    AltActivate,
     /// Request a copy of the item at the given index in `items`.
     CopyRequested,
     /// Request a quick-paste of the item at the given index.
@@ -466,6 +470,24 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
         }
 
         // ── PR 3B arms ──────────────────────────────────────────────
+        Action::AltActivate => {
+            // Alternate activation: quick-paste if mode is copy, copy if mode is quick-paste.
+            let Some(item) = state.selected_item() else {
+                return vec![];
+            };
+            let id = item.id;
+            let mime = if item.mime_type == "text/plain" {
+                None
+            } else {
+                Some(item.mime_type.clone())
+            };
+            let mode = match state.config.action {
+                crate::PickerAction::Copy => CopyMode::QuickPaste,
+                crate::PickerAction::QuickPaste => CopyMode::Copy,
+            };
+            vec![Effect::CopyItem { id, mode, mime }]
+        }
+
         Action::CopyRequested => {
             let Some(item) = state.selected_item() else {
                 return vec![];
@@ -870,6 +892,47 @@ mod tests {
         let mut state = fresh_state();
         state.selected_index = Some(0);
         let effects = reduce(&mut state, Action::CopyRequested);
+        assert!(effects.is_empty());
+    }
+
+    #[test]
+    fn alt_activate_emits_quick_paste_in_copy_mode() {
+        let mut state = fresh_state();
+        state.items = vec![make_item(7)];
+        state.select_by_id(Some(7));
+        state.config.action = crate::PickerAction::Copy;
+        let effects = reduce(&mut state, Action::AltActivate);
+        assert_eq!(
+            effects[0],
+            Effect::CopyItem {
+                id: 7,
+                mode: CopyMode::QuickPaste,
+                mime: None,
+            }
+        );
+    }
+
+    #[test]
+    fn alt_activate_emits_copy_in_quick_paste_mode() {
+        let mut state = fresh_state();
+        state.items = vec![make_item(7)];
+        state.select_by_id(Some(7));
+        state.config.action = crate::PickerAction::QuickPaste;
+        let effects = reduce(&mut state, Action::AltActivate);
+        assert_eq!(
+            effects[0],
+            Effect::CopyItem {
+                id: 7,
+                mode: CopyMode::Copy,
+                mime: None,
+            }
+        );
+    }
+
+    #[test]
+    fn alt_activate_with_no_selection_is_noop() {
+        let mut state = fresh_state();
+        let effects = reduce(&mut state, Action::AltActivate);
         assert!(effects.is_empty());
     }
 

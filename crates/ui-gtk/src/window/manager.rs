@@ -322,27 +322,31 @@ fn build_manager_window(app: &adw::Application, config: &ManagerConfig) -> anyho
     toast_overlay.set_child(Some(&toolbar));
     window.set_content(Some(&toast_overlay));
 
-    // ── Global key controller ─────────────────────────────────
+    // ── Key controller (bubble phase, no close-window) ───────
+    // Manager never closes on Esc — the controller only handles
+    // / for search focus, Ctrl+Tab for page cycling, and
+    // organization shortcuts.
     let (tx, rx) = std::sync::mpsc::channel::<Effect>();
-    crate::controller::key::install(&window, &state, &tx);
+    {
+        let content_widget: gtk4::Widget = content_vbox.upcast();
+        let search = find_search_entry(&content_widget);
+        let list = find_list_box(&content_widget);
+        crate::controller::key::install(
+            &window,
+            &state,
+            &tx,
+            None::<Box<dyn Fn()>>, // no close-window in manager
+            search.as_ref(),
+            list.as_ref(),
+        );
+    }
 
     // Handle effects from the channel on the GTK thread.
     let toast_overlay_for_rx = toast_overlay.clone();
     glib::idle_add_local(move || {
         while let Ok(eff) = rx.try_recv() {
-            match eff {
-                Effect::AddToast(ref msg) => {
-                    toast_overlay_for_rx.add_toast(adw::Toast::new(msg));
-                }
-                Effect::Quit => {
-                    if let Some(w) = toast_overlay_for_rx
-                        .root()
-                        .and_then(|r| r.downcast::<adw::ApplicationWindow>().ok())
-                    {
-                        w.close();
-                    }
-                }
-                _ => {}
+            if let Effect::AddToast(ref msg) = eff {
+                toast_overlay_for_rx.add_toast(adw::Toast::new(msg));
             }
         }
         glib::ControlFlow::Continue
@@ -362,4 +366,32 @@ fn build_manager_window(app: &adw::Application, config: &ManagerConfig) -> anyho
 
     window.present();
     Ok(())
+}
+
+fn find_search_entry(widget: &gtk4::Widget) -> Option<gtk4::SearchEntry> {
+    if let Ok(entry) = widget.clone().downcast::<gtk4::SearchEntry>() {
+        return Some(entry);
+    }
+    let mut child = widget.first_child();
+    while let Some(c) = child {
+        if let Some(found) = find_search_entry(&c) {
+            return Some(found);
+        }
+        child = c.next_sibling();
+    }
+    None
+}
+
+fn find_list_box(widget: &gtk4::Widget) -> Option<gtk4::ListBox> {
+    if let Ok(list) = widget.clone().downcast::<gtk4::ListBox>() {
+        return Some(list);
+    }
+    let mut child = widget.first_child();
+    while let Some(c) = child {
+        if let Some(found) = find_list_box(&c) {
+            return Some(found);
+        }
+        child = c.next_sibling();
+    }
+    None
 }

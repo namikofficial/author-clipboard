@@ -227,47 +227,56 @@ fn build_popup(app: &adw::Application, config: &PopupConfig) -> anyhow::Result<(
 
     window.set_content(Some(&content));
 
-    // ── US-001/US-002: Global key controller ─────────────────
+    // ── Focus tracking for Esc resolution ────────────────────
+    {
+        let s = state.clone();
+        let content_w: gtk4::Widget = content.clone().upcast();
+        if let Some(search) = find_search_entry(&content_w) {
+            search.connect_has_focus_notify(move |entry| {
+                s.borrow_mut().focus = if entry.has_focus() {
+                    FocusTarget::Search
+                } else {
+                    FocusTarget::List
+                };
+            });
+        }
+    }
+    {
+        let s = state.clone();
+        let content_w: gtk4::Widget = content.clone().upcast();
+        if let Some(list) = find_list_box(&content_w) {
+            list.connect_row_selected(move |_, _| {
+                s.borrow_mut().focus = FocusTarget::List;
+            });
+        }
+    }
+
+    // ── Key controller (bubble phase) ────────────────────────
     let (tx, rx) = std::sync::mpsc::channel::<crate::Effect>();
-    crate::controller::key::install(&window, &state, &tx);
+    {
+        let content_w: gtk4::Widget = content.clone().upcast();
+        let search = find_search_entry(&content_w);
+        let list = find_list_box(&content_w);
+        let window_for_close = window.clone();
+        crate::controller::key::install(
+            &window,
+            &state,
+            &tx,
+            Some(Box::new(move || window_for_close.close())),
+            search.as_ref(),
+            list.as_ref(),
+        );
+    }
 
     // Handle effects from the channel on the GTK thread.
-    // Esc close and search focus are handled by the key controller
-    // via the reducer + effect channel.
-    let window_for_effects = window.clone();
     glib::idle_add_local(move || {
         while let Ok(eff) = rx.try_recv() {
-            match eff {
-                crate::Effect::Quit => {
-                    window_for_effects.close();
-                }
-                crate::Effect::AddToast(ref msg) => {
-                    tracing::info!(%msg, "popup toast");
-                }
-                _ => {}
+            if let crate::Effect::AddToast(ref msg) = eff {
+                tracing::info!(%msg, "popup toast");
             }
         }
         glib::ControlFlow::Continue
     });
-
-    // ── Track focus changes in AppState for Esc resolution ───
-    let state_for_focus = state.clone();
-    let content_for_focus: gtk4::Widget = content.clone().upcast();
-    if let Some(search) = find_search_entry(&content_for_focus) {
-        let s = state_for_focus.clone();
-        search.connect_has_focus_notify(move |entry| {
-            s.borrow_mut().focus = if entry.has_focus() {
-                FocusTarget::Search
-            } else {
-                FocusTarget::List
-            };
-        });
-    }
-    if let Some(list) = find_list_box(&content_for_focus) {
-        list.connect_row_selected(move |_, _| {
-            state_for_focus.borrow_mut().focus = FocusTarget::List;
-        });
-    }
 
     // ── Size persistence (debounced) ─────────────────────────
     let settings_for_size = settings.clone();

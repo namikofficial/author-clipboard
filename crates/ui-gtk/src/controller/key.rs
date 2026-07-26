@@ -1,8 +1,19 @@
-//! Global key controller. Populated in T007 (T005 in 0-indexed plan).
+//! Window-level key controller.
+//!
+//! Runs in the default (bubble) propagation phase so child widgets
+//! (`SearchEntry`, `ListBox`, modal dialogs) handle their own keys first.
+//! The controller only sees keys that no child widget consumed.
+//!
+//! Ownership rules:
+//! - GTK `ListBox` owns Up/Down/Home/End/PageUp/PageDown/Enter.
+//! - `SearchEntry2` owns first-Esc-clear and text input.
+//! - This controller owns /, Ctrl+Enter, Ctrl+Tab, shortcuts overlay,
+//!   organization shortcuts (Ctrl+P/Shift+P/Shift+S/Shift+A),
+//!   and second-Esc-list-focus / popup-close.
+//! - Quit is never emitted from the key controller — Esc close is
+//!   driven by a callback so popup and manager behave differently.
 
-#![allow(dead_code, unused_imports)]
-
-use crate::app::{reduce, Action, AppState, FocusTarget};
+use crate::app::{Action, AppState, FocusTarget};
 use gtk4::gdk;
 use gtk4::gdk::Key;
 use gtk4::gdk::ModifierType;
@@ -12,92 +23,134 @@ use gtk4::EventControllerKey;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-/// Map a key + modifiers to an Action. Pure — no I/O, no GTK init required for tests.
-pub fn map_key_extended(key: Key, mods: ModifierType) -> Option<Action> {
+/// Map a key + modifiers to an action for the window-level controller.
+///
+/// Returns `None` for keys that should bubble to child widgets (navigation,
+/// Enter, text input). The caller decides what to do with the action
+/// (reduce state, focus widgets, close window).
+pub fn map_window_key(key: Key, mods: ModifierType) -> Option<Action> {
     let ctrl = mods.contains(ModifierType::CONTROL_MASK);
     let shift = mods.contains(ModifierType::SHIFT_MASK);
 
-    #[allow(clippy::match_same_arms)] // distinct keys map to the same action
+    #[allow(clippy::match_same_arms)]
     match (key, ctrl, shift) {
-        // Navigation
-        (Key::Up, false, false) => Some(Action::MoveBy(-1)),
-        (Key::Down, false, false) => Some(Action::MoveBy(1)),
-        (Key::Home, false, false) => Some(Action::MoveTo(0)),
-        (Key::End, false, false) => Some(Action::MoveTo(usize::MAX)), // clamp in reducer
-        (Key::Page_Up, false, false) => Some(Action::MovePage(-1)),
-        (Key::Page_Down, false, false) => Some(Action::MovePage(1)),
-        // Focus
-        (Key::Escape, false, false) => Some(Action::Focus(FocusTarget::List)), // runtime resolves Esc via resolve_escape
-        (Key::slash | Key::KP_Delete, false, false) => Some(Action::Focus(FocusTarget::Search)),
-        // ? shortcut (Shift+/)
-        (Key::minus, false, true) => Some(Action::Focus(FocusTarget::Search)), // ? is -/Shift on some layouts
+        // Focus search
+        (Key::slash, false, false) => Some(Action::Focus(FocusTarget::Search)),
+        // ? shortcut (Shift+/) — same target on some layouts
+        (Key::minus, false, true) => Some(Action::Focus(FocusTarget::Search)),
         // Shortcuts overlay
         (Key::question | Key::F1, false, false) => Some(Action::Focus(FocusTarget::Modal)),
-        // Quick pick Ctrl+1..9
-        (Key::_1, true, false) => Some(Action::MoveTo(0)),
-        (Key::_2, true, false) => Some(Action::MoveTo(1)),
-        (Key::_3, true, false) => Some(Action::MoveTo(2)),
-        (Key::_4, true, false) => Some(Action::MoveTo(3)),
-        (Key::_5, true, false) => Some(Action::MoveTo(4)),
-        (Key::_6, true, false) => Some(Action::MoveTo(5)),
-        (Key::_7, true, false) => Some(Action::MoveTo(6)),
-        (Key::_8, true, false) => Some(Action::MoveTo(7)),
-        (Key::_9, true, false) => Some(Action::MoveTo(8)),
         // Page navigation
-        (Key::Tab, true, false) => Some(Action::CyclePage(1)), // Ctrl+Tab = next
-        (Key::Tab, true, true) => Some(Action::CyclePage(-1)), // Ctrl+Shift+Tab = prev
-        // Collection organization and quick-access filters.
+        (Key::Tab, true, false) => Some(Action::CyclePage(1)),
+        (Key::Tab, true, true) => Some(Action::CyclePage(-1)),
+        // Organization shortcuts
         (Key::p, true, false) => Some(Action::ToggleSelectedPin),
         (Key::s, true, true) => Some(Action::ToggleSelectedStar),
-        (Key::p, true, true) => Some(Action::TogglePinnedFilter),
-        (Key::a, true, true) => Some(Action::ToggleStarredFilter),
-        // Actions (runtime decides copy vs quick-paste based on mode)
-        (Key::Return, false, false) => Some(Action::Focus(FocusTarget::List)), // Enter in list = copy; runtime wires copy
+        // Ctrl+1..9 quick pick — handled at page level via list_box.select_row()
+        // (not mapped here since the window controller can't directly select ListBox rows).
         _ => None,
     }
 }
 
-/// Install the global key controller on a top-level widget.
+/// Install the window-level key controller.
 ///
-/// This controller runs in [`PropagationPhase::Capture`] so it fires
-/// before any widget's built-in handler. That is what fixes the
-/// "Esc doesn't close when search has focus" bug (US-001).
+/// `close_window` is called when Esc should close the popup (not the manager).
+/// The controller runs in the default (bubble) phase, so child widgets
+/// (`SearchEntry`, `ListBox`, dialogs) process their own keys first.
+///
+/// # Parameters
+/// * `widget` — the top-level window or parent widget.
+/// * `state` — shared `AppState`.
+/// * `effects_tx` — channel to send effects.
+/// * `close_window` — closure invoked to close the window (popup only).
+/// * `search_entry` — optional reference to the search entry for focus.
+/// * `list_box` — optional reference to the list box for focus-on-Esc.
 pub fn install(
-    window: &impl IsA<gtk4::Widget>,
+    widget: &impl IsA<gtk4::Widget>,
     state: &Rc<RefCell<AppState>>,
     effects_tx: &std::sync::mpsc::Sender<crate::Effect>,
+    close_window: Option<Box<dyn Fn() + 'static>>,
+    search_entry: Option<&gtk4::SearchEntry>,
+    list_box: Option<&gtk4::ListBox>,
 ) -> EventControllerKey {
     use crate::controller::focus::resolve_escape;
     use crate::controller::focus::EscOutcome;
 
     let controller = EventControllerKey::new();
-    controller.set_propagation_phase(gtk4::PropagationPhase::Capture);
     let st = state.clone();
     let tx = effects_tx.clone();
+
+    // Keep handles to search and list for focus management.
+    let search = search_entry.cloned();
+    let list = list_box.cloned();
+
     controller.connect_key_pressed(move |_, key, _keycode, mods| {
+        // ── Esc handling ──────────────────────────────────────────
         if key == gdk::Key::Escape {
-            let outcome = resolve_escape(st.borrow().focus, st.borrow().search_query.is_empty());
+            let s = st.borrow();
+            let outcome = resolve_escape(s.focus, s.search_query.is_empty());
+            drop(s);
+
+            // If Esc was handled by a child widget (SearchEntry cleared
+            // text and stopped propagation), we don't see it here in bubble
+            // phase. So we always handle it: when search text is non-empty,
+            // clear search. When search text is empty and search has focus,
+            // focus list. When list has focus, close popup.
             match outcome {
-                EscOutcome::Close
-                | EscOutcome::ClearSearch
-                | EscOutcome::BlurSearch
-                | EscOutcome::Proceed => {
-                    let _ = tx.send(crate::Effect::Quit);
+                EscOutcome::ClearSearch => {
+                    // SearchEntry2 already handles this and stops propagation,
+                    // so we should only reach this branch if the search widget
+                    // didn't consume it (defensive: still handle it here).
+                    if let Some(ref entry) = search {
+                        entry.set_text("");
+                        st.borrow_mut().search_query = String::new();
+                        let _ = tx.send(crate::Effect::RefreshItems);
+                    }
                     Propagation::Stop
                 }
+                EscOutcome::BlurSearch => {
+                    // Search text is empty; transfer focus to the list.
+                    if let Some(ref lb) = list {
+                        lb.grab_focus();
+                    }
+                    st.borrow_mut().focus = FocusTarget::List;
+                    Propagation::Stop
+                }
+                EscOutcome::Close => {
+                    // List has focus; close the popup (or no-op in manager).
+                    if let Some(ref close) = close_window {
+                        close();
+                    }
+                    Propagation::Stop
+                }
+                EscOutcome::Proceed => {
+                    // Modal or no focus: let dialog handle its own Esc.
+                    Propagation::Proceed
+                }
             }
-        } else if let Some(action) = map_key_extended(key, mods) {
-            let continue_to_page = matches!(
-                action,
-                Action::TogglePinnedFilter | Action::ToggleStarredFilter
-            );
+        }
+        // ── Org shortcuts (Ctrl+Tab, Ctrl+P, etc.) ───────────────
+        else if let Some(action) = map_window_key(key, mods) {
+            // `/` focuses the search entry — handle before moving action.
+            if matches!(action, Action::Focus(FocusTarget::Search)) {
+                let mut s = st.borrow_mut();
+                s.focus = FocusTarget::Search;
+                drop(s);
+                if let Some(ref entry) = search {
+                    entry.grab_focus();
+                }
+                return Propagation::Stop;
+            }
+            // All other actions go through the reducer.
+            let is_cycle = matches!(action, Action::CyclePage(_));
             let mut s = st.borrow_mut();
-            let effects = reduce(&mut s, action);
+            let effects = crate::app::reduce(&mut s, action);
+            drop(s);
             for eff in effects {
-                persist_organization_effect(&eff);
                 let _ = tx.send(eff);
             }
-            if continue_to_page {
+            // Ctrl+Tab continues to page, others stop here.
+            if is_cycle {
                 Propagation::Proceed
             } else {
                 Propagation::Stop
@@ -106,25 +159,9 @@ pub fn install(
             Propagation::Proceed
         }
     });
-    window.add_controller(controller.clone());
-    controller
-}
 
-fn persist_organization_effect(effect: &crate::Effect) {
-    use author_clipboard_shared::ipc::{IpcClient, IpcCommand};
-    let command = match effect {
-        crate::Effect::PinItem(id) => Some(IpcCommand::Pin { id: *id }),
-        crate::Effect::UnpinItem(id) => Some(IpcCommand::Unpin { id: *id }),
-        crate::Effect::StarItem(id) | crate::Effect::UnstarItem(id) => {
-            Some(IpcCommand::ToggleStar { id: *id })
-        }
-        _ => None,
-    };
-    if let Some(command) = command {
-        if let Err(error) = IpcClient::new().send_command(&command) {
-            tracing::warn!(?error, "keyboard organization action failed");
-        }
-    }
+    widget.add_controller(controller.clone());
+    controller
 }
 
 #[cfg(test)]
@@ -134,49 +171,25 @@ mod tests {
     use gtk4::gdk::ModifierType;
 
     #[test]
-    fn map_key_up_returns_move_by_minus_1() {
+    fn map_window_key_slash_returns_focus_search() {
         assert_eq!(
-            map_key_extended(Key::Up, ModifierType::empty()),
-            Some(Action::MoveBy(-1))
+            map_window_key(Key::slash, ModifierType::empty()),
+            Some(Action::Focus(FocusTarget::Search))
         );
     }
 
     #[test]
-    fn map_key_down_returns_move_by_1() {
+    fn map_window_key_ctrl_tab_returns_cycle_page_1() {
         assert_eq!(
-            map_key_extended(Key::Down, ModifierType::empty()),
-            Some(Action::MoveBy(1))
-        );
-    }
-
-    #[test]
-    fn map_key_ctrl_1_returns_move_to_0() {
-        assert_eq!(
-            map_key_extended(Key::_1, ModifierType::CONTROL_MASK),
-            Some(Action::MoveTo(0))
-        );
-    }
-
-    #[test]
-    fn map_key_ctrl_2_returns_move_to_1() {
-        assert_eq!(
-            map_key_extended(Key::_2, ModifierType::CONTROL_MASK),
-            Some(Action::MoveTo(1))
-        );
-    }
-
-    #[test]
-    fn map_key_ctrl_tab_returns_cycle_page_1() {
-        assert_eq!(
-            map_key_extended(Key::Tab, ModifierType::CONTROL_MASK),
+            map_window_key(Key::Tab, ModifierType::CONTROL_MASK),
             Some(Action::CyclePage(1))
         );
     }
 
     #[test]
-    fn map_key_ctrl_shift_tab_returns_cycle_page_neg_1() {
+    fn map_window_key_ctrl_shift_tab_returns_cycle_page_neg_1() {
         assert_eq!(
-            map_key_extended(
+            map_window_key(
                 Key::Tab,
                 ModifierType::CONTROL_MASK | ModifierType::SHIFT_MASK
             ),
@@ -185,95 +198,42 @@ mod tests {
     }
 
     #[test]
-    fn map_key_slash_without_ctrl_returns_focus_search() {
+    fn map_window_key_question_opens_shortcuts() {
         assert_eq!(
-            map_key_extended(Key::slash, ModifierType::empty()),
-            Some(Action::Focus(FocusTarget::Search))
-        );
-    }
-
-    #[test]
-    fn map_key_escape_returns_focus_list() {
-        assert_eq!(
-            map_key_extended(Key::Escape, ModifierType::empty()),
-            Some(Action::Focus(FocusTarget::List))
-        );
-    }
-
-    #[test]
-    fn map_key_question_opens_shortcuts_overlay() {
-        assert_eq!(
-            map_key_extended(Key::question, ModifierType::empty()),
+            map_window_key(Key::question, ModifierType::empty()),
             Some(Action::Focus(FocusTarget::Modal))
         );
     }
 
     #[test]
-    fn map_key_f1_opens_shortcuts_overlay() {
+    fn map_window_key_ctrl_p_returns_toggle_pin() {
         assert_eq!(
-            map_key_extended(Key::F1, ModifierType::empty()),
-            Some(Action::Focus(FocusTarget::Modal))
-        );
-    }
-
-    #[test]
-    fn map_key_return_without_modifiers_focuses_list() {
-        assert_eq!(
-            map_key_extended(Key::Return, ModifierType::empty()),
-            Some(Action::Focus(FocusTarget::List))
-        );
-    }
-
-    #[test]
-    fn map_key_home_goes_to_first() {
-        assert_eq!(
-            map_key_extended(Key::Home, ModifierType::empty()),
-            Some(Action::MoveTo(0))
-        );
-    }
-
-    #[test]
-    fn map_key_page_up_moves_page_backward() {
-        assert_eq!(
-            map_key_extended(Key::Page_Up, ModifierType::empty()),
-            Some(Action::MovePage(-1))
-        );
-    }
-
-    #[test]
-    fn map_key_page_down_moves_page_forward() {
-        assert_eq!(
-            map_key_extended(Key::Page_Down, ModifierType::empty()),
-            Some(Action::MovePage(1))
-        );
-    }
-
-    #[test]
-    fn collection_shortcuts_map_to_selected_actions_and_quick_filters() {
-        assert_eq!(
-            map_key_extended(Key::p, ModifierType::CONTROL_MASK),
+            map_window_key(Key::p, ModifierType::CONTROL_MASK),
             Some(Action::ToggleSelectedPin)
         );
+    }
+
+    #[test]
+    fn map_window_key_ctrl_shift_s_returns_toggle_star() {
         assert_eq!(
-            map_key_extended(
+            map_window_key(
                 Key::s,
                 ModifierType::CONTROL_MASK | ModifierType::SHIFT_MASK
             ),
             Some(Action::ToggleSelectedStar)
         );
-        assert_eq!(
-            map_key_extended(
-                Key::p,
-                ModifierType::CONTROL_MASK | ModifierType::SHIFT_MASK
-            ),
-            Some(Action::TogglePinnedFilter)
-        );
-        assert_eq!(
-            map_key_extended(
-                Key::a,
-                ModifierType::CONTROL_MASK | ModifierType::SHIFT_MASK
-            ),
-            Some(Action::ToggleStarredFilter)
-        );
+    }
+
+    #[test]
+    fn map_window_key_navigation_keys_return_none() {
+        // Navigation is handled by ListBox, not the window controller.
+        assert_eq!(map_window_key(Key::Up, ModifierType::empty()), None);
+        assert_eq!(map_window_key(Key::Down, ModifierType::empty()), None);
+        assert_eq!(map_window_key(Key::Home, ModifierType::empty()), None);
+        assert_eq!(map_window_key(Key::End, ModifierType::empty()), None);
+        assert_eq!(map_window_key(Key::Page_Up, ModifierType::empty()), None);
+        assert_eq!(map_window_key(Key::Page_Down, ModifierType::empty()), None);
+        assert_eq!(map_window_key(Key::Return, ModifierType::empty()), None);
+        assert_eq!(map_window_key(Key::Escape, ModifierType::empty()), None);
     }
 }

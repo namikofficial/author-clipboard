@@ -168,6 +168,13 @@ pub fn build(
             &entries,
             s.query.is_empty(),
         );
+        // Select the first row after refresh, so GTK ListBox selection
+        // is always authoritative and connected to AppState.
+        if entries.is_empty() {
+            list_for_refresh.unselect_all();
+        } else if let Some(row) = list_for_refresh.row_at_index(0) {
+            list_for_refresh.select_row(Some(&row));
+        }
         if entries.is_empty() {
             scrolled_for_refresh.set_visible(false);
             empty_for_refresh.set_visible(true);
@@ -176,34 +183,6 @@ pub fn build(
             empty_for_refresh.set_visible(false);
         }
     };
-
-    let filter_keys = gtk4::EventControllerKey::new();
-    let state_for_filter_keys = state.clone();
-    let refresh_for_filter_keys = refresh.clone();
-    filter_keys.connect_key_pressed(move |_controller, key, _code, modifiers| {
-        let ctrl_shift = modifiers.contains(gdk::ModifierType::CONTROL_MASK)
-            && modifiers.contains(gdk::ModifierType::SHIFT_MASK);
-        let target = if ctrl_shift && key == gdk::Key::p {
-            Some(PickerFilter::Pinned)
-        } else if ctrl_shift && key == gdk::Key::a {
-            Some(PickerFilter::Starred)
-        } else {
-            None
-        };
-        let Some(target) = target else {
-            return glib::Propagation::Proceed;
-        };
-        let mut state = state_for_filter_keys.borrow_mut();
-        state.filter = if state.filter == target {
-            PickerFilter::All
-        } else {
-            target
-        };
-        drop(state);
-        refresh_for_filter_keys();
-        glib::Propagation::Stop
-    });
-    page.add_controller(filter_keys);
 
     // Search entry.
     let refresh_for_search = refresh.clone();
@@ -236,25 +215,38 @@ pub fn build(
     empty_state.widget().set_visible(false);
     page.append(&list_section);
 
-    // Copy on Enter: find the selected row's item id and call on_copy.
-    let item_rows_for_copy = item_rows.clone();
-    let app_state_for_copy = app_state.clone();
-    let state_for_copy = state.clone();
+    // ── Synchronize AppState from GTK ListBox selection ───────
+    // GTK selection is authoritative. When the user navigates with
+    // Up/Down/Home/End/PageUp/PageDown (via ListBox), we update
+    // AppState to match.
+    let item_rows_for_sync = item_rows.clone();
+    let app_state_for_sync = app_state.clone();
+    list_box.connect_row_selected(move |_list, row| {
+        let id = row.and_then(|r| {
+            let idx = usize::try_from(r.index()).ok()?;
+            let rows = item_rows_for_sync.borrow();
+            rows.get(idx).map(|(id, _, _)| *id)
+        });
+        app_state_for_sync.borrow_mut().select_by_id(id);
+    });
+
+    // ── Wrap on_copy in Rc before wiring handlers ─────────────
     let on_copy = Rc::new(on_copy);
+
+    // ── Copy on Enter: find the selected row's item id and call on_copy.
+    let item_rows_for_copy = item_rows.clone();
+    let state_for_copy = state.clone();
+    let on_copy_for_activate = on_copy.clone();
     list_box.connect_row_activated(move |_list, row| {
         let index = usize::try_from(row.index()).ok();
         if let Some(idx) = index {
             if let Some((id, _row, mime)) = item_rows_for_copy.borrow().get(idx) {
                 let action_mode = state_for_copy.borrow().action;
-                crate::app::reduce(
-                    &mut app_state_for_copy.borrow_mut(),
-                    crate::app::Action::Select(Some(*id)),
-                );
                 let mode = match action_mode {
                     PickerAction::Copy => CopyMode::Copy,
                     PickerAction::QuickPaste => CopyMode::QuickPaste,
                 };
-                on_copy(ClipboardCopyRequest {
+                on_copy_for_activate(ClipboardCopyRequest {
                     id: *id,
                     mime: mime.clone(),
                     mode,
@@ -263,30 +255,90 @@ pub fn build(
         }
     });
 
-    // Ctrl+Shift+C opens the collection chooser for the selected history row.
-    let collection_keys = gtk4::EventControllerKey::new();
-    let list_for_collection = list_box.clone();
-    let rows_for_collection = item_rows.clone();
-    let page_for_collection = page.clone();
-    collection_keys.connect_key_pressed(move |_controller, key, _code, modifiers| {
-        let requested = key == gdk::Key::c
-            && modifiers.contains(gdk::ModifierType::CONTROL_MASK)
-            && modifiers.contains(gdk::ModifierType::SHIFT_MASK);
-        if !requested {
-            return glib::Propagation::Proceed;
-        }
-        let Some(index) = list_for_collection
-            .selected_row()
-            .and_then(|row| usize::try_from(row.index()).ok())
-        else {
+    // ── Page-level key handlers ───────────────────────────────
+    // These keys are handled at the *page* level (not window level)
+    // because they interact with the ListBox or need the page's
+    // refresh/side-table context.
+    let page_keys = gtk4::EventControllerKey::new();
+
+    // Ctrl+Shift+P — toggle pinned filter
+    // Ctrl+Shift+A — toggle starred filter
+    // Ctrl+Shift+C — collection chooser
+    // Ctrl+Enter — alternate activation
+    let list_for_page = list_box.clone();
+    let rows_for_page = item_rows.clone();
+    let page_for_page = page.clone();
+    let state_for_page = state.clone();
+    let refresh_for_page = refresh.clone();
+    let on_copy_for_page = on_copy.clone();
+    page_keys.connect_key_pressed(move |_controller, key, _code, modifiers| {
+        let ctrl = modifiers.contains(gdk::ModifierType::CONTROL_MASK);
+        let shift = modifiers.contains(gdk::ModifierType::SHIFT_MASK);
+
+        // Ctrl+Shift+P: toggle pinned filter
+        if ctrl && shift && key == gdk::Key::p {
+            let mut s = state_for_page.borrow_mut();
+            s.filter = if s.filter == PickerFilter::Pinned {
+                PickerFilter::All
+            } else {
+                PickerFilter::Pinned
+            };
+            drop(s);
+            refresh_for_page();
             return glib::Propagation::Stop;
-        };
-        if let Some((item_id, _, _)) = rows_for_collection.borrow().get(index) {
-            show_collection_chooser(&page_for_collection, *item_id);
         }
-        glib::Propagation::Stop
+
+        // Ctrl+Shift+A: toggle starred filter
+        if ctrl && shift && key == gdk::Key::a {
+            let mut s = state_for_page.borrow_mut();
+            s.filter = if s.filter == PickerFilter::Starred {
+                PickerFilter::All
+            } else {
+                PickerFilter::Starred
+            };
+            drop(s);
+            refresh_for_page();
+            return glib::Propagation::Stop;
+        }
+
+        // Ctrl+Shift+C: collection chooser
+        if ctrl && shift && key == gdk::Key::c {
+            let Some(index) = list_for_page
+                .selected_row()
+                .and_then(|row| usize::try_from(row.index()).ok())
+            else {
+                return glib::Propagation::Stop;
+            };
+            if let Some((item_id, _, _)) = rows_for_page.borrow().get(index) {
+                show_collection_chooser(&page_for_page, *item_id);
+            }
+            return glib::Propagation::Stop;
+        }
+
+        // Ctrl+Enter: alternate activation (quick-paste if copy mode, etc.)
+        if ctrl && !shift && key == gdk::Key::Return {
+            if let Some(row) = list_for_page.selected_row() {
+                let index = usize::try_from(row.index()).ok();
+                if let Some(idx) = index {
+                    if let Some((id, _, mime)) = rows_for_page.borrow().get(idx) {
+                        let mode = match state_for_page.borrow().action {
+                            PickerAction::Copy => CopyMode::QuickPaste,
+                            PickerAction::QuickPaste => CopyMode::Copy,
+                        };
+                        on_copy_for_page(ClipboardCopyRequest {
+                            id: *id,
+                            mime: mime.clone(),
+                            mode,
+                        });
+                    }
+                }
+            }
+            return glib::Propagation::Stop;
+        }
+
+        glib::Propagation::Proceed
     });
-    page.add_controller(collection_keys);
+    page.add_controller(page_keys);
 
     // Initial load.
     let entries = load_entries_for(
@@ -306,6 +358,12 @@ pub fn build(
         &entries,
         props.initial_query.is_empty(),
     );
+    // Select the first row if items exist, so GTK selection is authoritative.
+    if !entries.is_empty() {
+        if let Some(row) = list_box.row_at_index(0) {
+            list_box.select_row(Some(&row));
+        }
+    }
     // Set the initial empty-state variant + visibility. The
     // variant follows the same rule as the refresh closure:
     // "no results" when the user has typed something,

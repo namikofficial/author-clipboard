@@ -74,7 +74,9 @@ impl SearchEntry2 {
             debounce_source_for_change.set(Some(source_id));
         });
 
-        // Esc while the search has focus: clear and emit immediately.
+        // Esc while the search has focus: clear text and stop propagation.
+        // When text is already empty, PROCEED so the window controller can
+        // handle blur-search (transfer focus to the list).
         let entry_for_esc = inner.clone();
         let debounce_source_for_esc = debounce_source.clone();
         let on_query_for_esc = on_query.clone();
@@ -90,8 +92,10 @@ impl SearchEntry2 {
                         id.remove();
                     }
                     on_query_for_esc(String::new());
+                    return glib::Propagation::Stop;
                 }
-                return glib::Propagation::Stop;
+                // Text is empty — let the window controller handle blur.
+                return glib::Propagation::Proceed;
             }
             glib::Propagation::Proceed
         });
