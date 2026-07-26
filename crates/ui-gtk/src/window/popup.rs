@@ -67,6 +67,12 @@ fn build_popup(app: &adw::Application, config: &PopupConfig) -> anyhow::Result<(
     if config.layer_shell && gtk4_layer_shell::is_supported() {
         window.init_layer_shell();
         window.set_layer(gtk4_layer_shell::Layer::Overlay);
+        window.set_namespace(Some("author-clipboard-picker"));
+        // Do not reserve an exclusive zone — the popup should not push
+        // other windows out of the way.
+        window.set_exclusive_zone(0);
+        // Anchor to top; Left and Right anchors make it span the
+        // focused monitor width.
         window.set_anchor(gtk4_layer_shell::Edge::Top, true);
         window.set_anchor(gtk4_layer_shell::Edge::Left, true);
         window.set_anchor(gtk4_layer_shell::Edge::Right, true);

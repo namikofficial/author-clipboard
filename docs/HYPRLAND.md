@@ -96,15 +96,21 @@ author-clipboard-ctl picker --action quick-paste
 
 ## First-Party Native Picker
 
-`author-clipboard-hypr-picker` is a standalone GTK4 layer-shell popup:
+`author-clipboard-hypr-picker` is a standalone GTK4 layer-shell popup.
+It uses the Wayland layer-shell protocol by default, so it appears as an
+overlay on the currently focused monitor without tiling or reserving
+screen space. No window rules are needed.
 
 ```bash
-# Open with defaults
+# Open with defaults (layer-shell overlay)
 author-clipboard-hypr-picker
 
 # Specify source
 author-clipboard-hypr-picker --source emoji
 author-clipboard-hypr-picker --source history --count 30
+
+# Force XDG window mode (for debugging on non-layer-shell compositors)
+author-clipboard-hypr-picker --xdg-window
 ```
 
 ### CLI Options
@@ -115,6 +121,7 @@ author-clipboard-hypr-picker --source history --count 30
 | `--count` | 50 | Maximum items |
 | `--include-sensitive` | off | Show sensitive items |
 | `--action` | copy | `copy` or `quick-paste` |
+| `--xdg-window` | off | Force XDG window mode (debugging fallback) |
 
 ### Keyboard Controls
 
@@ -139,12 +146,17 @@ Add to `~/.config/hypr/hyprland.conf`:
 # External menu picker (fast, uses wofi/fuzzel/rofi)
 bind = SUPER, V, exec, author-clipboard-ctl picker --menu auto
 
-# First-party native picker (standalone GTK4 popup)
+# First-party native picker (layer-shell overlay by default)
 bind = SUPER SHIFT, V, exec, author-clipboard-hypr-picker
 
 # COSMIC applet toggle (requires libcosmic runtime)
 bind = SUPER ALT, V, exec, author-clipboard-ctl toggle
 ```
+
+> **No window rules needed.** The native picker uses layer-shell by default,
+> so it does not appear in `hyprctl clients` as a regular window and does not
+> participate in tiling layout. To force XDG window mode for debugging, pass
+> `--xdg-window`.
 
 ### Clipboard History Shortcuts
 

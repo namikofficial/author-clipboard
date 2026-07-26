@@ -32,8 +32,18 @@ struct Args {
     /// Filter chip (all, text, images, files, pinned, starred, sensitive).
     #[arg(short, long, default_value = "all")]
     filter: String,
-    /// Use layer-shell overlay mode instead of a normal resizable window.
+
+    /// Force XDG window mode instead of layer-shell (debugging fallback).
+    ///
+    /// When set, the picker runs as a normal resizable window that can be
+    /// tiled, resized, and moved freely. Useful when layer-shell is causing
+    /// issues or when testing on non-layer-shell compositors.
     #[arg(long)]
+    xdg_window: bool,
+
+    /// Deprecated: layer-shell is now the default. Kept for backward
+    /// compatibility with existing Hyprland keybinds. Ignored.
+    #[arg(long, hide = true)]
     layer_shell: bool,
 }
 
@@ -87,8 +97,9 @@ fn main() -> anyhow::Result<()> {
     tracing::info!(?args, "hypr-picker starting");
 
     let filter = PickerFilter::from_str(&args.filter).unwrap_or(PickerFilter::All);
+    let use_layer_shell = !args.xdg_window;
     let cfg = PopupConfig {
-        layer_shell: args.layer_shell,
+        layer_shell: use_layer_shell,
         source: args.source.into(),
         filter,
         query: args.query,
@@ -98,4 +109,87 @@ fn main() -> anyhow::Result<()> {
     };
 
     ui_gtk::run_popup(cfg)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn default_args_enable_layer_shell() {
+        let args = Args::parse_from(["hypr-picker"]);
+        assert!(!args.xdg_window);
+        let use_layer_shell = !args.xdg_window;
+        assert!(use_layer_shell);
+    }
+
+    #[test]
+    fn xdg_window_flag_disables_layer_shell() {
+        let args = Args::parse_from(["hypr-picker", "--xdg-window"]);
+        assert!(args.xdg_window);
+        let use_layer_shell = !args.xdg_window;
+        assert!(!use_layer_shell);
+    }
+
+    #[test]
+    fn deprecated_layer_shell_flag_is_ignored() {
+        let args = Args::parse_from(["hypr-picker", "--layer-shell"]);
+        // --layer-shell is hidden/deprecated; xdg_window stays false
+        assert!(!args.xdg_window);
+        let use_layer_shell = !args.xdg_window;
+        assert!(use_layer_shell);
+    }
+
+    #[test]
+    fn source_defaults_to_history() {
+        let args = Args::parse_from(["hypr-picker"]);
+        assert_eq!(args.source, SourceArg::History);
+    }
+
+    #[test]
+    fn action_defaults_to_copy() {
+        let args = Args::parse_from(["hypr-picker"]);
+        assert_eq!(args.action, ActionArg::Copy);
+    }
+
+    #[test]
+    fn filter_defaults_to_all() {
+        let args = Args::parse_from(["hypr-picker"]);
+        assert_eq!(args.filter, "all");
+    }
+
+    #[test]
+    fn count_defaults_to_50() {
+        let args = Args::parse_from(["hypr-picker"]);
+        assert_eq!(args.count, 50);
+    }
+
+    #[test]
+    fn popup_config_reflects_xdg_window_flag() {
+        let args = Args::parse_from(["hypr-picker", "--xdg-window"]);
+        let use_layer_shell = !args.xdg_window;
+        let cfg = PopupConfig {
+            layer_shell: use_layer_shell,
+            ..Default::default()
+        };
+        assert!(!cfg.layer_shell);
+    }
+
+    #[test]
+    fn popup_config_layer_shell_by_default() {
+        let args = Args::parse_from(["hypr-picker"]);
+        let use_layer_shell = !args.xdg_window;
+        let cfg = PopupConfig {
+            layer_shell: use_layer_shell,
+            ..Default::default()
+        };
+        assert!(cfg.layer_shell);
+    }
+
+    #[test]
+    fn include_sensitive_defaults_to_false() {
+        let args = Args::parse_from(["hypr-picker"]);
+        assert!(!args.include_sensitive);
+    }
 }

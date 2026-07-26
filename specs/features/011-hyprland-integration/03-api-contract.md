@@ -70,7 +70,14 @@ Options:
   --count <n>         Number of items (default: 50)
   --action <action>   copy, quick-paste (default: copy)
   --include-sensitive  Show sensitive items (masked)
+  --xdg-window        Force XDG window mode instead of layer-shell (debugging)
 ```
+
+Layer-shell is enabled by default. The picker appears as an overlay on the
+currently focused monitor with namespace `author-clipboard-picker`, no
+exclusive zone, and `OnDemand` keyboard focus. No window rules are needed.
+
+Pass `--xdg-window` to force a normal resizable window for debugging.
 
 ---
 

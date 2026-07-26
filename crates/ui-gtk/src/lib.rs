@@ -49,7 +49,7 @@ pub struct PopupConfig {
 impl Default for PopupConfig {
     fn default() -> Self {
         Self {
-            layer_shell: false,
+            layer_shell: true,
             source: PickerSource::History,
             filter: PickerFilter::All,
             query: None,
