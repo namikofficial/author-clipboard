@@ -20,16 +20,16 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use author_clipboard_shared::ipc::{CopyMode, IpcClient, IpcCommand};
-use author_clipboard_shared::picker::{self, PickerEntry, PickerFilter, PickerSource};
+use author_clipboard_shared::picker::{
+    self, PickerAction, PickerEntry, PickerFilter, PickerSource,
+};
 
 use crate::widgets::empty::{EmptyState, EmptyVariant};
 use crate::widgets::filter_bar::{FilterBar, OnChange as OnFilterChange};
 use crate::widgets::item_row::ItemRow;
 use crate::widgets::search::SearchEntry2;
 
-/// Initial-state props for the clipboard page. The page does not know
-/// about `PopupConfig` — the window layer translates the subset the
-/// page needs.
+/// Initial-state props for the clipboard page.
 #[derive(Debug, Clone)]
 pub struct ClipboardPageProps {
     /// Pre-fill text for the search entry.
@@ -38,26 +38,37 @@ pub struct ClipboardPageProps {
     pub initial_filter: PickerFilter,
     /// Maximum items to load (clamped to `>= 1`).
     pub count: usize,
+    /// Which data source to display (history, snippets, emoji, …).
+    pub source: PickerSource,
+    /// Include sensitive items in results.
+    pub include_sensitive: bool,
+    /// Action to perform on Enter (copy or quick-paste).
+    pub action: PickerAction,
 }
 
 impl Default for ClipboardPageProps {
     fn default() -> Self {
+        let shared = author_clipboard_shared::config::PickerConfig::default();
         Self {
             initial_query: String::new(),
             initial_filter: PickerFilter::All,
-            count: 50,
+            count: shared.max_results,
+            source: PickerSource::History,
+            include_sensitive: false,
+            action: PickerAction::Copy,
         }
     }
 }
 
-/// Typed payload the page passes to its `on_copy` callback. The
-/// `&str` is the MIME type of the selected row (already resolved).
+/// Typed payload the page passes to its `on_copy` callback.
 #[derive(Debug, Clone)]
 pub struct ClipboardCopyRequest {
     /// Database id of the row the user activated.
     pub id: i64,
     /// MIME type of the row (e.g. `"text/plain"`, `"image/png"`).
     pub mime: String,
+    /// Copy mode (copy or quick-paste), driven by config/CLI.
+    pub mode: CopyMode,
 }
 
 /// Side-table mapping row index → `(id, ItemRow, mime)`. Kept outside
@@ -145,7 +156,7 @@ pub fn build(
     let empty_for_refresh = empty_state.widget().clone();
     let refresh = move || {
         let s = state_for_refresh.borrow();
-        let entries = load_entries_for(&s.query, s.filter, s.count);
+        let entries = load_entries_for(&s.query, s.filter, s.count, s.source, s.include_sensitive);
         let items = entries.iter().map(entry_to_item).collect();
         crate::app::reduce(
             &mut app_state_for_refresh.borrow_mut(),
@@ -228,18 +239,25 @@ pub fn build(
     // Copy on Enter: find the selected row's item id and call on_copy.
     let item_rows_for_copy = item_rows.clone();
     let app_state_for_copy = app_state.clone();
+    let state_for_copy = state.clone();
     let on_copy = Rc::new(on_copy);
     list_box.connect_row_activated(move |_list, row| {
         let index = usize::try_from(row.index()).ok();
         if let Some(idx) = index {
             if let Some((id, _row, mime)) = item_rows_for_copy.borrow().get(idx) {
+                let action_mode = state_for_copy.borrow().action;
                 crate::app::reduce(
                     &mut app_state_for_copy.borrow_mut(),
                     crate::app::Action::Select(Some(*id)),
                 );
+                let mode = match action_mode {
+                    PickerAction::Copy => CopyMode::Copy,
+                    PickerAction::QuickPaste => CopyMode::QuickPaste,
+                };
                 on_copy(ClipboardCopyRequest {
                     id: *id,
                     mime: mime.clone(),
+                    mode,
                 });
             }
         }
@@ -275,6 +293,8 @@ pub fn build(
         &props.initial_query,
         props.initial_filter,
         props.count.max(1),
+        props.source,
+        props.include_sensitive,
     );
     crate::app::reduce(
         &mut app_state.borrow_mut(),
@@ -407,6 +427,9 @@ struct PageState {
     query: String,
     filter: PickerFilter,
     count: usize,
+    source: PickerSource,
+    include_sensitive: bool,
+    action: PickerAction,
 }
 
 impl PageState {
@@ -415,6 +438,9 @@ impl PageState {
             query: props.initial_query.clone(),
             filter: props.initial_filter,
             count: props.count.max(1),
+            source: props.source,
+            include_sensitive: props.include_sensitive,
+            action: props.action,
         }
     }
 }
@@ -423,18 +449,115 @@ impl PageState {
 ///
 /// The `query` is the current search text; `filter` is the active
 /// filter chip; `count` is the max number of items to return.
-fn load_entries_for(query: &str, filter: PickerFilter, count: usize) -> Vec<PickerEntry> {
+/// `source` controls which data source (history, snippets, emoji, …)
+/// is displayed.
+fn load_entries_for(
+    query: &str,
+    filter: PickerFilter,
+    count: usize,
+    source: PickerSource,
+    include_sensitive: bool,
+) -> Vec<PickerEntry> {
+    match source {
+        PickerSource::Emoji => load_emoji_entries(query, filter),
+        PickerSource::Symbols => load_symbol_entries(query, filter),
+        PickerSource::Kaomoji => load_kaomoji_entries(query, filter),
+        PickerSource::Snippets => load_snippet_entries(query, filter, count),
+        PickerSource::All => load_all_entries(query, filter, count, include_sensitive),
+        PickerSource::History => load_history_entries(query, filter, count, include_sensitive),
+    }
+}
+
+fn load_emoji_entries(query: &str, filter: PickerFilter) -> Vec<PickerEntry> {
+    picker::filter_and_query(&picker::emoji_entries(query), query, filter)
+}
+
+fn load_symbol_entries(query: &str, filter: PickerFilter) -> Vec<PickerEntry> {
+    picker::filter_and_query(&picker::symbol_entries(query), query, filter)
+}
+
+fn load_kaomoji_entries(query: &str, filter: PickerFilter) -> Vec<PickerEntry> {
+    picker::filter_and_query(&picker::kaomoji_entries(query), query, filter)
+}
+
+fn load_snippet_entries(query: &str, filter: PickerFilter, count: usize) -> Vec<PickerEntry> {
+    let response = IpcClient::new().send_command(&IpcCommand::ListSnippets);
+    let entries: Vec<PickerEntry> = match response {
+        Ok(resp) if resp.ok => resp
+            .data
+            .and_then(|d| d.get("snippets").cloned())
+            .and_then(|s| s.as_array().cloned())
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|v| {
+                let id = v.get("id")?.as_i64()?;
+                let name = v.get("name")?.as_str()?.to_string();
+                let content = v.get("content")?.as_str()?.to_string();
+                Some(PickerEntry {
+                    id: Some(id),
+                    source: PickerSource::Snippets,
+                    content_type: Some(author_clipboard_shared::types::ContentType::Text),
+                    title: name,
+                    subtitle: Some("snippet".to_string()),
+                    content,
+                    mime_type: Some("text/plain".to_string()),
+                    sensitive: false,
+                    pinned: false,
+                    starred: false,
+                    timestamp: None,
+                })
+            })
+            .take(count)
+            .collect(),
+        _ => Vec::new(),
+    };
+    if query.is_empty() && filter == PickerFilter::All {
+        return entries;
+    }
+    picker::filter_and_query(&entries, query, filter)
+}
+
+fn load_all_entries(
+    query: &str,
+    filter: PickerFilter,
+    count: usize,
+    include_sensitive: bool,
+) -> Vec<PickerEntry> {
+    let mut all = load_history_entries(query, filter, count, include_sensitive);
+    if all.len() < count {
+        let remaining = count.saturating_sub(all.len());
+        let snippets = load_snippet_entries(query, filter, remaining);
+        all.extend(snippets);
+    }
+    all
+}
+
+fn load_history_entries(
+    query: &str,
+    filter: PickerFilter,
+    count: usize,
+    include_sensitive: bool,
+) -> Vec<PickerEntry> {
+    let filter_opts = if include_sensitive {
+        None
+    } else {
+        Some(author_clipboard_shared::ipc::FilterOptions {
+            sensitive: Some(false),
+            ..Default::default()
+        })
+    };
+
     let command = if query.is_empty() {
         IpcCommand::History {
             limit: count,
             offset: None,
-            filters: None,
+            filters: filter_opts,
         }
     } else {
         IpcCommand::Search {
             query: query.to_string(),
             limit: Some(count),
-            filters: None,
+            filters: filter_opts,
         }
     };
     let response = match IpcClient::new().send_command(&command) {
@@ -456,8 +579,6 @@ fn load_entries_for(query: &str, filter: PickerFilter, count: usize) -> Vec<Pick
         .iter()
         .filter_map(ipc_item_to_entry)
         .collect();
-    // Apply filter + query in one pass via filter_and_query so we don't
-    // double-filter (filter_and_query applies filter first, then query).
     picker::filter_and_query(&entries, query, filter)
 }
 
@@ -620,14 +741,14 @@ fn entry_mime(entry: &PickerEntry) -> String {
 /// Copy an item to the Wayland clipboard via IPC. Returns
 /// `Ok(mime)` on success, `Err(String)` on failure.
 ///
-/// This is the bridge the page uses when the user confirms a copy.
-/// The window layer (popup) calls this and then closes; the
-/// manager layer calls this and shows a toast.
-pub fn copy_via_ipc(id: i64, mime: &str) -> Result<String, String> {
+/// The `mode` parameter controls whether the item is copied or
+/// quick-pasted. The window layer (popup) calls this and then
+/// closes; the manager layer calls this and shows a toast.
+pub fn copy_via_ipc(id: i64, mime: &str, mode: CopyMode) -> Result<String, String> {
     let client = IpcClient::new();
     match client.send_command(&IpcCommand::Copy {
         id,
-        mode: CopyMode::Copy,
+        mode,
         mime: Some(mime.to_string()),
     }) {
         Ok(resp) if resp.ok => Ok(mime.to_string()),
@@ -641,6 +762,156 @@ pub fn copy_via_ipc(id: i64, mime: &str) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── ClipboardPageProps ──────────────────────────────────────────
+
+    #[test]
+    fn clipboard_page_props_default_source_is_history() {
+        let props = ClipboardPageProps::default();
+        assert_eq!(props.source, PickerSource::History);
+    }
+
+    #[test]
+    fn clipboard_page_props_default_action_is_copy() {
+        let props = ClipboardPageProps::default();
+        assert_eq!(props.action, PickerAction::Copy);
+    }
+
+    #[test]
+    fn clipboard_page_props_default_include_sensitive_is_false() {
+        let props = ClipboardPageProps::default();
+        assert!(!props.include_sensitive);
+    }
+
+    #[test]
+    fn clipboard_page_props_default_count_matches_config() {
+        let props = ClipboardPageProps::default();
+        let config = author_clipboard_shared::config::PickerConfig::default();
+        assert_eq!(props.count, config.max_results);
+    }
+
+    #[test]
+    fn clipboard_page_props_default_filter_is_all() {
+        let props = ClipboardPageProps::default();
+        assert_eq!(props.initial_filter, PickerFilter::All);
+    }
+
+    #[test]
+    fn clipboard_page_props_can_set_source_to_snippets() {
+        let props = ClipboardPageProps {
+            source: PickerSource::Snippets,
+            ..Default::default()
+        };
+        assert_eq!(props.source, PickerSource::Snippets);
+    }
+
+    #[test]
+    fn clipboard_page_props_can_set_source_to_emoji() {
+        let props = ClipboardPageProps {
+            source: PickerSource::Emoji,
+            ..Default::default()
+        };
+        assert_eq!(props.source, PickerSource::Emoji);
+    }
+
+    #[test]
+    fn clipboard_page_props_can_set_action_to_quick_paste() {
+        let props = ClipboardPageProps {
+            action: PickerAction::QuickPaste,
+            ..Default::default()
+        };
+        assert_eq!(props.action, PickerAction::QuickPaste);
+    }
+
+    #[test]
+    fn clipboard_page_props_can_set_include_sensitive() {
+        let props = ClipboardPageProps {
+            include_sensitive: true,
+            ..Default::default()
+        };
+        assert!(props.include_sensitive);
+    }
+
+    #[test]
+    fn clipboard_page_props_can_set_initial_query() {
+        let props = ClipboardPageProps {
+            initial_query: "test search".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(props.initial_query, "test search");
+    }
+
+    #[test]
+    fn clipboard_page_props_can_set_initial_filter_pinned() {
+        let props = ClipboardPageProps {
+            initial_filter: PickerFilter::Pinned,
+            ..Default::default()
+        };
+        assert_eq!(props.initial_filter, PickerFilter::Pinned);
+    }
+
+    // ── PageState from Props ────────────────────────────────────────
+
+    #[test]
+    fn page_state_from_props_inherits_all_fields() {
+        let props = ClipboardPageProps {
+            initial_query: "find me".to_string(),
+            initial_filter: PickerFilter::Pinned,
+            count: 25,
+            source: PickerSource::Snippets,
+            include_sensitive: true,
+            action: PickerAction::QuickPaste,
+        };
+        let state = PageState::from_props(&props);
+        assert_eq!(state.query, "find me");
+        assert_eq!(state.filter, PickerFilter::Pinned);
+        assert_eq!(state.count, 25);
+        assert_eq!(state.source, PickerSource::Snippets);
+        assert!(state.include_sensitive);
+        assert_eq!(state.action, PickerAction::QuickPaste);
+    }
+
+    #[test]
+    fn page_state_from_props_clamps_count_to_at_least_one() {
+        let props = ClipboardPageProps {
+            count: 0,
+            ..Default::default()
+        };
+        let state = PageState::from_props(&props);
+        assert_eq!(state.count, 1);
+    }
+
+    #[test]
+    fn page_state_source_default_is_history() {
+        let state = PageState::from_props(&ClipboardPageProps::default());
+        assert_eq!(state.source, PickerSource::History);
+    }
+
+    // ── ClipboardCopyRequest ────────────────────────────────────────
+
+    #[test]
+    fn clipboard_copy_request_holds_mode() {
+        let req = ClipboardCopyRequest {
+            id: 42,
+            mime: "text/plain".to_string(),
+            mode: CopyMode::QuickPaste,
+        };
+        assert_eq!(req.id, 42);
+        assert_eq!(req.mime, "text/plain");
+        assert_eq!(req.mode, CopyMode::QuickPaste);
+    }
+
+    #[test]
+    fn clipboard_copy_request_copy_mode() {
+        let req = ClipboardCopyRequest {
+            id: 7,
+            mime: "image/png".to_string(),
+            mode: CopyMode::Copy,
+        };
+        assert_eq!(req.mode, CopyMode::Copy);
+    }
+
+    // ── entry_to_item ───────────────────────────────────────────────
 
     #[test]
     fn entry_to_item_preserves_sensitive() {

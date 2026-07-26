@@ -61,10 +61,38 @@ impl Default for PopupConfig {
 }
 
 /// Configuration passed to [`run_manager`].
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ManagerConfig {
-    /// Optional deep-link to a specific page.
-    pub initial_page: Option<PickerSource>,
+    /// Optional deep-link to a specific page by `PageId` name.
+    /// Supports all page IDs: clipboard, home, collections, emoji,
+    /// symbols, kaomoji, snippets, settings.
+    pub initial_page: Option<crate::app::PageId>,
+    /// Initial source for the clipboard/history page.
+    pub clipboard_source: PickerSource,
+    /// Initial filter chip for the clipboard/history page.
+    pub clipboard_filter: PickerFilter,
+    /// Pre-fill search query for the clipboard/history page.
+    pub clipboard_query: Option<String>,
+    /// Action on Enter for the clipboard/history page.
+    pub clipboard_action: PickerAction,
+    /// Maximum items to load on the clipboard/history page.
+    pub clipboard_count: usize,
+    /// Include sensitive items on the clipboard/history page.
+    pub clipboard_include_sensitive: bool,
+}
+
+impl Default for ManagerConfig {
+    fn default() -> Self {
+        Self {
+            initial_page: None,
+            clipboard_source: PickerSource::History,
+            clipboard_filter: PickerFilter::All,
+            clipboard_query: None,
+            clipboard_action: PickerAction::Copy,
+            clipboard_count: 50,
+            clipboard_include_sensitive: false,
+        }
+    }
 }
 
 /// Run the GTK4 layer-shell popup. Blocks until the popup closes.

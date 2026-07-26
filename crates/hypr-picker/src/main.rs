@@ -115,6 +115,7 @@ fn main() -> anyhow::Result<()> {
 mod tests {
     use super::*;
     use clap::Parser;
+    use std::str::FromStr;
 
     #[test]
     fn default_args_enable_layer_shell() {
@@ -191,5 +192,148 @@ mod tests {
     fn include_sensitive_defaults_to_false() {
         let args = Args::parse_from(["hypr-picker"]);
         assert!(!args.include_sensitive);
+    }
+
+    #[test]
+    fn include_sensitive_flag_works() {
+        let args = Args::parse_from(["hypr-picker", "--include-sensitive"]);
+        assert!(args.include_sensitive);
+    }
+
+    #[test]
+    fn query_defaults_to_none() {
+        let args = Args::parse_from(["hypr-picker"]);
+        assert!(args.query.is_none());
+    }
+
+    #[test]
+    fn query_parses() {
+        let args = Args::parse_from(["hypr-picker", "--query", "search term"]);
+        assert_eq!(args.query.as_deref(), Some("search term"));
+    }
+
+    #[test]
+    fn action_can_be_quick_paste() {
+        let args = Args::parse_from(["hypr-picker", "--action", "quick-paste"]);
+        assert_eq!(args.action, ActionArg::QuickPaste);
+    }
+
+    #[test]
+    fn action_can_be_copy() {
+        let args = Args::parse_from(["hypr-picker", "--action", "copy"]);
+        assert_eq!(args.action, ActionArg::Copy);
+    }
+
+    #[test]
+    fn source_snippets_parses() {
+        let args = Args::parse_from(["hypr-picker", "--source", "snippets"]);
+        assert_eq!(args.source, SourceArg::Snippets);
+    }
+
+    #[test]
+    fn source_emoji_parses() {
+        let args = Args::parse_from(["hypr-picker", "--source", "emoji"]);
+        assert_eq!(args.source, SourceArg::Emoji);
+    }
+
+    #[test]
+    fn popup_config_reflects_source() {
+        let args = Args::parse_from(["hypr-picker", "--source", "emoji"]);
+        let filter = PickerFilter::from_str(&args.filter).unwrap_or(PickerFilter::All);
+        let cfg = PopupConfig {
+            layer_shell: !args.xdg_window,
+            source: args.source.into(),
+            filter,
+            query: args.query,
+            action: args.action.into(),
+            count: args.count,
+            include_sensitive: args.include_sensitive,
+        };
+        assert_eq!(cfg.source, PickerSource::Emoji);
+        assert_eq!(cfg.action, PickerAction::Copy);
+        assert!(!cfg.include_sensitive);
+    }
+
+    #[test]
+    fn popup_config_reflects_action() {
+        let args = Args::parse_from(["hypr-picker", "--action", "quick-paste"]);
+        let filter = PickerFilter::from_str(&args.filter).unwrap_or(PickerFilter::All);
+        let cfg = PopupConfig {
+            layer_shell: !args.xdg_window,
+            source: args.source.into(),
+            filter,
+            query: args.query,
+            action: args.action.into(),
+            count: args.count,
+            include_sensitive: args.include_sensitive,
+        };
+        assert_eq!(cfg.action, PickerAction::QuickPaste);
+    }
+
+    #[test]
+    fn popup_config_reflects_include_sensitive() {
+        let args = Args::parse_from(["hypr-picker", "--include-sensitive"]);
+        let filter = PickerFilter::from_str(&args.filter).unwrap_or(PickerFilter::All);
+        let cfg = PopupConfig {
+            layer_shell: !args.xdg_window,
+            source: args.source.into(),
+            filter,
+            query: args.query,
+            action: args.action.into(),
+            count: args.count,
+            include_sensitive: args.include_sensitive,
+        };
+        assert!(cfg.include_sensitive);
+    }
+
+    #[test]
+    fn popup_config_reflects_query() {
+        let args = Args::parse_from(["hypr-picker", "--query", "test"]);
+        let filter = PickerFilter::from_str(&args.filter).unwrap_or(PickerFilter::All);
+        let cfg = PopupConfig {
+            layer_shell: !args.xdg_window,
+            source: args.source.into(),
+            filter,
+            query: args.query,
+            action: args.action.into(),
+            count: args.count,
+            include_sensitive: args.include_sensitive,
+        };
+        assert_eq!(cfg.query.as_deref(), Some("test"));
+    }
+
+    #[test]
+    fn source_arg_roundtrip() {
+        for src in [
+            SourceArg::History,
+            SourceArg::Snippets,
+            SourceArg::Emoji,
+            SourceArg::Symbols,
+            SourceArg::Kaomoji,
+            SourceArg::All,
+        ] {
+            let picker: PickerSource = src.into();
+            assert!(matches!(
+                (&src, picker),
+                (SourceArg::History, PickerSource::History)
+                    | (SourceArg::Snippets, PickerSource::Snippets)
+                    | (SourceArg::Emoji, PickerSource::Emoji)
+                    | (SourceArg::Symbols, PickerSource::Symbols)
+                    | (SourceArg::Kaomoji, PickerSource::Kaomoji)
+                    | (SourceArg::All, PickerSource::All)
+            ));
+        }
+    }
+
+    #[test]
+    fn action_arg_roundtrip() {
+        for act in [ActionArg::Copy, ActionArg::QuickPaste] {
+            let picker: PickerAction = act.into();
+            assert!(matches!(
+                (act, picker),
+                (ActionArg::Copy, PickerAction::Copy)
+                    | (ActionArg::QuickPaste, PickerAction::QuickPaste)
+            ));
+        }
     }
 }

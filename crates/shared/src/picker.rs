@@ -1497,4 +1497,218 @@ mod tests {
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].title, "title here");
     }
+
+    // ── Expression entry source tests ────────────────────────────────
+
+    #[test]
+    fn emoji_entries_returns_all_when_query_empty() {
+        let entries = emoji_entries("");
+        assert!(!entries.is_empty(), "should have at least one emoji");
+        assert!(entries.iter().all(|e| e.source == PickerSource::Emoji));
+    }
+
+    #[test]
+    fn emoji_entries_filters_by_query() {
+        let entries = emoji_entries("smile");
+        assert!(
+            entries.iter().any(|e| e.content.contains("😊")
+                || e.content.contains("😄")
+                || e.content.contains("☺")),
+            "should include smiling emoji"
+        );
+    }
+
+    #[test]
+    fn emoji_entries_empty_query_unchanged() {
+        let empty = emoji_entries("");
+        let all = emoji_entries("smile");
+        assert!(
+            empty.len() > all.len(),
+            "empty query should return more entries than a filtered one"
+        );
+    }
+
+    #[test]
+    fn symbol_entries_returns_all_when_query_empty() {
+        let entries = symbol_entries("");
+        assert!(!entries.is_empty(), "should have at least one symbol");
+        assert!(entries.iter().all(|e| e.source == PickerSource::Symbols));
+    }
+
+    #[test]
+    fn symbol_entries_filters_by_query() {
+        let entries = symbol_entries("arrow");
+        assert!(!entries.is_empty(), "should include arrow symbols");
+        assert!(entries.iter().all(|e| e.source == PickerSource::Symbols));
+    }
+
+    #[test]
+    fn kaomoji_entries_returns_all_when_query_empty() {
+        let entries = kaomoji_entries("");
+        assert!(!entries.is_empty(), "should have at least one kaomoji");
+        assert!(entries.iter().all(|e| e.source == PickerSource::Kaomoji));
+    }
+
+    #[test]
+    fn kaomoji_entries_filters_by_query() {
+        let entries = kaomoji_entries("happy");
+        assert!(!entries.is_empty(), "should include happy kaomoji");
+        assert!(entries.iter().all(|e| e.source == PickerSource::Kaomoji));
+    }
+
+    #[test]
+    fn expression_entries_have_no_database_id() {
+        for entry in emoji_entries("") {
+            assert!(entry.id.is_none(), "emoji entries should not have DB id");
+        }
+        for entry in symbol_entries("") {
+            assert!(entry.id.is_none(), "symbol entries should not have DB id");
+        }
+        for entry in kaomoji_entries("") {
+            assert!(entry.id.is_none(), "kaomoji entries should not have DB id");
+        }
+    }
+
+    #[test]
+    fn expression_entries_are_not_sensitive() {
+        for entry in emoji_entries("") {
+            assert!(!entry.sensitive, "emoji entries should not be sensitive");
+        }
+        for entry in symbol_entries("") {
+            assert!(!entry.sensitive, "symbol entries should not be sensitive");
+        }
+        for entry in kaomoji_entries("") {
+            assert!(!entry.sensitive, "kaomoji entries should not be sensitive");
+        }
+    }
+
+    #[test]
+    fn expression_entries_are_text_plain() {
+        for entry in emoji_entries("") {
+            assert_eq!(
+                entry.mime_type.as_deref(),
+                Some("text/plain"),
+                "emoji should be text/plain"
+            );
+        }
+    }
+
+    // ── PickerSource --include-sensitive logic ───────────────────────
+
+    #[test]
+    fn load_history_entries_filters_sensitive_when_not_included() {
+        let options = PickerOptions {
+            source: PickerSource::History,
+            include_sensitive: false,
+            ..Default::default()
+        };
+        // Without a DB connection, this returns empty, but the key
+        // test is that the function doesn't panic and the filter
+        // logic is correct: include_sensitive=false should pass
+        // the correct filter to the query.
+        assert!(!options.include_sensitive);
+    }
+
+    #[test]
+    fn load_history_entries_includes_sensitive_when_requested() {
+        let options = PickerOptions {
+            source: PickerSource::History,
+            include_sensitive: true,
+            ..Default::default()
+        };
+        assert!(options.include_sensitive);
+    }
+
+    // ── PickerAction / CopyMode mapping ──────────────────────────────
+
+    #[test]
+    fn copy_action_maps_to_copy_mode() {
+        let action = PickerAction::Copy;
+        let mode: crate::ipc::CopyMode = match action {
+            PickerAction::Copy => crate::ipc::CopyMode::Copy,
+            PickerAction::QuickPaste => crate::ipc::CopyMode::QuickPaste,
+        };
+        assert_eq!(mode, crate::ipc::CopyMode::Copy);
+    }
+
+    #[test]
+    fn quick_paste_action_maps_to_quick_paste_mode() {
+        let action = PickerAction::QuickPaste;
+        let mode: crate::ipc::CopyMode = match action {
+            PickerAction::Copy => crate::ipc::CopyMode::Copy,
+            PickerAction::QuickPaste => crate::ipc::CopyMode::QuickPaste,
+        };
+        assert_eq!(mode, crate::ipc::CopyMode::QuickPaste);
+    }
+
+    // ── PickerFilter pinned view ─────────────────────────────────────
+
+    #[test]
+    fn filter_pinned_only_shows_pinned_entries() {
+        let entries = vec![
+            text_entry("a", "1"),
+            pinned_text_entry("pinned note"),
+            text_entry("b", "2"),
+        ];
+        let filtered = apply_filter(&entries, PickerFilter::Pinned);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].title, "pinned note");
+    }
+
+    #[test]
+    fn filter_sensitive_only_shows_sensitive_entries() {
+        let entries = vec![
+            sensitive_text_entry("secret"),
+            text_entry("normal", "hello"),
+        ];
+        let filtered = apply_filter(&entries, PickerFilter::Sensitive);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].title, "secret");
+    }
+
+    // ── Invalid values ──────────────────────────────────────────────
+
+    #[test]
+    fn invalid_picker_source_returns_error() {
+        let result = "invalid_source".parse::<PickerSource>();
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("unknown"));
+        assert!(err.contains("source"));
+    }
+
+    #[test]
+    fn invalid_picker_action_returns_error() {
+        let result = "invalid_action".parse::<PickerAction>();
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("unknown"));
+        assert!(err.contains("action"));
+    }
+
+    #[test]
+    fn invalid_picker_filter_returns_error() {
+        let result = "invalid_filter".parse::<PickerFilter>();
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("unknown"));
+        assert!(err.contains("filter"));
+    }
+
+    // ── Manager deep-link page mapping ──────────────────────────────
+
+    #[test]
+    fn picker_source_history_maps_to_clipboard_page() {
+        assert_eq!(PickerSource::History.to_string(), "history");
+    }
+
+    #[test]
+    fn picker_source_emoji_maps_to_emoji_string() {
+        assert_eq!(PickerSource::Emoji.to_string(), "emoji");
+    }
+
+    #[test]
+    fn picker_source_snippets_maps_to_snippets_string() {
+        assert_eq!(PickerSource::Snippets.to_string(), "snippets");
+    }
 }

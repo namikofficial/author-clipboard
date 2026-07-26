@@ -89,20 +89,25 @@ fn build_popup(app: &adw::Application, config: &PopupConfig) -> anyhow::Result<(
         }));
 
     // ── Real clipboard page (data via IPC) ────────────────────
+    let shared_config = author_clipboard_shared::config::Config::load();
+    let close_after = shared_config.picker.close_after_copy;
     let props = crate::pages::clipboard::ClipboardPageProps {
         initial_query: config.query.clone().unwrap_or_default(),
         initial_filter: config.filter,
         count: config.count,
+        source: config.source,
+        include_sensitive: config.include_sensitive,
+        action: config.action,
     };
     let window_for_copy = window.clone();
     let page = crate::pages::clipboard::build(&props, &state, move |req| {
-        tracing::info!(id = req.id, mime = %req.mime, "popup copy");
-        if let Err(e) = crate::pages::clipboard::copy_via_ipc(req.id, &req.mime) {
+        tracing::info!(id = req.id, mime = %req.mime, mode = ?req.mode, "popup action");
+        if let Err(e) = crate::pages::clipboard::copy_via_ipc(req.id, &req.mime, req.mode) {
             tracing::warn!(?e, "popup copy failed");
         }
-        // US-001: close after a successful copy (or failure — we'd rather
-        // lose the popup than keep it open if the user pressed Enter).
-        window_for_copy.close();
+        if close_after {
+            window_for_copy.close();
+        }
     });
 
     // ── Status hint ───────────────────────────────────────────

@@ -21,7 +21,7 @@ pub fn run(config: ManagerConfig) -> anyhow::Result<()> {
         .build();
 
     app.connect_activate(move |app| {
-        if let Err(e) = build_manager_window(app) {
+        if let Err(e) = build_manager_window(app, &config) {
             tracing::error!(?e, "failed to build manager");
             app.quit();
         }
@@ -37,7 +37,7 @@ pub fn run(config: ManagerConfig) -> anyhow::Result<()> {
     clippy::too_many_lines,
     clippy::items_after_statements
 )]
-fn build_manager_window(app: &adw::Application) -> anyhow::Result<()> {
+fn build_manager_window(app: &adw::Application, config: &ManagerConfig) -> anyhow::Result<()> {
     let settings = Settings::new();
     let (default_w, default_h) = settings.as_ref().map_or((1100, 720), Settings::window_size);
 
@@ -62,7 +62,14 @@ fn build_manager_window(app: &adw::Application) -> anyhow::Result<()> {
 
     // ── Content pages (built once, cached) ────────────────────
     let shared_config = author_clipboard_shared::config::Config::load();
-    let clipboard_props = crate::pages::clipboard::ClipboardPageProps::default();
+    let clipboard_props = crate::pages::clipboard::ClipboardPageProps {
+        initial_query: config.clipboard_query.clone().unwrap_or_default(),
+        initial_filter: config.clipboard_filter,
+        count: config.clipboard_count.max(1),
+        source: config.clipboard_source,
+        include_sensitive: config.clipboard_include_sensitive,
+        action: config.clipboard_action,
+    };
 
     // Clipboard page uses a Paned: list on left, preview on right.
     let clipboard_paned = gtk4::Paned::builder()
@@ -85,8 +92,8 @@ fn build_manager_window(app: &adw::Application) -> anyhow::Result<()> {
 
     let clipboard_page_content =
         crate::pages::clipboard::build(&clipboard_props, &state, move |req| {
-            tracing::info!(id = req.id, mime = %req.mime, "manager copy");
-            if let Err(e) = crate::pages::clipboard::copy_via_ipc(req.id, &req.mime) {
+            tracing::info!(id = req.id, mime = %req.mime, mode = ?req.mode, "manager copy");
+            if let Err(e) = crate::pages::clipboard::copy_via_ipc(req.id, &req.mime, req.mode) {
                 tracing::warn!(?e, "manager copy failed");
             }
         });
@@ -191,8 +198,23 @@ fn build_manager_window(app: &adw::Application) -> anyhow::Result<()> {
         stack.add_child(widget);
     }
 
-    // Show first page.
-    if let Some((_, first_widget)) = page_widgets.first() {
+    // Select initial page: CLI deep-link wins, then GSettings, then first.
+    let default_page = config
+        .initial_page
+        .or_else(|| settings.as_ref().map(crate::settings::Settings::last_page))
+        .unwrap_or(PageId::Clipboard);
+
+    if let Some(idx) = page_widgets
+        .iter()
+        .position(|(pid, _)| pid == &default_page)
+    {
+        if let Some((_, widget)) = page_widgets.get(idx) {
+            stack.set_visible_child(widget);
+        }
+        if let Some(row) = sidebar_list.row_at_index(i32::try_from(idx).unwrap_or(0)) {
+            sidebar_list.select_row(Some(&row));
+        }
+    } else if let Some((_, first_widget)) = page_widgets.first() {
         stack.set_visible_child(first_widget);
     }
 
@@ -238,16 +260,6 @@ fn build_manager_window(app: &adw::Application) -> anyhow::Result<()> {
             }
         }
     });
-
-    // Select initial page from GSettings.
-    if let Some(ref settings) = settings {
-        let last_page = settings.last_page();
-        if let Some(idx) = page_widgets.iter().position(|(pid, _)| pid == &last_page) {
-            if let Some(row) = sidebar_list.row_at_index(i32::try_from(idx).unwrap_or(0)) {
-                sidebar_list.select_row(Some(&row));
-            }
-        }
-    }
 
     // ── Status bar ────────────────────────────────────────────
     let status_label = gtk4::Label::new(Some("● Daemon"));

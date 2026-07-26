@@ -210,6 +210,7 @@ name = "author-clipboard-applet"
 version = "0.6.0"
 dependencies = [
  "anyhow",
+ "author-clipboard-shared",
  "author-clipboard-ui-gtk",
  "clap",
  "tokio",
