@@ -8,8 +8,10 @@
 //! Bug fixes baked in:
 //!
 //! * US-001 — Esc always closes the popup, even when the search
-//!   input has focus. The Esc controller runs in `Capture` phase so
-//!   it wins over the widget's built-in handler.
+//!   input has focus. The global Esc controller runs in `Bubble`
+//!   phase and is notified before widget defaults. Text inputs
+//!   are handled via `FocusTarget::TextInput` resolution so that
+//!   in-field Esc clears/leaves the field first.
 //! * US-002 — Popup opens with the **list** focused, not the search
 //!   input. `/` focuses the search; `Esc` clears it.
 //! * US-003 — The manager window is a real `AdwApplicationWindow`
@@ -22,6 +24,7 @@ pub mod app;
 pub mod controller;
 pub mod model;
 pub mod pages;
+pub mod service;
 pub mod settings;
 pub mod theme;
 pub mod widgets;

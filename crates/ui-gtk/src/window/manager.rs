@@ -90,12 +90,25 @@ fn build_manager_window(app: &adw::Application, config: &ManagerConfig) -> anyho
         }),
     );
 
+    let service: std::sync::Arc<dyn crate::service::ClipboardService> =
+        std::sync::Arc::new(crate::service::ServiceHandle::new());
+    let service_for_copy = service.clone();
     let clipboard_page_content =
-        crate::pages::clipboard::build(&clipboard_props, &state, move |req| {
+        crate::pages::clipboard::build(&clipboard_props, &state, service.clone(), move |req| {
             tracing::info!(id = req.id, mime = %req.mime, mode = ?req.mode, "manager copy");
-            if let Err(e) = crate::pages::clipboard::copy_via_ipc(req.id, &req.mime, req.mode) {
-                tracing::warn!(?e, "manager copy failed");
-            }
+            let service = service_for_copy.clone();
+            glib::MainContext::default().spawn_local(async move {
+                if let Err(error) = service
+                    .copy(crate::service::CopyRequest {
+                        id: req.id,
+                        mode: req.mode,
+                        mime: Some(req.mime),
+                    })
+                    .await
+                {
+                    tracing::warn!(%error, "manager copy failed");
+                }
+            });
         });
 
     clipboard_paned.set_start_child(Some(&clipboard_page_content));
@@ -161,14 +174,20 @@ fn build_manager_window(app: &adw::Application, config: &ManagerConfig) -> anyho
         sidebar_list.append(&row);
 
         let content_widget: gtk4::Widget = match page_id {
-            PageId::Home => crate::pages::home::build(&shared_config).upcast(),
+            PageId::Home => crate::pages::home::build(&shared_config, service.clone()).upcast(),
             PageId::Clipboard => clipboard_paned.clone().upcast(),
-            PageId::Collections => crate::pages::collections::build(&shared_config).upcast(),
+            PageId::Collections => {
+                crate::pages::collections::build(&shared_config, service.clone()).upcast()
+            }
             PageId::Emoji => crate::pages::emoji::build().upcast(),
             PageId::Symbols => crate::pages::symbols::build().upcast(),
             PageId::Kaomoji => crate::pages::kaomoji::build().upcast(),
-            PageId::Snippets => crate::pages::snippets::build(&shared_config).upcast(),
-            PageId::Settings => crate::pages::settings::build(&shared_config).upcast(),
+            PageId::Snippets => {
+                crate::pages::snippets::build(&shared_config, service.clone()).upcast()
+            }
+            PageId::Settings => {
+                crate::pages::settings::build(&shared_config, service.clone()).upcast()
+            }
         };
 
         let page_widget = if matches!(page_id, PageId::Clipboard | PageId::Settings) {
@@ -331,6 +350,7 @@ fn build_manager_window(app: &adw::Application, config: &ManagerConfig) -> anyho
         let content_widget: gtk4::Widget = content_vbox.upcast();
         let search = find_search_entry(&content_widget);
         let list = find_list_box(&content_widget);
+        let page_keys = crate::controller::install_page_keys(&state, &tx);
         crate::controller::key::install(
             &window,
             &state,
@@ -338,15 +358,90 @@ fn build_manager_window(app: &adw::Application, config: &ManagerConfig) -> anyho
             None::<Box<dyn Fn()>>, // no close-window in manager
             search.as_ref(),
             list.as_ref(),
+            Some(page_keys),
         );
     }
 
     // Handle effects from the channel on the GTK thread.
     let toast_overlay_for_rx = toast_overlay.clone();
+    let service_for_effects = service.clone();
     glib::idle_add_local(move || {
         while let Ok(eff) = rx.try_recv() {
-            if let Effect::AddToast(ref msg) = eff {
-                toast_overlay_for_rx.add_toast(adw::Toast::new(msg));
+            match eff {
+                Effect::AddToast(msg) => {
+                    toast_overlay_for_rx.add_toast(adw::Toast::new(&msg));
+                }
+                Effect::CopyItem { id, mode, mime } => {
+                    let srv = service_for_effects.clone();
+                    glib::MainContext::default().spawn_local(async move {
+                        let _ = srv.copy(crate::service::CopyRequest { id, mode, mime }).await;
+                    });
+                }
+                Effect::QuickPasteItem { id, mime } => {
+                    let srv = service_for_effects.clone();
+                    glib::MainContext::default().spawn_local(async move {
+                        let _ = srv.copy(crate::service::CopyRequest {
+                            id,
+                            mode: author_clipboard_shared::ipc::CopyMode::QuickPaste,
+                            mime,
+                        }).await;
+                    });
+                }
+                Effect::CopyPlainText(id) => {
+                    let srv = service_for_effects.clone();
+                    glib::MainContext::default().spawn_local(async move {
+                        let _ = srv.copy(crate::service::CopyRequest {
+                            id,
+                            mode: author_clipboard_shared::ipc::CopyMode::CopyPlainText,
+                            mime: None,
+                        }).await;
+                    });
+                }
+                Effect::PinItem(id) => {
+                    let srv = service_for_effects.clone();
+                    glib::MainContext::default().spawn_local(async move {
+                        let _ = srv.update_item(author_clipboard_shared::ipc::IpcCommand::Pin { id }).await;
+                    });
+                }
+                Effect::UnpinItem(id) => {
+                    let srv = service_for_effects.clone();
+                    glib::MainContext::default().spawn_local(async move {
+                        let _ = srv.update_item(author_clipboard_shared::ipc::IpcCommand::Unpin { id }).await;
+                    });
+                }
+                Effect::StarItem(id) => {
+                    let srv = service_for_effects.clone();
+                    glib::MainContext::default().spawn_local(async move {
+                        let _ = srv.update_item(author_clipboard_shared::ipc::IpcCommand::ToggleStar { id }).await;
+                    });
+                }
+                Effect::UnstarItem(id) => {
+                    let srv = service_for_effects.clone();
+                    glib::MainContext::default().spawn_local(async move {
+                        let _ = srv.update_item(author_clipboard_shared::ipc::IpcCommand::ToggleStar { id }).await;
+                    });
+                }
+                Effect::DeleteItem(id) => {
+                    let srv = service_for_effects.clone();
+                    glib::MainContext::default().spawn_local(async move {
+                        let _ = srv.update_item(author_clipboard_shared::ipc::IpcCommand::Delete { id }).await;
+                    });
+                }
+                Effect::ClearUnpinned => {
+                    let srv = service_for_effects.clone();
+                    glib::MainContext::default().spawn_local(async move {
+                        let _ = srv.update_item(author_clipboard_shared::ipc::IpcCommand::ClearUnpinned).await;
+                    });
+                }
+                Effect::RefreshItems => {
+                    // Handled by the page's fetch cycle.
+                }
+                Effect::RefreshSnippets => {}
+                Effect::TransformContent(_)
+                | Effect::CreateSnippet(_)
+                | Effect::ShowCollectionChooser(_)
+                | Effect::HideRedacted => {}
+                Effect::PersistGSettings | Effect::PersistConfig | Effect::Quit => {}
             }
         }
         glib::ControlFlow::Continue

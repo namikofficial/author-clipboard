@@ -1,6 +1,6 @@
 //! Selected-result command rail for the popup.
 
-use gtk4::{glib, prelude::*};
+use gtk4::prelude::*;
 
 use crate::app::{selected_command_available, AppState, SelectedItemCommand};
 
@@ -45,23 +45,37 @@ pub fn command_for(action: RailAction) -> SelectedItemCommand {
     }
 }
 
-/// Build a compact, keyboard-labelled command rail.
+/// A constructed action rail with a refresh handle for reactive updates.
+pub struct ActionRail {
+    /// The GTK box widget.
+    pub widget: gtk4::Box,
+    /// Call to re-evaluate button sensitivity from current state.
+    /// Wrapped in `Rc` so multiple GTK signal handlers can share it.
+    pub refresh: std::rc::Rc<dyn Fn()>,
+}
+
+/// Build a compact, keyboard-labelled command rail without state tracking.
 pub fn build(on_action: impl Fn(RailAction) + 'static) -> gtk4::Box {
-    build_internal(None, on_action)
+    build_with_state_inner(std::rc::Rc::new(std::cell::RefCell::new(AppState::default())), on_action, false).widget
 }
 
 /// Build a rail whose controls track the authoritative selected item.
+///
+/// Returns an `ActionRail` whose `refresh` method must be called when state
+/// changes that affect button sensitivity (selection, pin/star toggles,
+/// item content changes). Replaces the old 100ms polling approach.
 pub fn build_with_state(
     state: std::rc::Rc<std::cell::RefCell<AppState>>,
     on_action: impl Fn(RailAction) + 'static,
-) -> gtk4::Box {
-    build_internal(Some(state), on_action)
+) -> ActionRail {
+    build_with_state_inner(state, on_action, true)
 }
 
-fn build_internal(
-    state: Option<std::rc::Rc<std::cell::RefCell<AppState>>>,
+fn build_with_state_inner(
+    state: std::rc::Rc<std::cell::RefCell<AppState>>,
     on_action: impl Fn(RailAction) + 'static,
-) -> gtk4::Box {
+    track_state: bool,
+) -> ActionRail {
     let rail = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
     rail.add_css_class("popup-action-rail");
     rail.set_accessible_role(gtk4::AccessibleRole::Toolbar);
@@ -99,26 +113,18 @@ fn build_internal(
         rail.append(&button);
         buttons.borrow_mut().push((action, button));
     }
-    if let Some(state) = state {
-        let refresh = {
-            let buttons = buttons.clone();
-            let state = state.clone();
-            move || {
-                let state = state.borrow();
-                for (action, button) in buttons.borrow().iter() {
-                    button.set_sensitive(selected_command_available(&state, command_for(*action)));
-                }
+    let refresh: std::rc::Rc<dyn Fn()> = if track_state {
+        let buttons = buttons.clone();
+        let state = state.clone();
+        std::rc::Rc::new(move || {
+            let s = state.borrow();
+            for (action, button) in buttons.borrow().iter() {
+                button.set_sensitive(selected_command_available(&s, command_for(*action)));
             }
-        };
-        refresh();
-        let rail_weak = rail.downgrade();
-        glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
-            if rail_weak.upgrade().is_none() {
-                return glib::ControlFlow::Break;
-            }
-            refresh();
-            glib::ControlFlow::Continue
-        });
-    }
-    rail
+        })
+    } else {
+        std::rc::Rc::new(|| {})
+    };
+    refresh();
+    ActionRail { widget: rail, refresh }
 }

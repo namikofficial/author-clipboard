@@ -103,6 +103,9 @@ pub enum FocusTarget {
     Search,
     /// A modal dialog (shortcuts overlay, error) has focus.
     Modal,
+    /// A text input widget (e.g. editing a snippet name) has focus.
+    /// Esc should proceed (let the widget handle it), not close.
+    TextInput,
     /// No widget has focus (e.g. before the window is mapped).
     None,
 }
@@ -332,6 +335,20 @@ pub enum Action {
     WindowResized(i32, i32),
     /// User navigated to a page via Ctrl+Tab.
     WindowPageChanged(PageId),
+    // ── PR 4/5 unified action variants ──────────────────────────────
+    /// Delete the currently selected item (like `Delete` but from
+    /// the selected_id, not an explicit ID).
+    DeleteSelected,
+    /// Request copy as plain text for the selected item.
+    CopyPlainTextRequested,
+    /// Request a content-aware transformation.
+    TransformRequested,
+    /// Open the collection chooser for the selected item.
+    AddToCollectionRequested,
+    /// Create a snippet from the selected item.
+    CreateSnippetRequested,
+    /// Quick-select the nth visible item (Ctrl+1..9).
+    QuickPickItem(usize),
 }
 
 /// Side-effects emitted by [`reduce`].
@@ -373,6 +390,15 @@ pub enum Effect {
     Quit,
     /// Hide redacted content.
     HideRedacted,
+    // ── PR 4/5 unified effect variants ──────────────────────────────
+    /// Copy the selected item as plain text.
+    CopyPlainText(i64),
+    /// Transform and copy the selected item.
+    TransformContent(i64),
+    /// Open the collection chooser dialog.
+    ShowCollectionChooser(i64),
+    /// Create a snippet from the selected item.
+    CreateSnippet(i64),
 }
 
 impl AppState {
@@ -697,6 +723,50 @@ pub fn reduce(state: &mut AppState, action: Action) -> Vec<Effect> {
 
         Action::WindowPageChanged(p) => {
             state.active_page = p;
+            vec![]
+        }
+
+        // ── PR 4/5 unified action arms ──────────────────────────────
+
+        Action::DeleteSelected => state
+            .selected_id
+            .map_or_else(Vec::new, |id| reduce(state, Action::Delete(id))),
+
+        Action::CopyPlainTextRequested => {
+            let Some(item) = state.selected_item() else {
+                return vec![];
+            };
+            let id = item.id;
+            vec![Effect::CopyPlainText(id)]
+        }
+
+        Action::TransformRequested => {
+            let Some(item) = state.selected_item() else {
+                return vec![];
+            };
+            let id = item.id;
+            vec![Effect::TransformContent(id)]
+        }
+
+        Action::AddToCollectionRequested => {
+            let Some(item) = state.selected_item() else {
+                return vec![];
+            };
+            let id = item.id;
+            vec![Effect::ShowCollectionChooser(id)]
+        }
+
+        Action::CreateSnippetRequested => {
+            let Some(item) = state.selected_item() else {
+                return vec![];
+            };
+            let id = item.id;
+            vec![Effect::CreateSnippet(id)]
+        }
+
+        Action::QuickPickItem(n) => {
+            let idx = n;
+            state.select_by_id(state.items.get(idx).map(|item| item.id));
             vec![]
         }
     }

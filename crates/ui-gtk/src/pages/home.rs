@@ -1,11 +1,14 @@
 //! Manager home dashboard with local runtime, privacy, and history status.
 
 use author_clipboard_shared::config::Config;
-use author_clipboard_shared::Database;
 use gtk4::prelude::*;
 
 /// Build the manager's functional home dashboard.
-pub fn build(config: &Config) -> gtk4::Box {
+#[allow(clippy::needless_pass_by_value)]
+pub fn build(
+    config: &Config,
+    service: std::sync::Arc<dyn crate::service::ClipboardService>,
+) -> gtk4::Box {
     let page = gtk4::Box::new(gtk4::Orientation::Vertical, 16);
     page.set_margin_top(32);
     page.set_margin_bottom(32);
@@ -27,19 +30,7 @@ pub fn build(config: &Config) -> gtk4::Box {
         .column_spacing(12)
         .row_spacing(12)
         .build();
-    let stats = Database::open(&config.db_path())
-        .and_then(|db| db.get_stats())
-        .ok();
-    cards.insert(
-        &status_card(
-            "History",
-            &stats.as_ref().map_or_else(
-                || "Unavailable".into(),
-                |s| format!("{} local items", s.total_items),
-            ),
-        ),
-        -1,
-    );
+    cards.insert(&status_card("History", "Loading daemon status…"), -1);
     cards.insert(
         &status_card(
             "Privacy",
@@ -61,6 +52,23 @@ pub fn build(config: &Config) -> gtk4::Box {
     hint.set_halign(gtk4::Align::Start);
     hint.add_css_class("dim-label");
     page.append(&hint);
+    let history_card = cards.first_child();
+    let service = service.clone();
+    glib::MainContext::default().spawn_local(async move {
+        match service.status().await {
+            Ok(status) => {
+                if let Some(card) = history_card {
+                    if let Some(value) = card
+                        .last_child()
+                        .and_then(|child| child.downcast::<gtk4::Label>().ok())
+                    {
+                        value.set_text(&format!("{} daemon items", status.item_count));
+                    }
+                }
+            }
+            Err(error) => tracing::warn!(%error, "home status request failed"),
+        }
+    });
     page
 }
 

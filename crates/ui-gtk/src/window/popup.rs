@@ -100,15 +100,31 @@ fn build_popup(app: &adw::Application, config: &PopupConfig) -> anyhow::Result<(
         action: config.action,
     };
     let window_for_copy = window.clone();
-    let page = crate::pages::clipboard::build(&props, &state, move |req| {
+    let service: std::sync::Arc<dyn crate::service::ClipboardService> =
+        std::sync::Arc::new(crate::service::ServiceHandle::new());
+    let service_for_copy = service.clone();
+    let page = crate::pages::clipboard::build(&props, &state, service.clone(), move |req| {
         tracing::info!(id = req.id, mime = %req.mime, mode = ?req.mode, "popup action");
-        if let Err(e) = crate::pages::clipboard::copy_via_ipc(req.id, &req.mime, req.mode) {
-            tracing::warn!(?e, "popup copy failed");
-        }
-        if close_after {
-            window_for_copy.close();
-        }
+        let service = service_for_copy.clone();
+        let window = window_for_copy.clone();
+        glib::MainContext::default().spawn_local(async move {
+            match service
+                .copy(crate::service::CopyRequest {
+                    id: req.id,
+                    mode: req.mode,
+                    mime: Some(req.mime),
+                })
+                .await
+            {
+                Ok(()) if close_after => window.close(),
+                Ok(()) => {}
+                Err(error) => tracing::warn!(%error, "popup copy failed"),
+            }
+        });
     });
+
+    // ── Effect channel (must be before action rail) ──────────
+    let (tx, rx) = std::sync::mpsc::channel::<crate::Effect>();
 
     // ── Status hint ───────────────────────────────────────────
     let status = gtk4::Label::new(Some(
@@ -123,32 +139,35 @@ fn build_popup(app: &adw::Application, config: &PopupConfig) -> anyhow::Result<(
     content.append(&build_popup_header(&window, config));
     content.append(&page);
     let state_for_rail = state.clone();
+    let service_for_rail = service.clone();
     let window_for_rail = window.clone();
-    content.append(&crate::widgets::action_bar::build_with_state(
+    let tx_for_rail = tx.clone();
+    let action_rail = crate::widgets::action_bar::build_with_state(
         state.clone(),
         move |action| {
+            use crate::app::Action;
             use crate::widgets::action_bar::RailAction;
-            use author_clipboard_shared::ipc::{CopyMode, IpcClient, IpcCommand};
-            let state = state_for_rail.borrow();
-            let Some(id) = state.selected_id else { return };
-            let item = state.items.iter().find(|item| item.id == id);
-            let Some(selected) = item.cloned() else {
-                return;
-            };
+
+            // Special cases that need window/service context on the main thread.
             if action == RailAction::Reveal {
-                if !selected.sensitive && !selected.encrypted {
-                    return;
-                }
-                drop(state);
-                crate::app::reduce(
+                let s = state_for_rail.borrow();
+                let Some(item) = s.selected_item().cloned() else { return };
+                if !item.sensitive && !item.encrypted { return; }
+                // Update state to show redacted.
+                let effects = crate::app::reduce(
                     &mut state_for_rail.borrow_mut(),
-                    crate::app::Action::RevealRedacted,
+                    Action::RevealRedacted,
                 );
+                drop(s);
+                for eff in effects {
+                    let _ = tx_for_rail.send(eff);
+                }
+                // Show reveal dialog with 5-second auto-close.
                 let dialog = gtk4::MessageDialog::builder()
                     .transient_for(&window_for_rail)
                     .modal(true)
                     .text("Protected clipboard item")
-                    .secondary_text(&selected.content)
+                    .secondary_text(&item.content)
                     .build();
                 dialog.add_button("Hide now", gtk4::ResponseType::Close);
                 dialog.connect_response(|dialog, _| dialog.close());
@@ -159,79 +178,47 @@ fn build_popup(app: &adw::Application, config: &PopupConfig) -> anyhow::Result<(
                 dialog.present();
                 return;
             }
+
             if action == RailAction::AddToCollection {
-                drop(state);
-                crate::pages::clipboard::show_collection_chooser_for_window(&window_for_rail, id);
+                let s = state_for_rail.borrow();
+                let Some(id) = s.selected_id else { return };
+                drop(s);
+                crate::pages::clipboard::show_collection_chooser_for_window(
+                    &window_for_rail, id, service_for_rail.clone(),
+                );
                 return;
             }
-            let command = match action {
-                RailAction::Copy => IpcCommand::Copy {
-                    id,
-                    mode: CopyMode::Copy,
-                    mime: None,
-                },
-                RailAction::QuickPaste => IpcCommand::Copy {
-                    id,
-                    mode: CopyMode::QuickPaste,
-                    mime: None,
-                },
-                RailAction::PlainText => IpcCommand::Copy {
-                    id,
-                    mode: CopyMode::CopyPlainText,
-                    mime: None,
-                },
-                RailAction::Transform => {
-                    let transform = if matches!(
-                        author_clipboard_shared::presentation::present(&selected),
-                        author_clipboard_shared::presentation::ContentPresentation::Json { .. }
-                    ) {
-                        author_clipboard_shared::transform::TransformKind::JsonPretty
-                    } else {
-                        author_clipboard_shared::transform::TransformKind::Quote
-                    };
-                    IpcCommand::Transform {
-                        content: selected.content.clone(),
-                        transform,
-                        sensitive: selected.sensitive || selected.encrypted,
-                        confirm_sensitive: false,
-                    }
-                }
-                RailAction::CreateSnippet if selected.sensitive || selected.encrypted => {
-                    tracing::warn!(
-                        "refusing to create snippet from protected content without confirmation"
-                    );
-                    return;
-                }
-                RailAction::CreateSnippet => IpcCommand::UpsertSnippet {
-                    name: format!("clipboard-{id}"),
-                    content: selected.content.clone(),
-                },
-                RailAction::Pin if item.is_some_and(|item| item.pinned) => IpcCommand::Unpin { id },
-                RailAction::Pin => IpcCommand::Pin { id },
-                RailAction::Star => IpcCommand::ToggleStar { id },
-                RailAction::Delete => IpcCommand::Delete { id },
-                RailAction::AddToCollection => unreachable!("handled before IPC command mapping"),
-                RailAction::Reveal => unreachable!("handled before selection lookup"),
+
+            // Route the rest through the reducer.
+            let app_action = match action {
+                RailAction::Copy => Action::CopyRequested,
+                RailAction::QuickPaste => Action::QuickPasteRequested,
+                RailAction::PlainText => Action::CopyPlainTextRequested,
+                RailAction::Transform => Action::TransformRequested,
+                RailAction::CreateSnippet => Action::CreateSnippetRequested,
+                RailAction::Pin => Action::ToggleSelectedPin,
+                RailAction::Star => Action::ToggleSelectedStar,
+                RailAction::Delete => Action::DeleteSelected,
+                RailAction::AddToCollection | RailAction::Reveal => unreachable!(),
             };
-            drop(state);
-            match IpcClient::new().send_command(&command) {
-                Ok(response) if action == RailAction::Transform && response.ok => {
-                    if let Some(output) = response
-                        .data
-                        .as_ref()
-                        .and_then(|data| data.get("output"))
-                        .and_then(serde_json::Value::as_str)
-                    {
-                        if let Some(display) = gdk::Display::default() {
-                            display.clipboard().set_text(output);
-                        }
-                    }
-                }
-                Ok(_) => {}
-                Err(error) => tracing::warn!(?error, "popup action failed"),
+            let effects = crate::app::reduce(
+                &mut state_for_rail.borrow_mut(),
+                app_action,
+            );
+            for eff in effects {
+                let _ = tx_for_rail.send(eff);
             }
         },
-    ));
+    );
+    let rail_refresh = action_rail.refresh;
+    content.append(&action_rail.widget);
+    // Wire rail reactivity to ListBox selection changes (replaces old polling).
+    {
+        let content_w: gtk4::Widget = page.clone().upcast();
+        if let Some(list) = find_list_box(&content_w) {
+            list.connect_row_selected(move |_, _| rail_refresh());
+        }
+    }
     content.append(&status);
 
     window.set_content(Some(&content));
@@ -261,12 +248,12 @@ fn build_popup(app: &adw::Application, config: &PopupConfig) -> anyhow::Result<(
     }
 
     // ── Key controller (bubble phase) ────────────────────────
-    let (tx, rx) = std::sync::mpsc::channel::<crate::Effect>();
     {
         let content_w: gtk4::Widget = content.clone().upcast();
         let search = find_search_entry(&content_w);
         let list = find_list_box(&content_w);
         let window_for_close = window.clone();
+        let page_keys = crate::controller::install_page_keys(&state, &tx);
         crate::controller::key::install(
             &window,
             &state,
@@ -274,14 +261,63 @@ fn build_popup(app: &adw::Application, config: &PopupConfig) -> anyhow::Result<(
             Some(Box::new(move || window_for_close.close())),
             search.as_ref(),
             list.as_ref(),
+            Some(page_keys),
         );
     }
 
     // Handle effects from the channel on the GTK thread.
+    let service_for_effects = service.clone();
     glib::idle_add_local(move || {
         while let Ok(eff) = rx.try_recv() {
-            if let crate::Effect::AddToast(ref msg) = eff {
-                tracing::info!(%msg, "popup toast");
+            match eff {
+                crate::Effect::AddToast(msg) => {
+                    tracing::info!(%msg, "popup toast");
+                }
+                crate::Effect::CopyItem { id, mode, mime } => {
+                    let srv = service_for_effects.clone();
+                    glib::MainContext::default().spawn_local(async move {
+                        let _ = srv.copy(crate::service::CopyRequest { id, mode, mime }).await;
+                    });
+                }
+                crate::Effect::QuickPasteItem { id, mime } => {
+                    let srv = service_for_effects.clone();
+                    glib::MainContext::default().spawn_local(async move {
+                        let _ = srv.copy(crate::service::CopyRequest {
+                            id,
+                            mode: author_clipboard_shared::ipc::CopyMode::QuickPaste,
+                            mime,
+                        }).await;
+                    });
+                }
+                crate::Effect::CopyPlainText(id) => {
+                    let srv = service_for_effects.clone();
+                    glib::MainContext::default().spawn_local(async move {
+                        let _ = srv.copy(crate::service::CopyRequest {
+                            id,
+                            mode: author_clipboard_shared::ipc::CopyMode::CopyPlainText,
+                            mime: None,
+                        }).await;
+                    });
+                }
+                // These effects are acknowledged but handled directly by the
+                // action rail (Reveal, AddToCollection) or need page-level
+                // dialogs not yet wired into the popup effect loop:
+                crate::Effect::TransformContent(_)
+                | crate::Effect::CreateSnippet(_)
+                | crate::Effect::ShowCollectionChooser(_)
+                | crate::Effect::HideRedacted => {}
+                // State-only effects — no service call needed in the popup.
+                crate::Effect::RefreshItems
+                | crate::Effect::RefreshSnippets
+                | crate::Effect::PersistGSettings
+                | crate::Effect::PersistConfig
+                | crate::Effect::Quit
+                | crate::Effect::ClearUnpinned
+                | crate::Effect::PinItem(_)
+                | crate::Effect::UnpinItem(_)
+                | crate::Effect::StarItem(_)
+                | crate::Effect::UnstarItem(_)
+                | crate::Effect::DeleteItem(_) => {}
             }
         }
         glib::ControlFlow::Continue

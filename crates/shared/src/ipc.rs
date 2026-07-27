@@ -9,6 +9,8 @@
 use std::io::{BufRead, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
@@ -84,6 +86,9 @@ pub struct IpcResponse {
     pub data: Option<serde_json::Value>,
     /// Error details (on failure).
     pub error: Option<IpcErrorDetail>,
+    /// Request ID echoed by the daemon, when the request supplied one.
+    #[serde(default)]
+    pub request_id: Option<u64>,
 }
 
 impl IpcResponse {
@@ -94,6 +99,7 @@ impl IpcResponse {
             ok: true,
             data: Some(data),
             error: None,
+            request_id: None,
         }
     }
 
@@ -108,6 +114,7 @@ impl IpcResponse {
                 message: message.into(),
                 min_version: None,
             }),
+            request_id: None,
         }
     }
 
@@ -126,6 +133,7 @@ impl IpcResponse {
                 message: message.into(),
                 min_version: Some(min_version.into()),
             }),
+            request_id: None,
         }
     }
 }
@@ -434,16 +442,28 @@ impl IpcServer {
 
     /// Accept a single incoming connection and read one message.
     pub fn accept(&self) -> Result<IpcMessage, IpcError> {
+        let (_, message) = self.accept_stream()?;
+        Ok(message)
+    }
+
+    /// Accept a connection and return its stream together with the message.
+    /// The stream remains available so callers can write a correlated response.
+    pub fn accept_stream(&self) -> Result<(UnixStream, IpcMessage), IpcError> {
         let (stream, _addr) = self
             .listener
             .accept()
             .map_err(|e| IpcError::ReceiveFailed(e.to_string()))?;
-        let mut reader = std::io::BufReader::new(stream);
+        let reader_stream = stream
+            .try_clone()
+            .map_err(|e| IpcError::ReceiveFailed(e.to_string()))?;
+        let mut reader = std::io::BufReader::new(reader_stream);
         let mut line = String::new();
         reader
             .read_line(&mut line)
             .map_err(|e| IpcError::ReceiveFailed(e.to_string()))?;
-        serde_json::from_str(line.trim()).map_err(|e| IpcError::InvalidMessage(e.to_string()))
+        let message = serde_json::from_str(line.trim())
+            .map_err(|e| IpcError::InvalidMessage(e.to_string()))?;
+        Ok((stream, message))
     }
 }
 
@@ -457,6 +477,9 @@ impl Drop for IpcServer {
 #[derive(Debug, Clone)]
 pub struct IpcClient {
     path: PathBuf,
+    write_timeout: Duration,
+    response_timeout: Duration,
+    next_request_id: std::sync::Arc<AtomicU64>,
 }
 
 impl IpcClient {
@@ -464,12 +487,26 @@ impl IpcClient {
     pub fn new() -> Self {
         Self {
             path: socket_path(),
+            write_timeout: Duration::from_millis(500),
+            response_timeout: Duration::from_secs(2),
+            next_request_id: std::sync::Arc::new(AtomicU64::new(1)),
         }
     }
 
     /// Create a client that connects to a specific socket path.
     pub fn with_path(path: PathBuf) -> Self {
-        Self { path }
+        Self {
+            path,
+            ..Self::new()
+        }
+    }
+
+    /// Set transport timeouts used by subsequent requests.
+    #[must_use]
+    pub fn with_timeouts(mut self, write_timeout: Duration, response_timeout: Duration) -> Self {
+        self.write_timeout = write_timeout;
+        self.response_timeout = response_timeout;
+        self
     }
 
     /// Send a message and optionally receive a response.
@@ -479,6 +516,12 @@ impl IpcClient {
     pub fn send(&self, message: &IpcMessage) -> Result<Option<IpcMessage>, IpcError> {
         let mut stream = UnixStream::connect(&self.path)
             .map_err(|e| IpcError::ConnectionFailed(e.to_string()))?;
+        stream
+            .set_write_timeout(Some(self.write_timeout))
+            .map_err(|e| IpcError::SendFailed(e.to_string()))?;
+        stream
+            .set_read_timeout(Some(self.response_timeout))
+            .map_err(|e| IpcError::ReceiveFailed(e.to_string()))?;
 
         // Write JSON message followed by newline
         let json =
@@ -517,7 +560,15 @@ impl IpcClient {
     pub fn send_request(&self, request: &IpcRequest) -> Result<IpcResponse, IpcError> {
         let response = self.send(&IpcMessage::Request(request.clone()))?;
         match response {
-            Some(IpcMessage::Response(resp)) => Ok(resp),
+            Some(IpcMessage::Response(resp))
+                if resp.version == IPC_VERSION && resp.request_id == request.request_id =>
+            {
+                Ok(resp)
+            }
+            Some(IpcMessage::Response(resp)) => Err(IpcError::InvalidMessage(format!(
+                "Response version/id ({:?}, {:?}) did not match ({IPC_VERSION}, {:?})",
+                resp.version, resp.request_id, request.request_id
+            ))),
             Some(other) => Err(IpcError::InvalidMessage(format!(
                 "Expected Response message, got: {other:?}"
             ))),
@@ -566,7 +617,11 @@ impl IpcClient {
             IpcCommand::GetConfig => "GetConfig",
             IpcCommand::UpdateConfig { .. } => "UpdateConfig",
         };
-        let request = IpcRequest::new(cmd_name, args);
+        let request = IpcRequest::with_id(
+            cmd_name,
+            args,
+            self.next_request_id.fetch_add(1, Ordering::Relaxed),
+        );
         self.send_request(&request)
     }
 }

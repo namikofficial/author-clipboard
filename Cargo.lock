@@ -302,6 +302,7 @@ name = "author-clipboard-ui-gtk"
 version = "0.6.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "author-clipboard-shared",
  "base64 0.22.1",
  "chrono",

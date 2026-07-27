@@ -24,7 +24,8 @@ pub fn resolve_escape(focus: FocusTarget, search_query_empty: bool) -> EscOutcom
     match focus {
         FocusTarget::Search if !search_query_empty => EscOutcome::ClearSearch,
         FocusTarget::Search => EscOutcome::BlurSearch,
-        FocusTarget::Modal | FocusTarget::None => EscOutcome::Proceed,
+        // Modal, TextInput, and None all let the widget handle Esc itself.
+        FocusTarget::Modal | FocusTarget::TextInput | FocusTarget::None => EscOutcome::Proceed,
         FocusTarget::List => EscOutcome::Close,
     }
 }
@@ -59,6 +60,18 @@ mod tests {
     fn esc_in_modal_proceeds() {
         assert_eq!(
             resolve_escape(FocusTarget::Modal, true),
+            EscOutcome::Proceed
+        );
+    }
+
+    #[test]
+    fn esc_in_text_input_proceeds() {
+        assert_eq!(
+            resolve_escape(FocusTarget::TextInput, true),
+            EscOutcome::Proceed
+        );
+        assert_eq!(
+            resolve_escape(FocusTarget::TextInput, false),
             EscOutcome::Proceed
         );
     }

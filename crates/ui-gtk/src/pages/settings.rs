@@ -19,7 +19,10 @@ use std::rc::Rc;
 // would obscure the read-through-to-Config story. The function is
 // intentionally linear.
 #[allow(clippy::too_many_lines)]
-pub fn build(config: &author_clipboard_shared::config::Config) -> Widget {
+pub fn build(
+    config: &author_clipboard_shared::config::Config,
+    service: std::sync::Arc<dyn crate::service::ClipboardService>,
+) -> Widget {
     let scrolled = gtk4::ScrolledWindow::builder()
         .vscrollbar_policy(gtk4::PolicyType::Automatic)
         .vexpand(true)
@@ -208,15 +211,19 @@ pub fn build(config: &author_clipboard_shared::config::Config) -> Widget {
     let clear_btn = Button::with_label("Clear");
     clear_btn.add_css_class("destructive-action");
     clear_btn.set_valign(gtk4::Align::Center);
-    clear_btn.connect_clicked(|_| {
-        // Best-effort: send IPC ClearUnpinned.
-        if let Ok(resp) = author_clipboard_shared::ipc::IpcClient::new()
-            .send_command(&author_clipboard_shared::ipc::IpcCommand::ClearUnpinned)
-        {
-            if resp.ok {
-                tracing::info!("cleared unpinned");
+    let clear_status = clear_row.clone();
+    clear_btn.connect_clicked(move |_| {
+        let service = service.clone();
+        let status = clear_status.clone();
+        glib::MainContext::default().spawn_local(async move {
+            match service
+                .command(author_clipboard_shared::ipc::IpcCommand::ClearUnpinned)
+                .await
+            {
+                Ok(_) => status.set_subtitle("Unpinned history cleared."),
+                Err(error) => status.set_subtitle(&format!("Could not clear history: {error}")),
             }
-        }
+        });
     });
     clear_row.add_suffix(&clear_btn);
     clear_row.set_activatable_widget(Some(&clear_btn));

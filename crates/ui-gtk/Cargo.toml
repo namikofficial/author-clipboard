@@ -23,6 +23,7 @@ gdk-pixbuf.workspace = true
 sourceview5.workspace = true
 webkit6 = { workspace = true, optional = true }
 tokio.workspace = true
+async-trait.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 anyhow.workspace = true

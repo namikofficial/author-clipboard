@@ -24,6 +24,7 @@ use author_clipboard_shared::picker::{
     self, PickerAction, PickerEntry, PickerFilter, PickerSource,
 };
 
+use crate::service::{ClipboardService, HistoryRequest};
 use crate::widgets::empty::{EmptyState, EmptyVariant};
 use crate::widgets::filter_bar::{FilterBar, OnChange as OnFilterChange};
 use crate::widgets::item_row::ItemRow;
@@ -91,6 +92,7 @@ type ItemRowTable = Rc<RefCell<Vec<ItemRow>>>;
 pub fn build(
     props: &ClipboardPageProps,
     app_state: &Rc<RefCell<crate::app::AppState>>,
+    service: std::sync::Arc<dyn ClipboardService>,
     on_copy: impl Fn(ClipboardCopyRequest) + 'static,
 ) -> impl IsA<Widget> {
     let page = GtkBox::builder()
@@ -153,42 +155,69 @@ pub fn build(
     let app_state_for_refresh = app_state.clone();
     let scrolled_for_refresh = scrolled.clone();
     let empty_for_refresh = empty_state.widget().clone();
-    let refresh = move || {
-        let s = state_for_refresh.borrow();
-        let entries = load_entries_for(&s.query, s.filter, s.count, s.source, s.include_sensitive);
-        let items = entries.iter().map(entry_to_item).collect();
-        crate::app::reduce(
-            &mut app_state_for_refresh.borrow_mut(),
-            crate::app::Action::ItemsLoaded(items),
-        );
-        rebuild_list(
-            &list_for_refresh,
-            &item_rows_for_refresh,
-            &entries,
-            s.query.is_empty(),
-        );
-        // Select the first row after refresh, so GTK ListBox selection
-        // is always authoritative and connected to AppState.
-        let selected_id = app_state_for_refresh.borrow().selected_id;
-        if let Some(id) = selected_id {
-            if let Some(row) = item_rows_for_refresh
-                .borrow()
-                .iter()
-                .find(|row| row.id() == id)
-            {
-                list_for_refresh.select_row(Some(row.row()));
-            } else {
-                list_for_refresh.unselect_all();
-            }
-        } else {
-            list_for_refresh.unselect_all();
-        }
-        if entries.is_empty() {
-            scrolled_for_refresh.set_visible(false);
-            empty_for_refresh.set_visible(true);
-        } else {
-            scrolled_for_refresh.set_visible(true);
-            empty_for_refresh.set_visible(false);
+    let generation = Rc::new(std::cell::Cell::new(0_u64));
+    let refresh = {
+        let service = service.clone();
+        move || {
+            let request = {
+                let mut s = state_for_refresh.borrow_mut();
+                s.generation = s.generation.saturating_add(1);
+                HistoryRequest {
+                    query: s.query.clone(),
+                    limit: s.count,
+                    filter: s.filter,
+                    source: s.source,
+                    include_sensitive: s.include_sensitive,
+                    generation: s.generation,
+                }
+            };
+            generation.set(request.generation);
+            let latest = generation.clone();
+            let service = service.clone();
+            let state = state_for_refresh.clone();
+            let app_state = app_state_for_refresh.clone();
+            let list = list_for_refresh.clone();
+            let item_rows = item_rows_for_refresh.clone();
+            let scrolled = scrolled_for_refresh.clone();
+            let empty = empty_for_refresh.clone();
+            glib::MainContext::default().spawn_local(async move {
+                match service.history(request.clone()).await {
+                    Ok(entries)
+                        if crate::service::accepts_generation(latest.get(), request.generation) =>
+                    {
+                        let query_empty = state.borrow().query.is_empty();
+                        let items = entries.iter().map(entry_to_item).collect();
+                        crate::app::reduce(
+                            &mut app_state.borrow_mut(),
+                            crate::app::Action::ItemsLoaded(items),
+                        );
+                        rebuild_list(&list, &item_rows, &entries, query_empty);
+                        let selected_id = app_state.borrow().selected_id;
+                        if let Some(id) = selected_id {
+                            if let Some(row) = item_rows.borrow().iter().find(|row| row.id() == id)
+                            {
+                                list.select_row(Some(row.row()));
+                            } else {
+                                list.unselect_all();
+                            }
+                        } else {
+                            list.unselect_all();
+                        }
+                        scrolled.set_visible(!entries.is_empty());
+                        empty.set_visible(entries.is_empty());
+                    }
+                    Err(error)
+                        if crate::service::accepts_generation(latest.get(), request.generation) =>
+                    {
+                        tracing::warn!(%error, "clipboard service request failed");
+                        scrolled.set_visible(false);
+                        empty.set_visible(true);
+                        empty.set_tooltip_text(Some(&error.to_string()));
+                        empty.add_css_class("service-error");
+                    }
+                    _ => {}
+                }
+            });
         }
     };
 
@@ -264,125 +293,8 @@ pub fn build(
         });
     });
 
-    // ── Page-level key handlers ───────────────────────────────
-    // These keys are handled at the *page* level (not window level)
-    // because they interact with the ListBox or need the page's
-    // refresh/side-table context.
-    let page_keys = gtk4::EventControllerKey::new();
-
-    // Ctrl+Shift+P — toggle pinned filter
-    // Ctrl+Shift+A — toggle starred filter
-    // Ctrl+Shift+C — collection chooser
-    // Ctrl+Enter — alternate activation
-    let page_for_page = page.clone();
-    let state_for_page = state.clone();
-    let app_state_for_page = app_state.clone();
-    let refresh_for_page = refresh.clone();
-    let on_copy_for_page = on_copy.clone();
-    page_keys.connect_key_pressed(move |_controller, key, _code, modifiers| {
-        let ctrl = modifiers.contains(gdk::ModifierType::CONTROL_MASK);
-        let shift = modifiers.contains(gdk::ModifierType::SHIFT_MASK);
-
-        // Ctrl+Shift+P: toggle pinned filter
-        if ctrl && shift && key == gdk::Key::p {
-            let mut s = state_for_page.borrow_mut();
-            s.filter = if s.filter == PickerFilter::Pinned {
-                PickerFilter::All
-            } else {
-                PickerFilter::Pinned
-            };
-            drop(s);
-            refresh_for_page();
-            return glib::Propagation::Stop;
-        }
-
-        // Ctrl+Shift+A: toggle starred filter
-        if ctrl && shift && key == gdk::Key::a {
-            let mut s = state_for_page.borrow_mut();
-            s.filter = if s.filter == PickerFilter::Starred {
-                PickerFilter::All
-            } else {
-                PickerFilter::Starred
-            };
-            drop(s);
-            refresh_for_page();
-            return glib::Propagation::Stop;
-        }
-
-        // Ctrl+Shift+C: collection chooser
-        if ctrl && shift && key == gdk::Key::c {
-            let Some(item_id) = app_state_for_page.borrow().selected_id else {
-                return glib::Propagation::Stop;
-            };
-            show_collection_chooser(&page_for_page, item_id);
-            return glib::Propagation::Stop;
-        }
-
-        // Ctrl+Enter: alternate activation (quick-paste if copy mode, etc.)
-        if ctrl && !shift && key == gdk::Key::Return {
-            if let Some(item) = app_state_for_page.borrow().selected_item().cloned() {
-                let mode = match state_for_page.borrow().action {
-                    PickerAction::Copy => CopyMode::QuickPaste,
-                    PickerAction::QuickPaste => CopyMode::Copy,
-                };
-                on_copy_for_page(ClipboardCopyRequest {
-                    id: item.id,
-                    mime: item.mime_type,
-                    mode,
-                });
-            }
-            return glib::Propagation::Stop;
-        }
-
-        glib::Propagation::Proceed
-    });
-    page.add_controller(page_keys);
-
-    // Initial load.
-    let entries = load_entries_for(
-        &props.initial_query,
-        props.initial_filter,
-        props.count.max(1),
-        props.source,
-        props.include_sensitive,
-    );
-    crate::app::reduce(
-        &mut app_state.borrow_mut(),
-        crate::app::Action::ItemsLoaded(entries.iter().map(entry_to_item).collect()),
-    );
-    rebuild_list(
-        &list_box,
-        &item_rows,
-        &entries,
-        props.initial_query.is_empty(),
-    );
-    // Select the first row if items exist, so GTK selection is authoritative.
-    if !entries.is_empty() {
-        if let Some(row) = list_box.row_at_index(0) {
-            list_box.select_row(Some(&row));
-        }
-    }
-    // Set the initial empty-state variant + visibility. The
-    // variant follows the same rule as the refresh closure:
-    // "no results" when the user has typed something,
-    // "no sensitive" when filtered to sensitive, otherwise
-    // "no items".
-    if entries.is_empty() {
-        // Decide which empty-state copy to show. The query takes
-        // precedence ("no results") so a typed search never
-        // shows the bland "clipboard is empty" message.
-        let variant = if props.initial_query.is_empty() {
-            match props.initial_filter {
-                PickerFilter::Sensitive => EmptyVariant::NoSensitive,
-                _ => EmptyVariant::NoItems,
-            }
-        } else {
-            EmptyVariant::NoResults
-        };
-        empty_state.set_variant(variant);
-        scrolled.set_visible(false);
-        empty_state.widget().set_visible(true);
-    }
+    // Initial load is asynchronous; construction never performs socket I/O.
+    refresh();
 
     // The daemon rewrites this monotonic revision file after every capture.
     // A file monitor gives the open UI an explicit edge-triggered refresh;
@@ -408,19 +320,27 @@ pub fn build(
 // GtkDialog remains the compatibility path for distributions shipping GTK
 // 4.8/4.10; the replacement AlertDialog is not available across our floor.
 #[allow(deprecated)]
-fn show_collection_chooser(parent: &GtkBox, item_id: i64) {
+fn show_collection_chooser(
+    parent: &GtkBox,
+    item_id: i64,
+    service: std::sync::Arc<dyn ClipboardService>,
+) {
     let Some(window) = parent
         .root()
         .and_then(|root| root.downcast::<gtk4::Window>().ok())
     else {
         return;
     };
-    show_collection_chooser_for_window(&window, item_id);
+    show_collection_chooser_for_window(&window, item_id, service);
 }
 
 /// Open the collection chooser for a stable selected item ID.
 #[allow(deprecated)]
-pub fn show_collection_chooser_for_window(window: &impl IsA<gtk4::Window>, item_id: i64) {
+pub fn show_collection_chooser_for_window(
+    window: &impl IsA<gtk4::Window>,
+    item_id: i64,
+    service: std::sync::Arc<dyn ClipboardService>,
+) {
     let dialog = gtk4::Dialog::builder()
         .title("Add to collection")
         .transient_for(window)
@@ -432,54 +352,68 @@ pub fn show_collection_chooser_for_window(window: &impl IsA<gtk4::Window>, item_
         .selection_mode(SelectionMode::Single)
         .build();
     list.add_css_class("boxed-list");
-    let collections: Vec<(String, String)> = IpcClient::new()
-        .send_command(&IpcCommand::ListCollections)
-        .ok()
-        .and_then(|response| response.data)
-        .and_then(|data| data.get("collections").cloned())
-        .and_then(|value| value.as_array().cloned())
-        .unwrap_or_default()
-        .iter()
-        .filter_map(|value| {
-            Some((
-                value.get("id")?.as_str()?.to_string(),
-                value.get("name")?.as_str()?.to_string(),
-            ))
-        })
-        .collect();
-    if collections.is_empty() {
-        let empty = gtk4::Label::new(Some("Create a collection in the Collections page first."));
-        empty.set_margin_top(18);
-        empty.set_margin_bottom(18);
-        dialog.content_area().append(&empty);
-    } else {
-        for (_, collection_name) in &collections {
-            let label = gtk4::Label::new(Some(collection_name));
-            label.set_halign(gtk4::Align::Start);
-            label.set_margin_top(10);
-            label.set_margin_bottom(10);
-            label.set_margin_start(10);
-            label.set_margin_end(10);
-            list.append(&label);
-        }
-        let dialog_for_row = dialog.clone();
-        list.connect_row_activated(move |_list, row| {
-            let Some(index) = usize::try_from(row.index()).ok() else {
-                return;
-            };
-            let Some(collection) = collections.get(index) else {
-                return;
-            };
-            let response = IpcClient::new().send_command(&IpcCommand::AddToCollection {
-                collection_id: collection.0.clone(),
-                item_id,
-            });
-            if response.is_ok_and(|response| response.ok) {
-                dialog_for_row.close();
+    let dialog_for_load = dialog.clone();
+    let list_for_load = list.clone();
+    glib::MainContext::default().spawn_local(async move {
+        match service.command(IpcCommand::ListCollections).await {
+            Ok(data) => {
+                let collections: Vec<(String, String)> = data
+                    .get("collections")
+                    .and_then(serde_json::Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|value| {
+                        Some((
+                            value.get("id")?.as_str()?.to_owned(),
+                            value.get("name")?.as_str()?.to_owned(),
+                        ))
+                    })
+                    .collect();
+                if collections.is_empty() {
+                    dialog_for_load
+                        .content_area()
+                        .append(&gtk4::Label::new(Some(
+                            "Create a collection in the Collections page first.",
+                        )));
+                } else {
+                    for (_, name) in &collections {
+                        list_for_load.append(&gtk4::Label::new(Some(name)));
+                    }
+                    let dialog_for_row = dialog_for_load.clone();
+                    let service = service.clone();
+                    list_for_load.connect_row_activated(move |_list, row| {
+                        let Some(index) = usize::try_from(row.index()).ok() else {
+                            return;
+                        };
+                        let Some(collection) = collections.get(index) else {
+                            return;
+                        };
+                        let service = service.clone();
+                        let dialog = dialog_for_row.clone();
+                        let collection_id = collection.0.clone();
+                        glib::MainContext::default().spawn_local(async move {
+                            if service
+                                .command(IpcCommand::AddToCollection {
+                                    collection_id,
+                                    item_id,
+                                })
+                                .await
+                                .is_ok()
+                            {
+                                dialog.close();
+                            }
+                        });
+                    });
+                    dialog_for_load.content_area().append(&list_for_load);
+                }
             }
-        });
-        dialog.content_area().append(&list);
-    }
+            Err(error) => dialog_for_load
+                .content_area()
+                .append(&gtk4::Label::new(Some(&format!(
+                    "Could not load collections: {error}"
+                )))),
+        }
+    });
     dialog.connect_response(|dialog, _| dialog.close());
     dialog.present();
 }
@@ -492,6 +426,7 @@ struct PageState {
     source: PickerSource,
     include_sensitive: bool,
     action: PickerAction,
+    generation: u64,
 }
 
 impl PageState {
@@ -503,6 +438,7 @@ impl PageState {
             source: props.source,
             include_sensitive: props.include_sensitive,
             action: props.action,
+            generation: 0,
         }
     }
 }
@@ -797,27 +733,6 @@ fn entry_mime(entry: &PickerEntry) -> String {
         .mime_type
         .clone()
         .unwrap_or_else(|| "text/plain".to_string())
-}
-
-/// Copy an item to the Wayland clipboard via IPC. Returns
-/// `Ok(mime)` on success, `Err(String)` on failure.
-///
-/// The `mode` parameter controls whether the item is copied or
-/// quick-pasted. The window layer (popup) calls this and then
-/// closes; the manager layer calls this and shows a toast.
-pub fn copy_via_ipc(id: i64, mime: &str, mode: CopyMode) -> Result<String, String> {
-    let client = IpcClient::new();
-    match client.send_command(&IpcCommand::Copy {
-        id,
-        mode,
-        mime: Some(mime.to_string()),
-    }) {
-        Ok(resp) if resp.ok => Ok(mime.to_string()),
-        Ok(resp) => Err(resp
-            .error
-            .map_or_else(|| "copy failed".to_string(), |e| e.message)),
-        Err(e) => Err(e.to_string()),
-    }
 }
 
 #[cfg(test)]

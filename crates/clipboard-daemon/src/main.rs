@@ -3,6 +3,7 @@
 //! Watches for clipboard changes via the Wayland wlr-data-control protocol
 //! and stores them in a local `SQLite` database.
 
+use std::io::Write;
 use std::os::fd::AsFd;
 use std::sync::{Arc, Mutex};
 
@@ -1334,8 +1335,12 @@ fn spawn_ipc_server(state: IpcHandlerState) {
         };
 
         loop {
-            match server.accept() {
-                Ok(msg) => {
+            match server.accept_stream() {
+                Ok((mut stream, msg)) => {
+                    let request_id = match &msg {
+                        IpcMessage::Request(request) => request.request_id,
+                        _ => None,
+                    };
                     let response = match &msg {
                         // Handle legacy messages
                         IpcMessage::Toggle | IpcMessage::Show | IpcMessage::Hide => {
@@ -1374,6 +1379,8 @@ fn spawn_ipc_server(state: IpcHandlerState) {
                         IpcMessage::Request(request) => {
                             debug!("IPC request: cmd={}", request.cmd);
                             let response = state.handle_request(request);
+                            let mut response = response;
+                            response.request_id = request_id;
                             Some(IpcMessage::Response(response))
                         }
                         _ => {
@@ -1383,8 +1390,16 @@ fn spawn_ipc_server(state: IpcHandlerState) {
                     };
 
                     if let Some(resp) = response {
-                        // For now, responses are logged but not sent back on legacy messages
-                        debug!("IPC response: {resp:?}");
+                        match serde_json::to_string(&resp) {
+                            Ok(json) => {
+                                if let Err(error) =
+                                    writeln!(stream, "{json}").and_then(|()| stream.flush())
+                                {
+                                    debug!(?error, "failed to write IPC response");
+                                }
+                            }
+                            Err(error) => debug!(?error, "failed to serialize IPC response"),
+                        }
                     }
                 }
                 Err(e) => {
