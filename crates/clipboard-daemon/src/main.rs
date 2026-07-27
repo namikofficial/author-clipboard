@@ -616,7 +616,7 @@ impl IpcHandlerState {
     }
 
     /// Handle an IPC request and return the response.
-    fn handle_request(&self, request: &IpcRequest) -> IpcResponse {
+    fn handle_request(&mut self, request: &IpcRequest) -> IpcResponse {
         // Check version compatibility
         if request.version != IPC_VERSION {
             return IpcResponse::err_with_min_version(
@@ -642,7 +642,7 @@ impl IpcHandlerState {
     }
 
     #[allow(clippy::too_many_lines, unused_variables)]
-    fn handle_command(&self, cmd: IpcCommand) -> IpcResponse {
+    fn handle_command(&mut self, cmd: IpcCommand) -> IpcResponse {
         match cmd {
             // ── Visibility ────────────────────────────────────────────────
             IpcCommand::Toggle => {
@@ -1247,11 +1247,13 @@ impl IpcHandlerState {
                     "height": self.config.picker.height,
                 },
             })),
-            IpcCommand::UpdateConfig { config } => {
-                // For now, just acknowledge - full config update would require persisting
-                let updated_keys =
-                    serde_json::from_value::<Vec<String>>(config.clone()).unwrap_or_default();
-                IpcResponse::ok(serde_json::json!({ "updated_keys": updated_keys }))
+            IpcCommand::UpdateConfig { .. } => {
+                // The UI has already persisted config.json. Reload it to pick
+                // up the new settings (ttl_seconds, max_items, etc.).
+                let new_config = Config::load();
+                tracing::info!("reloading config after UpdateConfig");
+                self.config = new_config;
+                IpcResponse::ok(serde_json::json!({ "reloaded": true }))
             }
             IpcCommand::ToggleStar { id } => {
                 let db = self.db.lock().unwrap();
@@ -1318,7 +1320,7 @@ impl IpcHandlerState {
 
 /// Spawn a background thread running the IPC server that listens for
 /// toggle/show/hide commands and writes a visibility signal file for the applet.
-fn spawn_ipc_server(state: IpcHandlerState) {
+fn spawn_ipc_server(mut state: IpcHandlerState) {
     std::thread::spawn(move || {
         let server = match IpcServer::bind() {
             Ok(s) => {

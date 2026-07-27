@@ -113,6 +113,25 @@ impl EmptyState {
         });
     }
 
+    /// Switch to an error state with the given error message.
+    ///
+    /// This overrides whatever variant was set previously and shows
+    /// a "Service error" title plus the real error text as a description.
+    pub fn set_error(&self, error: &str) {
+        self.status_page.set_title("Service error");
+        self.status_page.set_description(Some(error));
+        self.status_page.set_icon_name(Some("dialog-error-symbolic"));
+        for v in [
+            "empty-state-no-items",
+            "empty-state-no-results",
+            "empty-state-no-sensitive",
+            "empty-state-daemon-down",
+        ] {
+            self.status_page.remove_css_class(v);
+        }
+        self.status_page.add_css_class("empty-state-error");
+    }
+
     /// Borrow the root widget.
     pub fn widget(&self) -> &Widget {
         self.status_page.upcast_ref()

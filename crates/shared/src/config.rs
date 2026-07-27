@@ -34,6 +34,9 @@ fn default_encrypt_sensitive() -> bool {
 fn default_clear_on_lock() -> bool {
     true
 }
+fn default_config_version() -> u32 {
+    CONFIG_VERSION
+}
 fn default_dedup_window_seconds() -> u64 {
     2 // Skip duplicate content within 2 seconds
 }
@@ -163,6 +166,54 @@ impl Default for PickerConfig {
     }
 }
 
+/// Current config schema version.
+///
+/// Incremented when backwards-incompatible schema changes are made.
+/// Migration logic lives in [`Config::migrate`].
+pub const CONFIG_VERSION: u32 = 1;
+
+/// A typed, validated partial update to [`Config`].
+///
+/// Each variant carries one setting field. Apply via
+/// [`Config::apply_patch`]; validation runs before any mutation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConfigPatch {
+    /// Toggle incognito mode (creates/removes `.incognito` flag file).
+    Incognito(bool),
+    /// Change max history items.
+    MaxItems(usize),
+    /// Change TTL in days (0 = forever).
+    TtlDays(u64),
+    /// Set TTL to "never expire" (0 seconds).
+    TtlNever,
+    /// Toggle encryption at rest.
+    EncryptSensitive(bool),
+    /// Toggle clear-on-screen-lock.
+    ClearOnLock(bool),
+    /// Change max item size in bytes.
+    MaxItemSize(usize),
+    /// Change cleanup interval in seconds.
+    CleanupInterval(u64),
+    /// Change keyboard shortcut.
+    KeyboardShortcut(String),
+    /// Default picker source.
+    PickerDefaultSource(String),
+    /// Max picker results.
+    PickerMaxResults(usize),
+    /// Replace capture rules.
+    CaptureRules(Vec<crate::rules::CaptureRule>),
+    /// Replace MIME denylist.
+    MimeDenylist(Vec<String>),
+    /// Replace content denylist patterns.
+    ContentDenylist(Vec<String>),
+    /// Change content pattern matching mode.
+    ContentPatternMode(ContentPatternMode),
+    /// Replace app denylist.
+    AppDenylist(Vec<String>),
+    /// Change dedup window in seconds.
+    DedupWindow(u64),
+}
+
 /// Application configuration for author-clipboard.
 ///
 /// Settings are persisted to `~/.config/author-clipboard/config.json`.
@@ -170,6 +221,9 @@ impl Default for PickerConfig {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
+    /// Config file schema version. Used for future migration.
+    #[serde(default = "default_config_version")]
+    pub config_version: u32,
     /// Maximum number of clipboard items to retain in history.
     #[serde(default = "default_max_items")]
     pub max_items: usize,
@@ -229,6 +283,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            config_version: default_config_version(),
             max_items: default_max_items(),
             max_item_size: default_max_item_size(),
             data_dir: default_data_dir(),
@@ -262,17 +317,58 @@ impl Config {
         )
     }
 
+    /// Returns the backup path for the configuration file.
+    fn config_backup_path() -> PathBuf {
+        let mut p = Self::config_path();
+        p.set_extension("json.bak");
+        p
+    }
+
+    /// Returns the temporary path for atomic writes.
+    fn config_tmp_path() -> PathBuf {
+        let mut p = Self::config_path();
+        let tmp = format!("{}.tmp", p.file_name().unwrap_or_default().to_string_lossy());
+        p.set_file_name(tmp);
+        p
+    }
+
     /// Load configuration from the default config file.
     ///
-    /// Falls back to [`Config::default()`] if the file is missing or
-    /// contains invalid JSON.
+    /// Attempts to parse the primary file. If parsing fails, falls back to
+    /// the backup file (`config.json.bak`). If both fail, returns
+    /// [`Config::default()`].
     #[must_use]
     pub fn load() -> Self {
         let path = Self::config_path();
-        std::fs::read_to_string(&path).map_or_else(
-            |_| Self::default(),
-            |contents| Self::from_existing_json(&contents),
-        )
+        let contents = std::fs::read_to_string(&path);
+        match contents {
+            Ok(text) => {
+                let config = Self::from_existing_json(&text);
+                // If from_existing_json returned default, the file was
+                // unparseable — try the backup.
+                if config == Config::default() && !text.trim().is_empty() {
+                    if let Some(backup) = Self::try_load_backup() {
+                        return backup;
+                    }
+                }
+                config
+            }
+            Err(_) => {
+                // No primary file; try backup
+                Self::try_load_backup().unwrap_or_default()
+            }
+        }
+    }
+
+    /// Attempt to load the backup file.
+    fn try_load_backup() -> Option<Self> {
+        let bak = Self::config_backup_path();
+        let contents = std::fs::read_to_string(&bak).ok()?;
+        let config = Self::from_existing_json(&contents);
+        if config == Config::default() && !contents.trim().is_empty() {
+            return None;
+        }
+        Some(config)
     }
 
     /// Deserialize an existing configuration while preserving the historical
@@ -286,6 +382,8 @@ impl Config {
         let Ok(mut config) = serde_json::from_value::<Self>(value) else {
             return Self::default();
         };
+        // Run schema migrations before applying legacy overrides.
+        config.migrate();
         if !had_encrypt_setting {
             config.encrypt_sensitive = false;
         }
@@ -299,7 +397,23 @@ impl Config {
         config
     }
 
-    /// Serialize this configuration to JSON and write it to the config file.
+    /// Run schema migrations up to the current version.
+    ///
+    /// Each migration step upgrades from version N to N+1. This is a
+    /// no-op when `self.config_version >= CONFIG_VERSION`.
+    fn migrate(&mut self) {
+        // Future migrations go here:
+        // if self.config_version < 2 { self.migrate_v1_to_v2(); }
+        // if self.config_version < 3 { self.migrate_v2_to_v3(); }
+        self.config_version = CONFIG_VERSION;
+    }
+
+    /// Serialize this configuration to JSON and write it to the config file
+    /// **atomically**.
+    ///
+    /// Writes to a temporary file in the same directory, flushes it,
+    /// then renames over the target. Before renaming, the previous
+    /// target is copied to a `.json.bak` backup.
     ///
     /// Creates parent directories if they do not exist.
     pub fn save(&self) -> std::io::Result<()> {
@@ -308,7 +422,33 @@ impl Config {
             std::fs::create_dir_all(parent)?;
         }
         let json = serde_json::to_string_pretty(self).map_err(std::io::Error::other)?;
-        std::fs::write(&path, json)
+
+        // Write to a temporary file
+        let tmp = Self::config_tmp_path();
+        std::fs::write(&tmp, &json)?;
+
+        // Flush the file (best-effort on Unix)
+        if let Ok(file) = std::fs::File::open(&tmp) {
+            file.sync_all().ok();
+        }
+
+        // Create a backup of the current file before overwriting
+        if path.exists() {
+            let bak = Self::config_backup_path();
+            let _ = std::fs::copy(&path, &bak);
+        }
+
+        // Atomic rename over the target
+        std::fs::rename(&tmp, &path)?;
+
+        // Sync the directory to ensure the rename is durable
+        if let Some(parent) = path.parent() {
+            if let Ok(dir) = std::fs::File::open(parent) {
+                dir.sync_all().ok();
+            }
+        }
+
+        Ok(())
     }
 
     /// Write a default configuration file only if one does not already exist.
@@ -352,6 +492,146 @@ impl Config {
             std::fs::remove_file(&path)?;
         }
         Ok(enabled)
+    }
+
+    /// Apply a typed patch to this configuration, returning `true` if fields
+    /// changed. This is the central update path — all settings mutations
+    /// should route through it.
+    ///
+    /// Validation is performed before any field is written. Returns an error
+    /// describing the first invalid value.
+    pub fn apply_patch(&mut self, patch: &ConfigPatch) -> Result<bool, String> {
+        let mut changed = false;
+        match patch {
+            ConfigPatch::Incognito(v) => {
+                self.set_incognito(*v).map_err(|e| format!("incognito: {e}"))?;
+                changed = true;
+            }
+            ConfigPatch::MaxItems(v) => {
+                if *v < 1 {
+                    return Err("max_items must be at least 1".into());
+                }
+                if *v != self.max_items {
+                    self.max_items = *v;
+                    changed = true;
+                }
+            }
+            ConfigPatch::TtlDays(v) => {
+                if *v > 3650 {
+                    return Err("ttl_days must be at most 3650".into());
+                }
+                let secs = v * 86400;
+                if secs != self.ttl_seconds {
+                    self.ttl_seconds = secs;
+                    changed = true;
+                }
+            }
+            ConfigPatch::TtlNever => {
+                if self.ttl_seconds != 0 {
+                    self.ttl_seconds = 0;
+                    changed = true;
+                }
+            }
+            ConfigPatch::EncryptSensitive(v) => {
+                if *v != self.encrypt_sensitive {
+                    self.encrypt_sensitive = *v;
+                    changed = true;
+                }
+            }
+            ConfigPatch::ClearOnLock(v) => {
+                if *v != self.clear_on_lock {
+                    self.clear_on_lock = *v;
+                    changed = true;
+                }
+            }
+            ConfigPatch::MaxItemSize(v) => {
+                if *v < 1024 {
+                    return Err("max_item_size must be at least 1024".into());
+                }
+                if *v != self.max_item_size {
+                    self.max_item_size = *v;
+                    changed = true;
+                }
+            }
+            ConfigPatch::CleanupInterval(v) => {
+                if *v < 10 {
+                    return Err("cleanup_interval_seconds must be at least 10".into());
+                }
+                if *v != self.cleanup_interval_seconds {
+                    self.cleanup_interval_seconds = *v;
+                    changed = true;
+                }
+            }
+            ConfigPatch::KeyboardShortcut(v) => {
+                if v.is_empty() {
+                    return Err("keyboard_shortcut must not be empty".into());
+                }
+                if v != &self.keyboard_shortcut {
+                    self.keyboard_shortcut.clone_from(v);
+                    changed = true;
+                }
+            }
+            ConfigPatch::PickerDefaultSource(v) => {
+                if v != &self.picker.default_source {
+                    self.picker.default_source.clone_from(v);
+                    changed = true;
+                }
+            }
+            ConfigPatch::PickerMaxResults(v) => {
+                if *v < 1 {
+                    return Err("picker max_results must be at least 1".into());
+                }
+                if *v != self.picker.max_results {
+                    self.picker.max_results = *v;
+                    changed = true;
+                }
+            }
+            ConfigPatch::CaptureRules(rules) => {
+                let valid: Vec<_> = rules.iter().filter(|r| crate::rules::validate(r).is_ok()).cloned().collect();
+                if valid.len() != rules.len() {
+                    return Err("one or more capture rules are invalid".into());
+                }
+                if &valid != &self.capture_rules {
+                    self.capture_rules = valid;
+                    changed = true;
+                }
+            }
+            ConfigPatch::MimeDenylist(v) => {
+                if v != &self.mime_denylist {
+                    self.mime_denylist.clone_from(v);
+                    changed = true;
+                }
+            }
+            ConfigPatch::ContentDenylist(v) => {
+                if v != &self.content_denylist {
+                    self.content_denylist.clone_from(v);
+                    // Invalidate the regex cache since patterns changed
+                    self.compiled_regex_cache = CompiledRegexCache::default();
+                    changed = true;
+                }
+            }
+            ConfigPatch::ContentPatternMode(v) => {
+                if *v != self.content_pattern_mode {
+                    self.content_pattern_mode = *v;
+                    // Invalidate the regex cache since mode changed
+                    self.compiled_regex_cache = CompiledRegexCache::default();
+                    changed = true;
+                }
+            }
+            ConfigPatch::AppDenylist(v) => {
+                if v != &self.app_denylist {
+                    self.app_denylist.clone_from(v);
+                    changed = true;
+                }
+            }
+            ConfigPatch::DedupWindow(v) => {
+                if *v != self.dedup_window_seconds {
+                    self.dedup_window_seconds = *v;
+                    changed = true;
+                }
+            }
+        }
+        Ok(changed)
     }
 
     /// Check if a MIME type is in the denylist.
@@ -468,6 +748,7 @@ mod tests {
     #[test]
     fn test_config_roundtrip() {
         let original = Config {
+            config_version: CONFIG_VERSION,
             max_items: 42,
             max_item_size: 2048,
             data_dir: PathBuf::from("/tmp/test-clipboard"),

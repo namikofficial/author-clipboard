@@ -19,9 +19,9 @@ use libadwaita::prelude::*;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use author_clipboard_shared::ipc::{CopyMode, IpcClient, IpcCommand};
+use author_clipboard_shared::ipc::{CopyMode, IpcCommand};
 use author_clipboard_shared::picker::{
-    self, PickerAction, PickerEntry, PickerFilter, PickerSource,
+    PickerAction, PickerEntry, PickerFilter, PickerSource,
 };
 
 use crate::service::{ClipboardService, HistoryRequest};
@@ -145,7 +145,7 @@ pub fn build(
         .build();
     scrolled.add_css_class("clipboard-scroll");
 
-    let empty_state = EmptyState::new();
+    let empty_state_ref: Rc<EmptyState> = Rc::new(EmptyState::new());
 
     // The list refresh function, captured for the search/filter
     // callbacks to call.
@@ -154,7 +154,8 @@ pub fn build(
     let item_rows_for_refresh = item_rows.clone();
     let app_state_for_refresh = app_state.clone();
     let scrolled_for_refresh = scrolled.clone();
-    let empty_for_refresh = empty_state.widget().clone();
+    let empty_widget_for_refresh = empty_state_ref.widget().clone();
+    let empty_state_for_refresh = empty_state_ref.clone();
     let generation = Rc::new(std::cell::Cell::new(0_u64));
     let refresh = {
         let service = service.clone();
@@ -179,7 +180,8 @@ pub fn build(
             let list = list_for_refresh.clone();
             let item_rows = item_rows_for_refresh.clone();
             let scrolled = scrolled_for_refresh.clone();
-            let empty = empty_for_refresh.clone();
+            let empty = empty_widget_for_refresh.clone();
+            let empty_state = empty_state_for_refresh.clone();
             glib::MainContext::default().spawn_local(async move {
                 match service.history(request.clone()).await {
                     Ok(entries)
@@ -211,9 +213,8 @@ pub fn build(
                     {
                         tracing::warn!(%error, "clipboard service request failed");
                         scrolled.set_visible(false);
+                        empty_state.set_error(&error.to_string());
                         empty.set_visible(true);
-                        empty.set_tooltip_text(Some(&error.to_string()));
-                        empty.add_css_class("service-error");
                     }
                     _ => {}
                 }
@@ -248,8 +249,8 @@ pub fn build(
     // hidden until the initial load or a refresh decides
     // otherwise.
     list_section.append(&scrolled);
-    list_section.append(empty_state.widget());
-    empty_state.widget().set_visible(false);
+    list_section.append(empty_state_ref.widget());
+    empty_state_ref.widget().set_visible(false);
     page.append(&list_section);
 
     // ── Synchronize AppState from GTK ListBox selection ───────
@@ -443,191 +444,6 @@ impl PageState {
     }
 }
 
-/// Load entries from the database using the shared picker logic.
-///
-/// The `query` is the current search text; `filter` is the active
-/// filter chip; `count` is the max number of items to return.
-/// `source` controls which data source (history, snippets, emoji, …)
-/// is displayed.
-fn load_entries_for(
-    query: &str,
-    filter: PickerFilter,
-    count: usize,
-    source: PickerSource,
-    include_sensitive: bool,
-) -> Vec<PickerEntry> {
-    match source {
-        PickerSource::Emoji => load_emoji_entries(query, filter),
-        PickerSource::Symbols => load_symbol_entries(query, filter),
-        PickerSource::Kaomoji => load_kaomoji_entries(query, filter),
-        PickerSource::Snippets => load_snippet_entries(query, filter, count),
-        PickerSource::All => load_all_entries(query, filter, count, include_sensitive),
-        PickerSource::History => load_history_entries(query, filter, count, include_sensitive),
-    }
-}
-
-fn load_emoji_entries(query: &str, filter: PickerFilter) -> Vec<PickerEntry> {
-    picker::filter_and_query(&picker::emoji_entries(query), query, filter)
-}
-
-fn load_symbol_entries(query: &str, filter: PickerFilter) -> Vec<PickerEntry> {
-    picker::filter_and_query(&picker::symbol_entries(query), query, filter)
-}
-
-fn load_kaomoji_entries(query: &str, filter: PickerFilter) -> Vec<PickerEntry> {
-    picker::filter_and_query(&picker::kaomoji_entries(query), query, filter)
-}
-
-fn load_snippet_entries(query: &str, filter: PickerFilter, count: usize) -> Vec<PickerEntry> {
-    let response = IpcClient::new().send_command(&IpcCommand::ListSnippets);
-    let entries: Vec<PickerEntry> = match response {
-        Ok(resp) if resp.ok => resp
-            .data
-            .and_then(|d| d.get("snippets").cloned())
-            .and_then(|s| s.as_array().cloned())
-            .unwrap_or_default()
-            .iter()
-            .filter_map(|v| {
-                let id = v.get("id")?.as_i64()?;
-                let name = v.get("name")?.as_str()?.to_string();
-                let content = v.get("content")?.as_str()?.to_string();
-                Some(PickerEntry {
-                    id: Some(id),
-                    source: PickerSource::Snippets,
-                    content_type: Some(author_clipboard_shared::types::ContentType::Text),
-                    title: name,
-                    subtitle: Some("snippet".to_string()),
-                    content,
-                    mime_type: Some("text/plain".to_string()),
-                    sensitive: false,
-                    pinned: false,
-                    starred: false,
-                    timestamp: None,
-                })
-            })
-            .take(count)
-            .collect(),
-        _ => Vec::new(),
-    };
-    if query.is_empty() && filter == PickerFilter::All {
-        return entries;
-    }
-    picker::filter_and_query(&entries, query, filter)
-}
-
-fn load_all_entries(
-    query: &str,
-    filter: PickerFilter,
-    count: usize,
-    include_sensitive: bool,
-) -> Vec<PickerEntry> {
-    let mut all = load_history_entries(query, filter, count, include_sensitive);
-    if all.len() < count {
-        let remaining = count.saturating_sub(all.len());
-        let snippets = load_snippet_entries(query, filter, remaining);
-        all.extend(snippets);
-    }
-    all
-}
-
-fn load_history_entries(
-    query: &str,
-    filter: PickerFilter,
-    count: usize,
-    include_sensitive: bool,
-) -> Vec<PickerEntry> {
-    let filter_opts = if include_sensitive {
-        None
-    } else {
-        Some(author_clipboard_shared::ipc::FilterOptions {
-            sensitive: Some(false),
-            ..Default::default()
-        })
-    };
-
-    let command = if query.is_empty() {
-        IpcCommand::History {
-            limit: count,
-            offset: None,
-            filters: filter_opts,
-        }
-    } else {
-        IpcCommand::Search {
-            query: query.to_string(),
-            limit: Some(count),
-            filters: filter_opts,
-        }
-    };
-    let response = match IpcClient::new().send_command(&command) {
-        Ok(response) if response.ok => response,
-        Ok(response) => {
-            tracing::warn!(error = ?response.error, "daemon rejected item snapshot");
-            return Vec::new();
-        }
-        Err(error) => {
-            tracing::warn!(%error, "failed to load item snapshot through IPC");
-            return Vec::new();
-        }
-    };
-    let entries: Vec<PickerEntry> = response
-        .data
-        .and_then(|data| data.get("items").cloned())
-        .and_then(|items| items.as_array().cloned())
-        .unwrap_or_default()
-        .iter()
-        .filter_map(ipc_item_to_entry)
-        .collect();
-    picker::filter_and_query(&entries, query, filter)
-}
-
-fn ipc_item_to_entry(value: &serde_json::Value) -> Option<PickerEntry> {
-    use author_clipboard_shared::types::ContentType;
-    let content_type = value
-        .get("content_type")?
-        .as_str()?
-        .parse::<ContentType>()
-        .ok()?;
-    let content = value.get("content")?.as_str()?.to_string();
-    let plain = value
-        .get("plain_text")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-    Some(PickerEntry {
-        id: Some(value.get("id")?.as_i64()?),
-        source: PickerSource::History,
-        content_type: Some(content_type),
-        title: if plain.is_empty() {
-            content.clone()
-        } else {
-            plain.to_string()
-        },
-        subtitle: value
-            .get("preview")
-            .and_then(|v| v.as_str())
-            .map(str::to_string),
-        content,
-        mime_type: value
-            .get("mime_type")
-            .and_then(|v| v.as_str())
-            .map(str::to_string),
-        sensitive: value
-            .get("sensitive")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false),
-        pinned: value
-            .get("pinned")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false),
-        starred: value
-            .get("starred")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false),
-        timestamp: value
-            .get("timestamp")
-            .and_then(|v| v.as_str())
-            .and_then(|s| s.parse().ok()),
-    })
-}
 
 /// Rebuild the list with the given entries. Reuses existing
 /// `ItemRow` widgets where possible to minimize churn.
@@ -948,27 +764,6 @@ mod tests {
         assert_eq!(item.content, "<h1>Formatted heading</h1>");
         assert_eq!(item.mime_type, "text/html");
         assert_eq!(item.plain_text.as_deref(), Some("Formatted heading"));
-    }
-
-    #[test]
-    fn ipc_snapshot_item_maps_to_picker_entry() {
-        let value = serde_json::json!({
-            "id": 91,
-            "content": "hello",
-            "plain_text": "hello",
-            "preview": "hello",
-            "mime_type": "text/plain",
-            "content_type": "text",
-            "timestamp": "2026-07-12T00:00:00Z",
-            "pinned": true,
-            "starred": true,
-            "sensitive": false
-        });
-        let entry = ipc_item_to_entry(&value).expect("valid IPC item");
-        assert_eq!(entry.id, Some(91));
-        assert_eq!(entry.title, "hello");
-        assert!(entry.pinned);
-        assert!(entry.starred);
     }
 
     #[test]

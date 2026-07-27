@@ -5,6 +5,8 @@ use gtk4::prelude::*;
 use gtk4::{gdk, glib};
 use libadwaita as adw;
 use libadwaita::prelude::*;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 use crate::app::{Action, AppState, Effect, PageId};
 use crate::settings::Settings;
@@ -60,8 +62,18 @@ fn build_manager_window(app: &adw::Application, config: &ManagerConfig) -> anyho
         .title_widget(&gtk4::Label::new(Some("Author Clipboard")))
         .build();
 
+    // ── Toast overlay (built early so settings page can use it) ─
+    let toast_overlay = adw::ToastOverlay::new();
+    let toast_fn: crate::pages::settings::ToastFn = {
+        let overlay = toast_overlay.clone();
+        Rc::new(move |msg: &str| {
+            overlay.add_toast(adw::Toast::new(msg));
+        })
+    };
+
     // ── Content pages (built once, cached) ────────────────────
     let shared_config = author_clipboard_shared::config::Config::load();
+    let shared_config_cell: Rc<RefCell<_>> = Rc::new(RefCell::new(shared_config.clone()));
     let clipboard_props = crate::pages::clipboard::ClipboardPageProps {
         initial_query: config.clipboard_query.clone().unwrap_or_default(),
         initial_filter: config.clipboard_filter,
@@ -186,7 +198,12 @@ fn build_manager_window(app: &adw::Application, config: &ManagerConfig) -> anyho
                 crate::pages::snippets::build(&shared_config, service.clone()).upcast()
             }
             PageId::Settings => {
-                crate::pages::settings::build(&shared_config, service.clone()).upcast()
+                crate::pages::settings::build(
+                    shared_config_cell.clone(),
+                    service.clone(),
+                    toast_fn.clone(),
+                )
+                .upcast()
             }
         };
 
